@@ -10,17 +10,29 @@ workflows:
         - android_signing # Create this group in Codemagic UI
       vars:
         NODE_ENV: production
-      node: 20
+      node: 22
       java: 17
     scripts:
+      - name: Install Node 22
+        script: |
+          nvm install 22
+          nvm use 22
       - name: Install dependencies
-        script: npm install
+        script: |
+          nvm use 22
+          npm install
       - name: Build web app
-        script: npm run build
+        script: |
+          nvm use 22
+          npm run build
       - name: Add Android platform
-        script: npx cap add android || true
+        script: |
+          nvm use 22
+          npx cap add android || true
       - name: Sync Capacitor
-        script: npx cap sync android
+        script: |
+          nvm use 22
+          npx cap sync android
       - name: Build Android AAB
         script: |
           cd android
