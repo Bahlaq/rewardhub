@@ -18,6 +18,8 @@ workflows:
           brew install node@22
           brew link --overwrite node@22
           node -v # To verify installation
+      - name: Install TypeScript
+        script: npm install -g typescript
       - name: Install dependencies
         script: |
           npm install
@@ -43,4 +45,4 @@ workflows:
         notify:
           success: true
           failure: true
-      # You can also configure Google Play Store publishing here
+      # You can also configure Google Play Store publishin
