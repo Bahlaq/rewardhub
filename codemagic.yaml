@@ -26,8 +26,8 @@ workflows:
         script: npm run build
       - name: Add Android platform
         script: npx cap add android || true
-      - name: Run Capacitor Doctor
-        script: npx cap doctor
+      - name: Install Capacitor CLI
+        script: npm install @capacitor/cli @capacitor/core @capacitor/android
       - name: Sync Capacitor
         script: npx cap sync android
       - name: Build Android AAB
