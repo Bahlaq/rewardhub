@@ -18,20 +18,18 @@ workflows:
           brew install node@22
           brew link --overwrite node@22
           node -v # To verify installation
-      - name: Install TypeScript and Dependencies
-        script: |
-          npm install -g typescript
-          npm install --save-dev typescript
-          npm install
+      - name: Install dependencies
+        script: npm install
+      - name: Install TypeScript globally
+        script: npm install -g typescript
       - name: Build web app
-        script: |
-          npm run build
+        script: npm run build
       - name: Add Android platform
-        script: |
-          npx cap add android || true
+        script: npx cap add android || true
+      - name: Run Capacitor Doctor
+        script: npx cap doctor
       - name: Sync Capacitor
-        script: |
-          npx cap sync android
+        script: npx cap sync android
       - name: Build Android AAB
         script: |
           cd android
