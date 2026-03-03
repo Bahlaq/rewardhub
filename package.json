@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@capacitor/android": "^8.1.0",
+    "@capacitor/cli": "^8.1.0",
     "@capacitor/core": "^8.1.0",
     "@google/genai": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",
@@ -30,7 +31,6 @@
     "vite": "^6.2.0"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.1.0",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
