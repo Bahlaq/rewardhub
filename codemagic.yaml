@@ -20,10 +20,6 @@ workflows:
           node -v # To verify installation
       - name: Install dependencies
         script: npm install
-      - name: Install TypeScript globally
-        script: npm install -g typescript
-      - name: Compile Capacitor Config
-        script: npx tsc capacitor.config.ts --esModuleInterop
       - name: Build web app
         script: npm run build
       - name: Add Android platform
@@ -43,4 +39,3 @@ workflows:
         notify:
           success: true
           failure: true
-      # You can also configure Google Play Store publishing here
