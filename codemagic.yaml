@@ -23,9 +23,9 @@ workflows:
       - name: Build web app
         script: npm run build
       - name: Add Android platform
-        script: npx cap add android || true
+        script: npm run cap:add || true
       - name: Sync Capacitor
-        script: npx cap sync android
+        script: npm run cap:sync
       - name: Build Android AAB
         script: |
           cd android
