@@ -8,8 +8,6 @@ workflows:
         - admob_secrets # Create this group in Codemagic UI
         - firebase_secrets # Create this group in Codemagic UI
         - android_signing # Create this group in Codemagic UI
-      vars:
-        # NODE_ENV: production (Removed to allow devDependencies like TypeScript to be installed)
       node: 22
       java: 17
     scripts:
