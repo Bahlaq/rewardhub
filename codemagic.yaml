@@ -22,12 +22,12 @@ workflows:
         script: npm install
       - name: Install TypeScript globally
         script: npm install -g typescript
+      - name: Compile Capacitor Config
+        script: npx tsc capacitor.config.ts --esModuleInterop
       - name: Build web app
         script: npm run build
       - name: Add Android platform
         script: npx cap add android || true
-      - name: Install Capacitor CLI
-        script: npm install @capacitor/cli @capacitor/core @capacitor/android
       - name: Sync Capacitor
         script: npx cap sync android
       - name: Build Android AAB
