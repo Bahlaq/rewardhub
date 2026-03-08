@@ -18,12 +18,14 @@ workflows:
           node -v # To verify installation
       - name: Install dependencies
         script: npm install
-      - name: Build web app
-        script: npm run build
-      - name: Add Android platform
-        script: npm run cap:add || true
-      - name: Sync Capacitor
-        script: npm run cap:sync
+      - name: Build and Sync Capacitor
+        script: |
+          npm run build
+          ls -la dist # Verify build output
+          rm -rf android
+          npm run cap:add
+          npm run cap:sync
+          ls -la android/app/src/main/assets/public # Verify assets are copied
       - name: Build Android AAB and APK
         script: |
           cd android
@@ -39,3 +41,4 @@ workflows:
         notify:
           success: true
           failure: true
+      # You can also configure Google Play Store publishing here
