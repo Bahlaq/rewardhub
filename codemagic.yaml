@@ -21,19 +21,24 @@ workflows:
       - name: Build and Sync Capacitor
         script: |
           npm run build
-          ls -la dist # Verify build output
+          echo "--- DIST FOLDER CONTENTS ---"
+          ls -R dist
           rm -rf android
           npm run cap:add
           npm run cap:sync
-          ls -la android/app/src/main/assets/public # Verify assets are copied
+          echo "--- NATIVE ASSETS CONTENTS ---"
+          ls -R android/app/src/main/assets/public
       - name: Build Android AAB and APK
         script: |
           cd android
-          ./gradlew assembleRelease bundleRelease
+          # assembleDebug produces an APK signed with a debug key, which is easy to install for testing
+          ./gradlew assembleDebug
+          # bundleRelease produces the AAB for the Play Store
+          ./gradlew bundleRelease
     artifacts:
-      - android/app/build/outputs/bundle/**/*.aab
-      - android/app/build/outputs/apk/**/*.apk
-      - android/app/build/outputs/mapping/**/*.txt
+      - android/app/build/outputs/bundle/release/*.aab
+      - android/app/build/outputs/apk/debug/*.apk
+      - android/app/build/outputs/mapping/release/*.txt
     publishing:
       email:
         recipients:
@@ -41,4 +46,3 @@ workflows:
         notify:
           success: true
           failure: true
-      # You can also configure Google Play Store publishing here
