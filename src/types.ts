@@ -1,3 +1,25 @@
+export interface Store {
+  id: string;
+  name: string;
+  logoUrl: string;
+  category: string;
+  affiliateLink: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DiscountCode {
+  id: string;
+  storeId: string;
+  storeName: string;
+  code: string;
+  description: string;
+  affiliateLink: string;
+  expiryDate: string;
+  isApiFetched: boolean;
+  createdAt: string;
+}
+
 export interface Offer {
   id: string;
   title: string;
