@@ -9,7 +9,7 @@ workflows:
         - firebase_secrets # Create this group in Codemagic UI
         - android_signing # Create this group in Codemagic UI
       node: 22
-      java: 17
+      java: 21
     scripts:
       - name: Install Node 22
         script: |
@@ -30,17 +30,20 @@ workflows:
           ls -R android/app/src/main/assets/public
       - name: Build Android AAB and APK
         script: |
-          # Isolate Gradle cache to prevent permission/concurrency issues
+          # Isolate Gradle cache
           export GRADLE_USER_HOME=$FCI_BUILD_DIR/.gradle
           mkdir -p $GRADLE_USER_HOME
           
           cd android
           chmod +x gradlew
           
+          # Upgrade Gradle to 8.7 for Java 21 support
+          ./gradlew wrapper --gradle-version 8.7 --no-daemon
+          
           # Aggressive clean
           ./gradlew clean --no-daemon
           
-          # Build with stacktrace for better debugging if it fails
+          # Build
           ./gradlew assembleDebug --no-daemon --stacktrace
           ./gradlew bundleRelease --no-daemon --stacktrace
     artifacts:
