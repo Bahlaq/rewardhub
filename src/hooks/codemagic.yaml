@@ -1,0 +1,37 @@
+workflows:
+  android-capacitor-release:
+    name: Android Capacitor Release
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    environment:
+      groups:
+        - admob_secrets # Create this group in Codemagic UI
+        - firebase_secrets # Create this group in Codemagic UI
+        - android_signing # Create this group in Codemagic UI
+      vars:
+        NODE_ENV: production
+      node: 20
+      java: 17
+    scripts:
+      - name: Install dependencies
+        script: npm install
+      - name: Build web app
+        script: npm run build
+      - name: Add Android platform
+        script: npx cap add android || true
+      - name: Sync Capacitor
+        script: npx cap sync android
+      - name: Build Android AAB
+        script: |
+          cd android
+          ./gradlew bundleRelease
+    artifacts:
+      - android/app/build/outputs/bundle/release/*.aab
+    publishing:
+      email:
+        recipients:
+          - m.bahlaq@dv8dm.com # User email from context
+        notify:
+          success: true
+          failure: true
+      # You can also configure Google Play Store publishing here

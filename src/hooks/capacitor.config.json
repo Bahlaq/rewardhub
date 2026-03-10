@@ -1,0 +1,8 @@
+{
+  "appId": "com.rewardhub.app",
+  "appName": "RewardHub",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}
