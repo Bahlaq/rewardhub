@@ -9,7 +9,7 @@ workflows:
         - firebase_secrets # Create this group in Codemagic UI
         - android_signing # Create this group in Codemagic UI
       node: 22
-      java: 21
+      java: 17
     scripts:
       - name: Install Node 22
         script: |
@@ -30,13 +30,19 @@ workflows:
           ls -R android/app/src/main/assets/public
       - name: Build Android AAB and APK
         script: |
+          # Isolate Gradle cache to prevent permission/concurrency issues
+          export GRADLE_USER_HOME=$FCI_BUILD_DIR/.gradle
+          mkdir -p $GRADLE_USER_HOME
+          
           cd android
           chmod +x gradlew
+          
+          # Aggressive clean
           ./gradlew clean --no-daemon
-          # assembleDebug produces an APK signed with a debug key, which is easy to install for testing
-          ./gradlew assembleDebug --no-daemon
-          # bundleRelease produces the AAB for the Play Store
-          ./gradlew bundleRelease --no-daemon
+          
+          # Build with stacktrace for better debugging if it fails
+          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew bundleRelease --no-daemon --stacktrace
     artifacts:
       - android/app/build/outputs/bundle/release/*.aab
       - android/app/build/outputs/apk/debug/*.apk
