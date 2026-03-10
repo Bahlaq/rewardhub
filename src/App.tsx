@@ -283,7 +283,7 @@ const DealCard = ({ deal }: { deal: DiscountCode, key?: string | number }) => {
 // --- Main App ---
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('deals');
+  const [activeTab, setActiveTab] = useState('offers');
   const [stores, setStores] = useState<Store[]>([]);
   const [deals, setDeals] = useState<DiscountCode[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -309,6 +309,16 @@ export default function App() {
 
   useEffect(() => {
     fetchData();
+    
+    // Daily Reset Simulation
+    const lastReset = localStorage.getItem('last_daily_reset');
+    const today = new Date().toDateString();
+    
+    if (lastReset !== today) {
+      setBoostsClaimedToday(0);
+      setAdWatchesForCurrentBoost(0);
+      localStorage.setItem('last_daily_reset', today);
+    }
   }, []);
 
   const fetchData = async () => {
@@ -460,8 +470,8 @@ export default function App() {
       new Date(t.timestamp).toDateString() === new Date().toDateString()
     ).length;
 
-    if (claimsTodayForOffer >= offer.dailyLimit) {
-      alert(`Daily limit reached for ${offer.title}. Come back tomorrow!`);
+    if (claimsTodayForOffer >= 2) { // Limit to 2 claims per day
+      alert(`Daily limit reached for ${offer.title}. You can claim each offer up to 2 times per day.`);
       addLog('banner', 'error', `Daily limit reached for offer ${offer.id}`);
       return;
     }
@@ -473,6 +483,7 @@ export default function App() {
       amount: -currentCost,
       timestamp: new Date().toISOString(),
       code: offer.reward,
+      rewardType: offer.rewardType,
     };
 
     setTransactions(prev => [newTransaction, ...prev]);
@@ -484,7 +495,12 @@ export default function App() {
     }));
     
     addLog('banner', 'reward', `Claimed ${offer.title} for ${currentCost} pts. Next claim will cost ${currentCost * 2} pts.`);
-    alert(`Success! Your code for ${offer.title} is: ${offer.reward}. You can find it in your Profile history.`);
+    
+    if (offer.rewardType === 'link') {
+      alert(`Success! Click "Open Link" in your Profile history to activate your reward.`);
+    } else {
+      alert(`Success! Your code for ${offer.title} is: ${offer.reward}. You can find it in your Profile history.`);
+    }
   };
 
   return (
@@ -753,16 +769,28 @@ export default function App() {
                           {tx.type === 'earn' ? '+' : ''}{tx.amount} pts
                         </span>
                         {tx.code && (
-                          <button 
-                            onClick={async () => {
-                              await Clipboard.write({ string: tx.code! });
-                              await Toast.show({ text: 'Code copied!', duration: 'short' });
-                            }}
-                            className="flex items-center gap-1 text-[10px] font-mono bg-zinc-100 px-2 py-0.5 rounded text-zinc-600 border border-zinc-200 hover:bg-zinc-200 transition-colors"
-                          >
-                            {tx.code}
-                            <Copy size={10} />
-                          </button>
+                          tx.rewardType === 'link' ? (
+                            <a 
+                              href={tx.code}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1 text-[10px] font-bold bg-indigo-600 px-2 py-0.5 rounded text-white border border-indigo-700 hover:bg-indigo-700 transition-colors"
+                            >
+                              Open Link
+                              <ExternalLink size={10} />
+                            </a>
+                          ) : (
+                            <button 
+                              onClick={async () => {
+                                await Clipboard.write({ string: tx.code! });
+                                await Toast.show({ text: 'Code copied!', duration: 'short' });
+                              }}
+                              className="flex items-center gap-1 text-[10px] font-mono bg-zinc-100 px-2 py-0.5 rounded text-zinc-600 border border-zinc-200 hover:bg-zinc-200 transition-colors"
+                            >
+                              {tx.code}
+                              <Copy size={10} />
+                            </button>
+                          )
                         )}
                       </div>
                     </div>
