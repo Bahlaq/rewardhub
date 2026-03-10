@@ -5,66 +5,52 @@ workflows:
     instance_type: mac_mini_m1
     environment:
       groups:
-        - admob_secrets # Create this group in Codemagic UI
-        - firebase_secrets # Create this group in Codemagic UI
-        - android_signing # Create this group in Codemagic UI
+        - admob_secrets
+        - firebase_secrets
+        - android_signing
       node: 22
-      java: 21
+      java: 21 # <--- Required for Java 21 class files
     scripts:
       - name: Install Node 22
         script: |
           brew install node@22
           brew link --overwrite node@22
-          node -v # To verify installation
+          node -v
       - name: Install dependencies
         script: npm install --legacy-peer-deps
       - name: Build and Sync Capacitor
         script: |
           npm run build
-          echo "--- DIST FOLDER CONTENTS ---"
-          ls -R dist
           rm -rf android
           npm run cap:add
           npm run cap:sync
           
-          # Manually patch Gradle version to 8.7
+          # 🛠️ PATCH 1: Force Gradle 8.7 (Supports Java 21)
           if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
-            sed -i '' 's/gradle-[0-9.]*-\(all\|bin\).zip/gradle-8.7-all.zip/g' android/gradle/wrapper/gradle-wrapper.properties
-            echo "Patched gradle-wrapper.properties to version 8.7"
+            cat > android/gradle/wrapper/gradle-wrapper.properties <<EOF
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\://services.gradle.org/distributions/gradle-8.7-all.zip
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+EOF
+            echo "Forced Gradle version to 8.7"
           fi
           
-          # Manually patch AGP version to 8.2.1 in root build.gradle
+          # 🛠️ PATCH 2: Force AGP 8.2.1 (Supports Java 21)
           if [ -f "android/build.gradle" ]; then
             sed -i '' 's/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:8.2.1/g' android/build.gradle
-            echo "Patched android/build.gradle to AGP 8.2.1"
+            echo "Forced AGP version to 8.2.1"
           fi
-          
-          echo "--- NATIVE ASSETS CONTENTS ---"
-          ls -R android/app/src/main/assets/public
       - name: Build Android AAB and APK
         script: |
-          # Isolate Gradle cache
           export GRADLE_USER_HOME=$FCI_BUILD_DIR/.gradle
           mkdir -p $GRADLE_USER_HOME
-          
           cd android
           chmod +x gradlew
-          
-          # Aggressive clean
           ./gradlew clean --no-daemon
-          
-          # Build
           ./gradlew assembleDebug --no-daemon --stacktrace
           ./gradlew bundleRelease --no-daemon --stacktrace
     artifacts:
       - android/app/build/outputs/bundle/release/*.aab
       - android/app/build/outputs/apk/debug/*.apk
-      - android/app/build/outputs/mapping/release/*.txt
-    publishing:
-      email:
-        recipients:
-          - m.bahlaq@dv8dm.com # User email from context
-        notify:
-          success: true
-          failure: true
-      # You can also configure Google Play Store publishing here
