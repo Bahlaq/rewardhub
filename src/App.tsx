@@ -45,7 +45,6 @@ const Navbar = ({ activeTab, setActiveTab }: { activeTab: string, setActiveTab: 
     { id: 'deals', icon: Ticket, label: 'Deals' },
     { id: 'offers', icon: LayoutDashboard, label: 'Rewards' },
     { id: 'profile', icon: User, label: 'Profile' },
-    { id: 'admin', icon: Settings, label: 'Admin' },
   ];
 
   return (
@@ -746,17 +745,24 @@ export default function App() {
                           </p>
                         </div>
                       </div>
-                      <div className="text-right">
+                      <div className="text-right flex flex-col items-end gap-1">
                         <span className={cn(
-                          "block text-sm font-bold mb-1",
+                          "block text-sm font-bold",
                           tx.type === 'earn' ? "text-emerald-600" : "text-rose-600"
                         )}>
                           {tx.type === 'earn' ? '+' : ''}{tx.amount} pts
                         </span>
                         {tx.code && (
-                          <span className="inline-block text-[10px] font-mono bg-zinc-100 px-2 py-0.5 rounded text-zinc-600 border border-zinc-200">
+                          <button 
+                            onClick={async () => {
+                              await Clipboard.write({ string: tx.code! });
+                              await Toast.show({ text: 'Code copied!', duration: 'short' });
+                            }}
+                            className="flex items-center gap-1 text-[10px] font-mono bg-zinc-100 px-2 py-0.5 rounded text-zinc-600 border border-zinc-200 hover:bg-zinc-200 transition-colors"
+                          >
                             {tx.code}
-                          </span>
+                            <Copy size={10} />
+                          </button>
                         )}
                       </div>
                     </div>
@@ -766,189 +772,6 @@ export default function App() {
             </motion.div>
           )}
 
-          {activeTab === 'admin' && (
-            <motion.div
-              key="admin"
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 10 }}
-              className="space-y-6"
-            >
-              {!isAdminAuthenticated ? (
-                <div className="bg-white rounded-3xl p-8 border border-zinc-200 shadow-sm text-center">
-                  <Settings size={48} className="text-zinc-300 mx-auto mb-4" />
-                  <h2 className="text-xl font-bold text-zinc-900 mb-2">Admin Access</h2>
-                  <p className="text-sm text-zinc-500 mb-6">Please enter the founder password to continue.</p>
-                  <input 
-                    type="password" 
-                    placeholder="Password"
-                    value={adminPassword}
-                    onChange={(e) => setAdminPassword(e.target.value)}
-                    className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-3 mb-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                  />
-                  <button 
-                    onClick={() => { if (adminPassword === 'founder2026') setIsAdminAuthenticated(true) }}
-                    className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-all"
-                  >
-                    Login
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-8">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-xl font-bold text-zinc-900">Admin Dashboard</h2>
-                    <button onClick={() => setIsAdminAuthenticated(false)} className="text-xs font-bold text-rose-600">Logout</button>
-                  </div>
-
-                  <div className="grid gap-4">
-                    <button 
-                      onClick={syncApiDeals}
-                      className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-100"
-                    >
-                      <RefreshCw size={20} className={isLoading ? 'animate-spin' : ''} />
-                      Sync Deals from APIs
-                    </button>
-                  </div>
-
-                  {/* Add Store Section */}
-                  <div className="bg-white rounded-3xl p-6 border border-zinc-200 shadow-sm space-y-4">
-                    <div className="flex items-center gap-2 text-sm font-bold text-zinc-400 uppercase tracking-widest">
-                      <Plus size={16} /> Add New Store
-                    </div>
-                    <input type="text" placeholder="Store Name" value={newStore.name} onChange={e => setNewStore({...newStore, name: e.target.value})} className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2.5 text-sm" />
-                    <input type="text" placeholder="Logo URL" value={newStore.logoUrl} onChange={e => setNewStore({...newStore, logoUrl: e.target.value})} className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2.5 text-sm" />
-                    <input type="text" placeholder="Category" value={newStore.category} onChange={e => setNewStore({...newStore, category: e.target.value})} className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2.5 text-sm" />
-                    <input type="text" placeholder="Affiliate Link" value={newStore.affiliateLink} onChange={e => setNewStore({...newStore, affiliateLink: e.target.value})} className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2.5 text-sm" />
-                    <button onClick={handleAddStore} className="w-full bg-zinc-900 text-white py-3 rounded-xl font-bold text-sm">Create Store</button>
-                  </div>
-
-                  {/* Add Deal Section */}
-                  <div className="bg-white rounded-3xl p-6 border border-zinc-200 shadow-sm space-y-4">
-                    <div className="flex items-center gap-2 text-sm font-bold text-zinc-400 uppercase tracking-widest">
-                      <Plus size={16} /> Add New Deal
-                    </div>
-                    <select value={newDeal.storeId} onChange={e => setNewDeal({...newDeal, storeId: e.target.value})} className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2.5 text-sm">
-                      <option value="">Select Store</option>
-                      {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                    <input type="text" placeholder="Discount Code" value={newDeal.code} onChange={e => setNewDeal({...newDeal, code: e.target.value})} className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2.5 text-sm" />
-                    <input type="text" placeholder="Description" value={newDeal.description} onChange={e => setNewDeal({...newDeal, description: e.target.value})} className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2.5 text-sm" />
-                    <input type="text" placeholder="Affiliate Link" value={newDeal.affiliateLink} onChange={e => setNewDeal({...newDeal, affiliateLink: e.target.value})} className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2.5 text-sm" />
-                    <input type="date" value={newDeal.expiryDate} onChange={e => setNewDeal({...newDeal, expiryDate: e.target.value})} className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2.5 text-sm" />
-                    <button onClick={handleAddDeal} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold text-sm">Create Deal</button>
-                  </div>
-
-                  {/* Manage Stores List */}
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 text-sm font-bold text-zinc-400 uppercase tracking-widest">
-                      <Database size={16} /> Manage Stores
-                    </div>
-                    {stores.length === 0 ? (
-                      <p className="text-xs text-zinc-400 italic px-2">No stores added yet.</p>
-                    ) : (
-                      <div className="grid gap-2">
-                        {stores.map(store => (
-                          <div key={store.id} className="bg-white p-3 rounded-xl border border-zinc-200 flex items-center justify-between shadow-sm">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-lg bg-zinc-100 flex items-center justify-center overflow-hidden">
-                                <img 
-                                  src={store.logoUrl || `https://logo.clearbit.com/${store.name.toLowerCase().replace(/\s/g, '')}.com`} 
-                                  alt={store.name} 
-                                  className="w-full h-full object-contain p-1"
-                                  onError={(e) => { (e.target as HTMLImageElement).src = 'https://picsum.photos/seed/store/100/100' }}
-                                />
-                              </div>
-                              <span className="font-bold text-sm text-zinc-900">{store.name}</span>
-                            </div>
-                            <button onClick={() => handleDeleteStore(store.id)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors">
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Manage Deals List */}
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 text-sm font-bold text-zinc-400 uppercase tracking-widest">
-                      <Database size={16} /> Manage Existing Deals
-                    </div>
-                    {deals.map(deal => (
-                      <div key={deal.id} className="bg-white p-4 rounded-2xl border border-zinc-200 flex items-center justify-between">
-                        <div>
-                          <h4 className="font-bold text-sm text-zinc-900">{deal.storeName}</h4>
-                          <p className="text-[10px] text-zinc-500">{deal.code}</p>
-                        </div>
-                        <button onClick={() => handleDeleteDeal(deal.id)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors">
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </motion.div>
-          )}
-
-          {activeTab === 'debug' && (
-            <motion.div
-              key="debug"
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 10 }}
-              className="space-y-4"
-            >
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Ad Debug Logs</h2>
-                <button 
-                  onClick={() => addLog('banner', 'load', 'Manual refresh triggered')}
-                  className="text-[10px] font-bold text-indigo-600 hover:underline"
-                >
-                  Clear Logs
-                </button>
-              </div>
-
-              <div className="bg-zinc-900 rounded-2xl p-4 font-mono text-[11px] space-y-2 overflow-hidden border border-zinc-800 shadow-xl min-h-[400px]">
-                {logs.length === 0 ? (
-                  <div className="h-full flex items-center justify-center text-zinc-600 italic">
-                    Waiting for events...
-                  </div>
-                ) : (
-                  logs.map((log) => (
-                    <div key={log.id} className="flex gap-3 border-b border-zinc-800 pb-2 last:border-0">
-                      <span className="text-zinc-500 shrink-0">
-                        {new Date(log.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                      </span>
-                      <span className={cn(
-                        "font-bold uppercase shrink-0 w-16",
-                        log.type === 'rewarded' ? "text-amber-400" : "text-blue-400"
-                      )}>
-                        [{log.type}]
-                      </span>
-                      <span className={cn(
-                        "font-bold shrink-0 w-16",
-                        log.event === 'reward' ? "text-emerald-400" : 
-                        log.event === 'error' ? "text-rose-400" : "text-zinc-300"
-                      )}>
-                        {log.event}
-                      </span>
-                      <span className="text-zinc-400 italic truncate">
-                        {log.message || '-'}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 flex gap-3">
-                <AlertCircle size={18} className="text-amber-600 shrink-0" />
-                <p className="text-[11px] text-amber-800 leading-relaxed">
-                  <strong>Developer Note:</strong> This screen simulates Google Mobile Ads events. In a production environment, these logs would be hooked into the AdMob SDK listeners.
-                </p>
-              </div>
-            </motion.div>
-          )}
         </AnimatePresence>
       </main>
 
