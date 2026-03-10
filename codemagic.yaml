@@ -26,6 +26,15 @@ workflows:
           rm -rf android
           npm run cap:add
           npm run cap:sync
+          
+          # Manually patch Gradle version to 8.7 before running it
+          # This avoids the "Unsupported class file major version 65" error when starting an old Gradle version with Java 21
+          if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
+            sed -i '' 's/gradle-[0-9.]*-\(all\|bin\).zip/gradle-8.7-all.zip/g' android/gradle/wrapper/gradle-wrapper.properties
+            echo "Patched gradle-wrapper.properties to version 8.7"
+            cat android/gradle/wrapper/gradle-wrapper.properties
+          fi
+          
           echo "--- NATIVE ASSETS CONTENTS ---"
           ls -R android/app/src/main/assets/public
       - name: Build Android AAB and APK
@@ -36,9 +45,6 @@ workflows:
           
           cd android
           chmod +x gradlew
-          
-          # Upgrade Gradle to 8.7 for Java 21 support
-          ./gradlew wrapper --gradle-version 8.7 --no-daemon
           
           # Aggressive clean
           ./gradlew clean --no-daemon
