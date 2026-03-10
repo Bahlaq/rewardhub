@@ -25,7 +25,8 @@ export interface Offer {
   title: string;
   description: string;
   reward: string;
-  type: 'discount' | 'giftcard' | 'coupon';
+  rewardType: 'code' | 'link';
+  type: 'discount' | 'giftcard' | 'coupon' | 'subscription';
   pointsRequired: number;
   dailyLimit: number;
   imageUrl: string;
@@ -39,6 +40,7 @@ export interface Transaction {
   amount: number;
   timestamp: string;
   code?: string;
+  rewardType?: 'code' | 'link';
 }
 
 export interface UserProfile {
