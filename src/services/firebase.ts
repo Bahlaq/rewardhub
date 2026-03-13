@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy } from 'firebase/firestore';
-import { Store, DiscountCode } from '../types';
+import { 
+  initializeFirestore
+} from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -11,61 +12,17 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
+// Check if config is valid
+const isConfigValid = !!firebaseConfig.apiKey && !!firebaseConfig.projectId;
+
 // Initialize Firebase
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-const db = getFirestore(app);
+
+// Initialize Firestore with settings for better connectivity in restricted environments
+const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true, // Often helps in containerized/proxy environments
+});
 
 export const firebaseService = {
-  // Stores
-  async getStores(): Promise<Store[]> {
-    const storesCol = collection(db, 'stores');
-    const snapshot = await getDocs(query(storesCol, orderBy('name')));
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Store));
-  },
-
-  async addStore(store: Omit<Store, 'id'>): Promise<string> {
-    const docRef = await addDoc(collection(db, 'stores'), {
-      ...store,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-    return docRef.id;
-  },
-
-  async updateStore(id: string, store: Partial<Store>): Promise<void> {
-    const docRef = doc(db, 'stores', id);
-    await updateDoc(docRef, {
-      ...store,
-      updatedAt: new Date().toISOString(),
-    });
-  },
-
-  async deleteStore(id: string): Promise<void> {
-    await deleteDoc(doc(db, 'stores', id));
-  },
-
-  // Discount Codes
-  async getDiscountCodes(isApiFetched?: boolean): Promise<DiscountCode[]> {
-    const codesCol = collection(db, 'discountCodes');
-    let q = query(codesCol, orderBy('createdAt', 'desc'));
-    
-    if (isApiFetched !== undefined) {
-      q = query(codesCol, where('isApiFetched', '==', isApiFetched), orderBy('createdAt', 'desc'));
-    }
-    
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DiscountCode));
-  },
-
-  async addDiscountCode(code: Omit<DiscountCode, 'id'>): Promise<string> {
-    const docRef = await addDoc(collection(db, 'discountCodes'), {
-      ...code,
-      createdAt: new Date().toISOString(),
-    });
-    return docRef.id;
-  },
-
-  async deleteDiscountCode(id: string): Promise<void> {
-    await deleteDoc(doc(db, 'discountCodes', id));
-  }
+  // Add future services here (e.g., user profiles, points sync)
 };
