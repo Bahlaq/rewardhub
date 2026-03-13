@@ -15,24 +15,17 @@ import {
   Zap,
   Search,
   History,
-  Ticket,
   Copy,
-  Plus,
-  Trash2,
-  ExternalLink,
-  Settings,
-  Database,
-  RefreshCw
+  ExternalLink
 } from 'lucide-react';
 import { Clipboard } from '@capacitor/clipboard';
 import { Toast } from '@capacitor/toast';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { MOCK_OFFERS } from './constants';
-import { Offer, UserProfile, AdLog, ClaimRecord, Transaction, Store, DiscountCode } from './types';
+import { Offer, UserProfile, AdLog, ClaimRecord, Transaction } from './types';
 import { useAds } from './hooks/useAds';
 import { firebaseService } from './services/firebase';
-import { apiService } from './services/apiService';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -42,7 +35,6 @@ function cn(...inputs: ClassValue[]) {
 
 const Navbar = ({ activeTab, setActiveTab }: { activeTab: string, setActiveTab: (tab: string) => void }) => {
   const tabs = [
-    { id: 'deals', icon: Ticket, label: 'Deals' },
     { id: 'offers', icon: LayoutDashboard, label: 'Rewards' },
     { id: 'profile', icon: User, label: 'Profile' },
   ];
@@ -228,88 +220,12 @@ const AdSimulatorModal = ({ isOpen, onClose, onReward }: { isOpen: boolean, onCl
   );
 };
 
-const DealCard = ({ deal }: { deal: DiscountCode, key?: string | number }) => {
-  const handleCopy = async () => {
-    await Clipboard.write({
-      string: deal.code
-    });
-    await Toast.show({
-      text: 'Code copied successfully!',
-      duration: 'short',
-      position: 'bottom'
-    });
-  };
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className="bg-white rounded-2xl border border-zinc-200 p-4 shadow-sm hover:shadow-md transition-all"
-    >
-      <div className="flex items-center gap-4 mb-3">
-        <div className="w-12 h-12 rounded-xl bg-zinc-100 flex items-center justify-center overflow-hidden border border-zinc-100">
-          <img src={`https://logo.clearbit.com/${deal.storeName.toLowerCase().replace(/\s/g, '')}.com`} alt={deal.storeName} className="w-full h-full object-contain p-2" onError={(e) => { (e.target as HTMLImageElement).src = 'https://picsum.photos/seed/store/100/100' }} />
-        </div>
-        <div className="flex-1">
-          <h3 className="font-bold text-zinc-900">{deal.storeName}</h3>
-          <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full uppercase tracking-wider">
-            {deal.isApiFetched ? 'Verified Deal' : 'Community Deal'}
-          </span>
-        </div>
-      </div>
-      
-      <p className="text-sm text-zinc-600 mb-4 line-clamp-2">{deal.description}</p>
-      
-      <div className="flex items-center gap-2">
-        <div className="flex-1 bg-zinc-50 border border-dashed border-zinc-300 rounded-xl px-4 py-2.5 flex items-center justify-between">
-          <span className="font-mono font-bold text-zinc-800 tracking-wider">{deal.code}</span>
-          <button onClick={handleCopy} className="text-indigo-600 hover:text-indigo-700 transition-colors">
-            <Copy size={18} />
-          </button>
-        </div>
-        <a 
-          href={deal.affiliateLink} 
-          target="_blank" 
-          rel="noopener noreferrer"
-          className="bg-indigo-600 text-white p-2.5 rounded-xl hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-200"
-        >
-          <ExternalLink size={18} />
-        </a>
-      </div>
-    </motion.div>
-  );
-};
-
 // --- Main App ---
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('offers');
-  const [stores, setStores] = useState<Store[]>([]);
-  const [deals, setDeals] = useState<DiscountCode[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [adminPassword, setAdminPassword] = useState('');
-  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
-
-  // Admin Form States
-  const [newStore, setNewStore] = useState<Omit<Store, 'id' | 'createdAt' | 'updatedAt'>>({
-    name: '',
-    logoUrl: '',
-    category: '',
-    affiliateLink: ''
-  });
-  const [newDeal, setNewDeal] = useState<Omit<DiscountCode, 'id' | 'createdAt'>>({
-    storeId: '',
-    storeName: '',
-    code: '',
-    description: '',
-    affiliateLink: '',
-    expiryDate: '',
-    isApiFetched: false
-  });
-
+  
   useEffect(() => {
-    fetchData();
-    
     // Daily Reset Simulation
     const lastReset = localStorage.getItem('last_daily_reset');
     const today = new Date().toDateString();
@@ -320,68 +236,6 @@ export default function App() {
       localStorage.setItem('last_daily_reset', today);
     }
   }, []);
-
-  const fetchData = async () => {
-    setIsLoading(true);
-    try {
-      const fetchedStores = await firebaseService.getStores();
-      const fetchedDeals = await firebaseService.getDiscountCodes();
-      setStores(fetchedStores);
-      setDeals(fetchedDeals);
-    } catch (error) {
-      console.error('Error fetching data:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const syncApiDeals = async () => {
-    setIsLoading(true);
-    try {
-      const apiDeals = await apiService.fetchExternalDeals();
-      for (const deal of apiDeals) {
-        await firebaseService.addDiscountCode(deal);
-      }
-      await fetchData();
-      alert('Successfully synced deals from APIs!');
-    } catch (error) {
-      console.error('Error syncing deals:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleAddStore = async () => {
-    if (!newStore.name) return;
-    await firebaseService.addStore(newStore as any);
-    setNewStore({ name: '', logoUrl: '', category: '', affiliateLink: '' });
-    await fetchData();
-  };
-
-  const handleAddDeal = async () => {
-    if (!newDeal.code || !newDeal.storeId) return;
-    const store = stores.find(s => s.id === newDeal.storeId);
-    await firebaseService.addDiscountCode({
-      ...newDeal,
-      storeName: store?.name || 'Unknown Store',
-    } as any);
-    setNewDeal({ storeId: '', storeName: '', code: '', description: '', affiliateLink: '', expiryDate: '', isApiFetched: false });
-    await fetchData();
-  };
-
-  const handleDeleteDeal = async (id: string) => {
-    if (confirm('Are you sure you want to delete this deal?')) {
-      await firebaseService.deleteDiscountCode(id);
-      await fetchData();
-    }
-  };
-
-  const handleDeleteStore = async (id: string) => {
-    if (confirm('Are you sure you want to delete this store? All associated deals might become orphaned.')) {
-      await firebaseService.deleteStore(id);
-      await fetchData();
-    }
-  };
 
   const [searchQuery, setSearchQuery] = useState('');
   const [user, setUser] = useState<UserProfile>({
@@ -509,55 +363,6 @@ export default function App() {
 
       <main className="max-w-md mx-auto px-6 py-6">
         <AnimatePresence mode="wait">
-          {activeTab === 'deals' && (
-            <motion.div
-              key="deals"
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 10 }}
-              className="space-y-6"
-            >
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold text-zinc-900">Today's Best Deals</h2>
-                <button onClick={fetchData} className="p-2 text-zinc-400 hover:text-indigo-600 transition-colors">
-                  <RefreshCw size={18} className={isLoading ? 'animate-spin' : ''} />
-                </button>
-              </div>
-
-              {/* Search Bar */}
-              <div className="relative group">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 group-focus-within:text-indigo-600 transition-colors" size={18} />
-                <input 
-                  type="text"
-                  placeholder="Search stores or codes..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-white border border-zinc-200 rounded-2xl py-3.5 pl-12 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm"
-                />
-              </div>
-
-              {isLoading ? (
-                <div className="grid gap-4">
-                  {[1, 2, 3].map(i => (
-                    <div key={i} className="h-32 bg-zinc-100 animate-pulse rounded-2xl" />
-                  ))}
-                </div>
-              ) : (
-                <div className="grid gap-4">
-                  {deals.filter(d => d.storeName.toLowerCase().includes(searchQuery.toLowerCase()) || d.description.toLowerCase().includes(searchQuery.toLowerCase())).map((deal) => (
-                    <DealCard key={deal.id} deal={deal} />
-                  ))}
-                  {deals.length === 0 && (
-                    <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-zinc-200">
-                      <Ticket size={40} className="text-zinc-300 mx-auto mb-3" />
-                      <p className="text-sm text-zinc-500">No deals found. Check back later!</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </motion.div>
-          )}
-
           {activeTab === 'offers' && (
             <motion.div
               key="offers"
@@ -681,7 +486,7 @@ export default function App() {
                             {tx.type === 'earn' ? (
                               <TrendingUp size={14} className="text-emerald-600" />
                             ) : (
-                              <Ticket size={14} className="text-indigo-600" />
+                              <Gift size={14} className="text-indigo-600" />
                             )}
                           </div>
                           <div>
@@ -751,7 +556,7 @@ export default function App() {
                           {tx.type === 'earn' ? (
                             <TrendingUp size={20} className="text-emerald-600" />
                           ) : (
-                            <Ticket size={20} className="text-indigo-600" />
+                            <Gift size={20} className="text-indigo-600" />
                           )}
                         </div>
                         <div>
