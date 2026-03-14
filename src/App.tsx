@@ -16,10 +16,12 @@ import {
   Search,
   History,
   Copy,
-  ExternalLink
+  ExternalLink,
+  ShieldCheck
 } from 'lucide-react';
 import { Clipboard } from '@capacitor/clipboard';
 import { Toast } from '@capacitor/toast';
+import { Browser } from '@capacitor/browser';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { MOCK_OFFERS } from './constants';
@@ -340,6 +342,15 @@ export default function App() {
     }
   };
 
+  const openPrivacyPolicy = async () => {
+    try {
+      await Browser.open({ url: 'https://docs.google.com/document/d/1D3u9UqwckecjQsdylWgCgMKaYhRu9FFMaAXNWKKCH5I/edit?usp=sharing' });
+    } catch (error) {
+      console.error('Error opening privacy policy:', error);
+      await Toast.show({ text: 'Could not open privacy policy link' });
+    }
+  };
+
   const handleClaimOffer = (offer: Offer, currentCost: number) => {
     // Check eligibility
     if (user.points < currentCost) {
@@ -561,6 +572,24 @@ export default function App() {
                     <span className="block text-[10px] uppercase font-bold text-zinc-400 tracking-wider mb-1">Claims</span>
                     <span className="text-lg font-bold text-zinc-900">{user.totalEarned}</span>
                   </div>
+                </div>
+
+                <div className="mt-6 pt-6 border-t border-zinc-100">
+                  <button 
+                    onClick={openPrivacyPolicy}
+                    className="w-full flex items-center justify-between p-4 bg-zinc-50 rounded-2xl border border-zinc-100 hover:bg-zinc-100 transition-colors group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border border-zinc-200 shadow-sm">
+                        <ShieldCheck size={18} className="text-zinc-600" />
+                      </div>
+                      <div className="text-left">
+                        <h4 className="text-sm font-bold text-zinc-900">Privacy Policy</h4>
+                        <p className="text-[10px] text-zinc-400 font-medium">How we handle your data</p>
+                      </div>
+                    </div>
+                    <ChevronRight size={18} className="text-zinc-300 group-hover:text-zinc-500 transition-colors" />
+                  </button>
                 </div>
               </div>
 
