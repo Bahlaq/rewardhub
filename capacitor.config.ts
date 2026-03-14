@@ -1,7 +1,7 @@
 import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.rewardhub.app',
+  appId: 'com.rewardhub.official.app',
   appName: 'RewardHub',
   webDir: 'dist',
   server: {
