@@ -29,6 +29,11 @@ workflows:
           # 🎨 Generate Assets
           npx @capacitor/assets generate --android
           
+          # 🔢 Set Version Code and Name
+          sed -i '' 's/versionCode [0-9]*/versionCode 1/g' android/app/build.gradle
+          sed -i '' 's/versionName "[0-9.]*"/versionName "1.0.0"/g' android/app/build.gradle
+          echo "Set Version Code: 1, Version Name: 1.0.0"
+          
           npm run cap:sync
           
           # 🛠️ PATCH 1: Force Gradle 8.7 (Supports Java 21)
