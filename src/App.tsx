@@ -33,6 +33,32 @@ function cn(...inputs: ClassValue[]) {
 
 // --- Components ---
 
+const Logo = () => (
+  <div className="relative w-10 h-10 group cursor-pointer">
+    {/* Main Body with 3D depth and gradients */}
+    <div className="absolute inset-0 bg-gradient-to-br from-violet-500 via-purple-600 to-indigo-900 rounded-xl shadow-[0_4px_12px_rgba(79,70,229,0.5),inset_0_1px_2px_rgba(255,255,255,0.4)] transition-all duration-300 group-hover:scale-105 group-hover:rotate-3 active:scale-95" />
+    
+    {/* Glossy Overlay */}
+    <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/10 to-white/20 rounded-xl pointer-events-none" />
+    
+    {/* Stylized R with shadow */}
+    <div className="absolute inset-0 flex items-center justify-center">
+      <span className="text-white font-black text-2xl italic tracking-tighter drop-shadow-[0_3px_2px_rgba(0,0,0,0.4)] select-none transform -translate-y-0.5">R</span>
+    </div>
+    
+    {/* Golden Shining Coin - 3D Style */}
+    <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-gradient-to-b from-yellow-200 via-amber-400 to-amber-700 rounded-full border-2 border-purple-900 shadow-[0_2px_6px_rgba(0,0,0,0.3)] flex items-center justify-center overflow-hidden">
+      {/* Coin Shimmer */}
+      <div className="absolute inset-0 bg-[linear-gradient(45deg,transparent_25%,rgba(255,255,255,0.6)_50%,transparent_75%)] bg-[length:250%_250%] animate-[shimmer_3s_infinite]" />
+      
+      {/* Coin Detail */}
+      <div className="relative w-3.5 h-3.5 border border-amber-200/50 rounded-full flex items-center justify-center">
+        <div className="w-1.5 h-1.5 bg-white rounded-full blur-[1px] opacity-80" />
+      </div>
+    </div>
+  </div>
+);
+
 const Navbar = ({ activeTab, setActiveTab }: { activeTab: string, setActiveTab: (tab: string) => void }) => {
   const tabs = [
     { id: 'offers', icon: LayoutDashboard, label: 'Rewards' },
@@ -63,11 +89,14 @@ const Navbar = ({ activeTab, setActiveTab }: { activeTab: string, setActiveTab: 
 const Header = ({ user }: { user: UserProfile }) => (
   <header className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-zinc-100 px-6 py-4 z-40">
     <div className="max-w-md mx-auto flex justify-between items-center">
-      <div>
-        <h1 className="text-xl font-bold tracking-tight text-zinc-900">RewardHub</h1>
-        <p className="text-xs text-zinc-500 font-medium">Earn while you play</p>
+      <div className="flex items-center gap-3">
+        <Logo />
+        <div>
+          <h1 className="text-lg font-black tracking-tight text-zinc-900 leading-none">RewardHub</h1>
+          <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mt-1">Earn while you play</p>
+        </div>
       </div>
-      <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100">
+      <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100 shadow-sm">
         <Zap size={14} className="text-indigo-600 fill-indigo-600" />
         <span className="text-sm font-bold text-indigo-700">{user.points} pts</span>
       </div>
@@ -241,7 +270,7 @@ export default function App() {
   const [user, setUser] = useState<UserProfile>({
     uid: 'user-123',
     email: 'demo@rewardhub.com',
-    points: 5000, // Increased starting points for testing
+    points: 0,
     claimsToday: 0,
     lastClaimDate: null,
     totalEarned: 0,
@@ -456,9 +485,9 @@ export default function App() {
                   })
                 ) : (
                   <div className="bg-white rounded-3xl p-12 border border-dashed border-zinc-200 text-center">
-                    <Search size={32} className="text-zinc-300 mx-auto mb-3" />
-                    <h3 className="text-sm font-bold text-zinc-900 mb-1">No results found</h3>
-                    <p className="text-xs text-zinc-500">Try searching for something else</p>
+                    <Gift size={32} className="text-zinc-300 mx-auto mb-3" />
+                    <h3 className="text-sm font-bold text-zinc-900 mb-1">More rewards coming soon!</h3>
+                    <p className="text-xs text-zinc-500">We're working on bringing you the best deals.</p>
                   </div>
                 )}
               </div>
