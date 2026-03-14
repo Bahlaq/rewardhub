@@ -20,21 +20,41 @@ workflows:
         script: npm install --legacy-peer-deps
       - name: Build and Sync Capacitor
         script: |
-          npm run build
-          echo "--- DIST FOLDER CONTENTS ---"
-          ls -R dist
-          rm -rf android
-          npm run cap:add
+          # 🛠️ Ensure assets directory exists to prevent tool failure
+          mkdir -p assets
           
-          # 🎨 Generate Assets
-          npx @capacitor/assets generate --android
+          # 🏗️ Build Web Assets
+          npm run build
+          
+          # 🔍 Verify dist exists
+          if [ ! -d "dist" ]; then
+            echo "❌ Error: dist directory was not created by npm run build"
+            exit 1
+          fi
+          
+          echo "--- DIST FOLDER CONTENTS ---"
+          ls -R dist | head -n 20
+          
+          # 📱 Prepare Android Project
+          rm -rf android
+          npx cap add android
+          
+          # 🎨 Generate Assets (if icons exist)
+          if [ -f "assets/icon-only.png" ] || [ -f "assets/icon.png" ]; then
+            npx @capacitor/assets generate --android
+          else
+            echo "⚠️ Warning: No icon files found in assets/. Skipping asset generation."
+          fi
           
           # 🔢 Set Version Code and Name
-          sed -i '' 's/versionCode [0-9]*/versionCode 1/g' android/app/build.gradle
-          sed -i '' 's/versionName "[0-9.]*"/versionName "1.0.0"/g' android/app/build.gradle
-          echo "Set Version Code: 1, Version Name: 1.0.0"
+          if [ -f "android/app/build.gradle" ]; then
+            sed -i '' 's/versionCode [0-9]*/versionCode 1/g' android/app/build.gradle
+            sed -i '' 's/versionName "[0-9.]*"/versionName "1.0.0"/g' android/app/build.gradle
+            echo "✅ Set Version Code: 1, Version Name: 1.0.0"
+          fi
           
-          npm run cap:sync
+          # 🔄 Sync Capacitor
+          npx cap sync android
           
           # 🛠️ PATCH 1: Force Gradle 8.7 (Supports Java 21)
           if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
