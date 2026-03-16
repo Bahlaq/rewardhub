@@ -1,7 +1,12 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
-  initializeFirestore
+  initializeFirestore,
+  collection,
+  getDocs,
+  query,
+  orderBy
 } from 'firebase/firestore';
+import { Offer } from '../types';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -24,5 +29,21 @@ const db = initializeFirestore(app, {
 });
 
 export const firebaseService = {
-  // Add future services here (e.g., user profiles, points sync)
+  async getOffers(): Promise<Offer[]> {
+    if (!isConfigValid) {
+      console.warn("Firebase config is invalid. Returning empty offers.");
+      return [];
+    }
+    try {
+      const q = query(collection(db, 'offers'), orderBy('pointsRequired', 'asc'));
+      const querySnapshot = await getDocs(q);
+      return querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as Offer));
+    } catch (error) {
+      console.error("Error fetching offers:", error);
+      return [];
+    }
+  }
 };
