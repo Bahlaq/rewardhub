@@ -26,7 +26,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { Offer, UserProfile, AdLog, ClaimRecord, Transaction } from './types';
 import { useAds } from './hooks/useAds';
-import { firebaseService } from './services/firebase';
+import { firebaseService, FirebaseUser } from './services/firebase';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -254,7 +254,44 @@ const AdSimulatorModal = ({ isOpen, onClose, onReward }: { isOpen: boolean, onCl
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('offers');
-  
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = firebaseService.onAuthChange(async (fUser) => {
+      setFirebaseUser(fUser);
+      setIsAuthLoading(true);
+      if (fUser) {
+        const profile = await firebaseService.getUserProfile(fUser.uid);
+        if (profile) {
+          setUser(profile);
+        } else {
+          const newProfile: UserProfile = {
+            uid: fUser.uid,
+            email: fUser.email,
+            points: 0,
+            claimsToday: 0,
+            lastClaimDate: null,
+            totalEarned: 0,
+          };
+          await firebaseService.saveUserProfile(newProfile);
+          setUser(newProfile);
+        }
+      } else {
+        setUser(null);
+      }
+      setIsAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (user) {
+      firebaseService.saveUserProfile(user);
+    }
+  }, [user]);
+
   useEffect(() => {
     // Daily Reset Simulation
     const lastReset = localStorage.getItem('last_daily_reset');
@@ -268,14 +305,6 @@ export default function App() {
   }, []);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [user, setUser] = useState<UserProfile>({
-    uid: 'user-123',
-    email: 'demo@rewardhub.com',
-    points: 0,
-    claimsToday: 0,
-    lastClaimDate: null,
-    totalEarned: 0,
-  });
   
   // Progressive Ad State
   const [adWatchesForCurrentBoost, setAdWatchesForCurrentBoost] = useState(0);
@@ -408,6 +437,46 @@ export default function App() {
       alert(`Success! Your code for ${offer.title} is: ${offer.reward}. You can find it in your Profile history.`);
     }
   };
+
+  const handleSignIn = async () => {
+    try {
+      await firebaseService.signInWithGoogle();
+    } catch (error) {
+      console.error("Sign in failed:", error);
+      alert("Sign in failed. Please try again.");
+    }
+  };
+
+  const handleSignOut = async () => {
+    await firebaseService.logout();
+  };
+
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-zinc-50 flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!firebaseUser) {
+    return (
+      <div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-6 text-center">
+        <Logo />
+        <h1 className="text-2xl font-black tracking-tight text-zinc-900 mt-6 mb-2">Welcome to RewardHub</h1>
+        <p className="text-sm text-zinc-500 mb-8 max-w-xs">Sign in with Google to start earning points and save your progress.</p>
+        <button 
+          onClick={handleSignIn}
+          className="w-full max-w-xs bg-white border border-zinc-200 py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-sm hover:shadow-md transition-all active:scale-95"
+        >
+          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
+          Continue with Google
+        </button>
+      </div>
+    );
+  }
+
+  if (!user) return null;
 
   return (
     <div className="min-h-screen bg-zinc-50 pb-24 font-sans selection:bg-indigo-100 selection:text-indigo-900">
@@ -606,6 +675,21 @@ export default function App() {
                       </div>
                     </div>
                     <ChevronRight size={18} className="text-zinc-300 group-hover:text-zinc-500 transition-colors" />
+                  </button>
+                  <button 
+                    onClick={handleSignOut}
+                    className="w-full flex items-center justify-between p-4 bg-rose-50 rounded-2xl border border-rose-100 hover:bg-rose-100 transition-colors group mt-3"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border border-rose-200 shadow-sm">
+                        <X size={18} className="text-rose-600" />
+                      </div>
+                      <div className="text-left">
+                        <h4 className="text-sm font-bold text-rose-900">Sign Out</h4>
+                        <p className="text-[10px] text-rose-400 font-medium">Log out of your account</p>
+                      </div>
+                    </div>
+                    <ChevronRight size={18} className="text-rose-300 group-hover:text-rose-500 transition-colors" />
                   </button>
                 </div>
               </div>
