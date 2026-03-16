@@ -39,13 +39,17 @@ workflows:
           rm -rf android
           npx cap add android
           
-          # 🎨 Generate Assets (if icons exist)
-          if [ ! -f "assets/icon-only.png" ] && [ ! -f "assets/icon.png" ]; then
-            echo "📥 Downloading placeholder icon..."
-            curl -o assets/icon.png https://picsum.photos/seed/rewardhub-icon/512/512
+          # 🎨 Generate Assets
+          mkdir -p assets
+          if [ ! -f "assets/icon.png" ]; then
+            curl -L -o assets/icon.png https://picsum.photos/seed/rewardhub-icon/512/512
+          fi
+          if [ ! -f "assets/splash.png" ]; then
+            curl -L -o assets/splash.png https://picsum.photos/seed/rewardhub-splash/2732/2732
           fi
           
-          npx @capacitor/assets generate --android
+          # Generate icons and splash screens
+          npx @capacitor/assets generate --android --assetPath assets
           
           # 🔢 Set Version Code and Name
           if [ -f "android/app/build.gradle" ]; then
