@@ -32,15 +32,25 @@ const firebaseConfig = {
 const isConfigValid = !!firebaseConfig.apiKey && !!firebaseConfig.projectId;
 
 // Initialize Firebase
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+let app;
+try {
+  if (isConfigValid) {
+    app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+  } else {
+    console.error("Firebase configuration is missing or incomplete. Please check your environment variables.");
+    // Fallback or dummy app if needed, but better to handle in components
+  }
+} catch (error) {
+  console.error("Failed to initialize Firebase:", error);
+}
 
 // Initialize Firestore with settings for better connectivity in restricted environments
-const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true, // Often helps in containerized/proxy environments
-});
+const db = app ? initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+}) : null;
 
 // Initialize Auth
-const auth = getAuth(app);
+const auth = app ? getAuth(app) : null;
 const googleProvider = new GoogleAuthProvider();
 
 export { auth, googleProvider };
@@ -48,6 +58,7 @@ export type { FirebaseUser };
 
 export const firebaseService = {
   async signInWithGoogle() {
+    if (!auth) throw new Error("Firebase Auth not initialized");
     try {
       const result = await signInWithPopup(auth, googleProvider);
       return result.user;
@@ -58,6 +69,7 @@ export const firebaseService = {
   },
 
   async logout() {
+    if (!auth) return;
     try {
       await signOut(auth);
     } catch (error) {
@@ -66,10 +78,15 @@ export const firebaseService = {
   },
 
   onAuthChange(callback: (user: FirebaseUser | null) => void) {
+    if (!auth) {
+      callback(null);
+      return () => {};
+    }
     return onAuthStateChanged(auth, callback);
   },
 
   async getUserProfile(uid: string): Promise<UserProfile | null> {
+    if (!db) return null;
     try {
       const userDoc = await getDoc(doc(db, 'users', uid));
       if (userDoc.exists()) {
@@ -83,6 +100,7 @@ export const firebaseService = {
   },
 
   async saveUserProfile(profile: UserProfile) {
+    if (!db) return;
     try {
       await setDoc(doc(db, 'users', profile.uid), profile, { merge: true });
     } catch (error) {
@@ -91,8 +109,8 @@ export const firebaseService = {
   },
 
   async getOffers(): Promise<Offer[]> {
-    if (!isConfigValid) {
-      console.warn("Firebase config is invalid. Returning empty offers.");
+    if (!db || !isConfigValid) {
+      console.warn("Firebase not initialized or config invalid. Returning empty offers.");
       return [];
     }
     try {
