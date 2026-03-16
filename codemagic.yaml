@@ -40,11 +40,12 @@ workflows:
           npx cap add android
           
           # 🎨 Generate Assets (if icons exist)
-          if [ -f "assets/icon-only.png" ] || [ -f "assets/icon.png" ]; then
-            npx @capacitor/assets generate --android
-          else
-            echo "⚠️ Warning: No icon files found in assets/. Skipping asset generation."
+          if [ ! -f "assets/icon-only.png" ] && [ ! -f "assets/icon.png" ]; then
+            echo "📥 Downloading placeholder icon..."
+            curl -o assets/icon.png https://picsum.photos/seed/rewardhub-icon/512/512
           fi
+          
+          npx @capacitor/assets generate --android
           
           # 🔢 Set Version Code and Name
           if [ -f "android/app/build.gradle" ]; then
