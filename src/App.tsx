@@ -259,31 +259,48 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = firebaseService.onAuthChange(async (fUser) => {
-      setFirebaseUser(fUser);
-      setIsAuthLoading(true);
-      if (fUser) {
-        const profile = await firebaseService.getUserProfile(fUser.uid);
-        if (profile) {
-          setUser(profile);
-        } else {
-          const newProfile: UserProfile = {
-            uid: fUser.uid,
-            email: fUser.email,
-            points: 0,
-            claimsToday: 0,
-            lastClaimDate: null,
-            totalEarned: 0,
-          };
-          await firebaseService.saveUserProfile(newProfile);
-          setUser(newProfile);
-        }
-      } else {
-        setUser(null);
+    // Safety timeout: if auth takes too long, stop loading
+    const timeout = setTimeout(() => {
+      if (isAuthLoading) {
+        console.warn("Auth loading timed out");
+        setIsAuthLoading(false);
       }
-      setIsAuthLoading(false);
+    }, 5000);
+
+    const unsubscribe = firebaseService.onAuthChange(async (fUser) => {
+      try {
+        setFirebaseUser(fUser);
+        if (fUser) {
+          const profile = await firebaseService.getUserProfile(fUser.uid);
+          if (profile) {
+            setUser(profile);
+          } else {
+            const newProfile: UserProfile = {
+              uid: fUser.uid,
+              email: fUser.email || '',
+              points: 0,
+              claimsToday: 0,
+              lastClaimDate: null,
+              totalEarned: 0,
+            };
+            await firebaseService.saveUserProfile(newProfile);
+            setUser(newProfile);
+          }
+        } else {
+          setUser(null);
+        }
+      } catch (error) {
+        console.error("Error in auth change handler:", error);
+      } finally {
+        setIsAuthLoading(false);
+        clearTimeout(timeout);
+      }
     });
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribe();
+      clearTimeout(timeout);
+    };
   }, []);
 
   useEffect(() => {
