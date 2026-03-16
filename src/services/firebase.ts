@@ -4,9 +4,20 @@ import {
   collection,
   getDocs,
   query,
-  orderBy
+  orderBy,
+  doc,
+  getDoc,
+  setDoc
 } from 'firebase/firestore';
-import { Offer } from '../types';
+import { 
+  getAuth, 
+  GoogleAuthProvider, 
+  signInWithPopup, 
+  onAuthStateChanged,
+  signOut,
+  User as FirebaseUser
+} from 'firebase/auth';
+import { Offer, UserProfile } from '../types';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -28,7 +39,57 @@ const db = initializeFirestore(app, {
   experimentalForceLongPolling: true, // Often helps in containerized/proxy environments
 });
 
+// Initialize Auth
+const auth = getAuth(app);
+const googleProvider = new GoogleAuthProvider();
+
+export { auth, googleProvider };
+export type { FirebaseUser };
+
 export const firebaseService = {
+  async signInWithGoogle() {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      return result.user;
+    } catch (error) {
+      console.error("Error signing in with Google:", error);
+      throw error;
+    }
+  },
+
+  async logout() {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("Error signing out:", error);
+    }
+  },
+
+  onAuthChange(callback: (user: FirebaseUser | null) => void) {
+    return onAuthStateChanged(auth, callback);
+  },
+
+  async getUserProfile(uid: string): Promise<UserProfile | null> {
+    try {
+      const userDoc = await getDoc(doc(db, 'users', uid));
+      if (userDoc.exists()) {
+        return userDoc.data() as UserProfile;
+      }
+      return null;
+    } catch (error) {
+      console.error("Error fetching user profile:", error);
+      return null;
+    }
+  },
+
+  async saveUserProfile(profile: UserProfile) {
+    try {
+      await setDoc(doc(db, 'users', profile.uid), profile, { merge: true });
+    } catch (error) {
+      console.error("Error saving user profile:", error);
+    }
+  },
+
   async getOffers(): Promise<Offer[]> {
     if (!isConfigValid) {
       console.warn("Firebase config is invalid. Returning empty offers.");
