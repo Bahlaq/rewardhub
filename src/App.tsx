@@ -24,7 +24,6 @@ import { Toast } from '@capacitor/toast';
 import { Browser } from '@capacitor/browser';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { MOCK_OFFERS } from './constants';
 import { Offer, UserProfile, AdLog, ClaimRecord, Transaction } from './types';
 import { useAds } from './hooks/useAds';
 import { firebaseService } from './services/firebase';
@@ -291,14 +290,27 @@ export default function App() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const { logs, addLog } = useAds();
 
+  const [offers, setOffers] = useState<Offer[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchOffers = async () => {
+      setIsLoading(true);
+      const data = await firebaseService.getOffers();
+      setOffers(data);
+      setIsLoading(false);
+    };
+    fetchOffers();
+  }, []);
+
   // Filtered Offers
   const filteredOffers = useMemo(() => {
-    return MOCK_OFFERS.filter(offer => 
+    return offers.filter(offer => 
       offer.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       offer.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
       offer.type.toLowerCase().includes(searchQuery.toLowerCase())
     );
-  }, [searchQuery]);
+  }, [offers, searchQuery]);
 
   // Simulate App Open Ad
   useEffect(() => {
@@ -467,13 +479,18 @@ export default function App() {
                 </h2>
                 {!searchQuery && (
                   <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
-                    {MOCK_OFFERS.length} Offers
+                    {offers.length} Offers
                   </span>
                 )}
               </div>
 
               <div className="grid gap-4">
-                {filteredOffers.length > 0 ? (
+                {isLoading ? (
+                  <div className="flex flex-col items-center justify-center py-12 space-y-4">
+                    <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                    <p className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Loading Rewards...</p>
+                  </div>
+                ) : filteredOffers.length > 0 ? (
                   filteredOffers.map((offer) => {
                     const claimsTodayForThisOffer = transactions.filter(t => 
                       t.type === 'claim' &&
