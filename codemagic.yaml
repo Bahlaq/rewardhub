@@ -42,8 +42,16 @@ workflows:
           # 🎨 Generate Assets
           mkdir -p assets
           # Use high-quality placeholders that match the purple/gold theme
-          if [ ! -f "assets/icon.png" ]; then
-            curl -L -o assets/icon.png "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=7c3aed&fontSize=50&fontWeight=900&radius=20"
+          # We provide icon-only, icon-foreground, and icon-background for best Android support
+          if [ ! -f "assets/icon-only.png" ]; then
+            curl -L -o assets/icon-only.png "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=7c3aed&fontSize=50&fontWeight=900&radius=20"
+          fi
+          cp assets/icon-only.png assets/icon.png
+          if [ ! -f "assets/icon-foreground.png" ]; then
+            curl -L -o assets/icon-foreground.png "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=transparent&fontSize=50&fontWeight=900"
+          fi
+          if [ ! -f "assets/icon-background.png" ]; then
+            curl -L -o assets/icon-background.png "https://placehold.co/1024x1024/7c3aed/7c3aed/png"
           fi
           if [ ! -f "assets/splash.png" ]; then
             curl -L -o assets/splash.png "https://api.dicebear.com/7.x/initials/png?seed=RewardHub&backgroundColor=7c3aed&fontSize=30&fontWeight=900"
