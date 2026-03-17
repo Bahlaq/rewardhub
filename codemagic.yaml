@@ -41,12 +41,12 @@ workflows:
           
           # 🎨 Generate Assets
           mkdir -p assets
-          # Use a high-quality purple placeholder with 'R' to match user request
+          # Use high-quality placeholders that match the purple/gold theme
           if [ ! -f "assets/icon.png" ]; then
-            curl -L -o assets/icon.png "https://placehold.co/1024x1024/7c3aed/ffffff?text=R"
+            curl -L -o assets/icon.png "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=7c3aed&fontSize=50&fontWeight=900&radius=20"
           fi
           if [ ! -f "assets/splash.png" ]; then
-            curl -L -o assets/splash.png "https://placehold.co/2732x2732/7c3aed/ffffff?text=RewardHub"
+            curl -L -o assets/splash.png "https://api.dicebear.com/7.x/initials/png?seed=RewardHub&backgroundColor=7c3aed&fontSize=30&fontWeight=900"
           fi
           
           # Generate icons and splash screens
