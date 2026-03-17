@@ -36,20 +36,25 @@ function cn(...inputs: ClassValue[]) {
 
 const Logo = () => (
   <div className="relative w-12 h-12 group cursor-pointer">
-    {/* Purple Background - Rounded Square */}
-    <div className="absolute inset-0 bg-[#7c3aed] rounded-2xl shadow-[0_8px_16px_rgba(124,58,237,0.4)] overflow-hidden">
-      {/* Subtle Radial Gradient to match the image rays */}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.15)_0%,transparent_70%)]" />
+    {/* Purple Background - Rounded Square with 3D depth */}
+    <div className="absolute inset-0 bg-[#7c3aed] rounded-2xl shadow-[0_8px_20px_rgba(124,58,237,0.5),inset_0_2px_4px_rgba(255,255,255,0.3)] overflow-hidden">
+      {/* Radial Rays Effect to match the image */}
+      <div className="absolute inset-0 opacity-20" 
+           style={{ background: 'conic-gradient(from 0deg at 50% 50%, transparent 0deg, white 15deg, transparent 30deg, white 45deg, transparent 60deg, white 75deg, transparent 90deg, white 105deg, transparent 120deg, white 135deg, transparent 150deg, white 165deg, transparent 180deg, white 195deg, transparent 210deg, white 225deg, transparent 240deg, white 255deg, transparent 270deg, white 285deg, transparent 300deg, white 315deg, transparent 330deg, white 345deg, transparent 360deg)' }} />
+      <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent" />
     </div>
     
-    {/* The Gold Coin - Positioned behind the R */}
-    <div className="absolute top-1/2 left-1/2 -translate-x-1/4 -translate-y-1/2 w-8 h-8 bg-gradient-to-b from-[#ffd700] via-[#f59e0b] to-[#b45309] rounded-full border-2 border-[#78350f] shadow-lg flex items-center justify-center">
-      <div className="w-5 h-5 border border-white/30 rounded-full" />
+    {/* The Gold Coin - Positioned behind the R, slightly offset to the right */}
+    <div className="absolute top-1/2 left-1/2 -translate-x-1/3 -translate-y-1/2 w-9 h-9 bg-gradient-to-b from-[#fbbf24] via-[#d97706] to-[#92400e] rounded-full border-2 border-[#78350f] shadow-lg flex items-center justify-center">
+      {/* Coin Inner Detail */}
+      <div className="w-6 h-6 border border-white/20 rounded-full flex items-center justify-center">
+        <div className="w-3 h-3 bg-white/10 rounded-full" />
+      </div>
     </div>
 
-    {/* The White R - Large and Bold */}
+    {/* The White R - Large, Bold, and 3D */}
     <div className="absolute inset-0 flex items-center justify-center">
-      <span className="text-white font-black text-3xl drop-shadow-[0_4px_4px_rgba(0,0,0,0.3)] select-none transform -translate-x-1">R</span>
+      <span className="text-white font-black text-4xl drop-shadow-[0_4px_6px_rgba(0,0,0,0.5)] select-none transform -translate-x-1 -translate-y-0.5">R</span>
     </div>
   </div>
 );
@@ -459,30 +464,25 @@ export default function App() {
   };
 
   const handleGuestSignIn = async () => {
+    setIsAuthLoading(true);
     try {
-      setIsAuthLoading(true);
       await firebaseService.signInAnonymously();
     } catch (error: any) {
-      console.error("Guest sign in failed:", error);
+      console.error("Guest sign in failed, falling back to local mode:", error);
       
-      if (error.code === 'auth/configuration-not-found') {
-        // Fallback to Local Guest Mode if Firebase Anonymous is not enabled
-        console.log("Anonymous auth not enabled in console, using Local Guest Mode");
-        const localUid = 'local_guest_' + Math.random().toString(36).substr(2, 9);
-        const guestProfile: UserProfile = {
-          uid: localUid,
-          email: 'Guest User',
-          points: 0,
-          claimsToday: 0,
-          lastClaimDate: null,
-          totalEarned: 0,
-        };
-        setUser(guestProfile);
-        setIsAuthLoading(false);
-      } else {
-        alert("Guest login failed. Please check your internet connection.");
-        setIsAuthLoading(false);
-      }
+      // ABSOLUTE FALLBACK: Local Guest Mode
+      // This ensures the user can ALWAYS enter the app even if Firebase is blocked or misconfigured
+      const localUid = 'local_guest_' + Math.random().toString(36).substr(2, 9);
+      const guestProfile: UserProfile = {
+        uid: localUid,
+        email: 'Guest User',
+        points: 0,
+        claimsToday: 0,
+        lastClaimDate: null,
+        totalEarned: 0,
+      };
+      setUser(guestProfile);
+      setIsAuthLoading(false);
     }
   };
 
