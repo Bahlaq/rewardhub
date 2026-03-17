@@ -35,26 +35,26 @@ function cn(...inputs: ClassValue[]) {
 // --- Components ---
 
 const Logo = () => (
-  <div className="relative w-12 h-12 group cursor-pointer">
-    {/* Purple Background - Rounded Square with 3D depth */}
-    <div className="absolute inset-0 bg-[#7c3aed] rounded-2xl shadow-[0_8px_20px_rgba(124,58,237,0.5),inset_0_2px_4px_rgba(255,255,255,0.3)] overflow-hidden">
-      {/* Radial Rays Effect to match the image */}
-      <div className="absolute inset-0 opacity-20" 
-           style={{ background: 'conic-gradient(from 0deg at 50% 50%, transparent 0deg, white 15deg, transparent 30deg, white 45deg, transparent 60deg, white 75deg, transparent 90deg, white 105deg, transparent 120deg, white 135deg, transparent 150deg, white 165deg, transparent 180deg, white 195deg, transparent 210deg, white 225deg, transparent 240deg, white 255deg, transparent 270deg, white 285deg, transparent 300deg, white 315deg, transparent 330deg, white 345deg, transparent 360deg)' }} />
-      <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent" />
+  <div className="relative w-16 h-16 group cursor-pointer mx-auto">
+    {/* Purple Background - Rounded Square with 3D depth and rays */}
+    <div className="absolute inset-0 bg-[#7c3aed] rounded-[22%] shadow-[0_10px_25px_rgba(124,58,237,0.6),inset_0_2px_4px_rgba(255,255,255,0.4)] overflow-hidden">
+      {/* Radial Rays Effect - More pronounced to match image */}
+      <div className="absolute inset-0 opacity-30" 
+           style={{ background: 'conic-gradient(from 0deg at 50% 50%, transparent 0deg, rgba(255,255,255,0.4) 10deg, transparent 20deg, rgba(255,255,255,0.4) 30deg, transparent 40deg, rgba(255,255,255,0.4) 50deg, transparent 60deg, rgba(255,255,255,0.4) 70deg, transparent 80deg, rgba(255,255,255,0.4) 90deg, transparent 100deg, rgba(255,255,255,0.4) 110deg, transparent 120deg, rgba(255,255,255,0.4) 130deg, transparent 140deg, rgba(255,255,255,0.4) 150deg, transparent 160deg, rgba(255,255,255,0.4) 170deg, transparent 180deg, rgba(255,255,255,0.4) 190deg, transparent 200deg, rgba(255,255,255,0.4) 210deg, transparent 220deg, rgba(255,255,255,0.4) 230deg, transparent 240deg, rgba(255,255,255,0.4) 250deg, transparent 260deg, rgba(255,255,255,0.4) 270deg, transparent 280deg, rgba(255,255,255,0.4) 290deg, transparent 300deg, rgba(255,255,255,0.4) 310deg, transparent 320deg, rgba(255,255,255,0.4) 330deg, transparent 340deg, rgba(255,255,255,0.4) 350deg, transparent 360deg)' }} />
+      <div className="absolute inset-0 bg-gradient-to-br from-white/20 via-transparent to-black/20" />
     </div>
     
     {/* The Gold Coin - Positioned behind the R, slightly offset to the right */}
-    <div className="absolute top-1/2 left-1/2 -translate-x-1/3 -translate-y-1/2 w-9 h-9 bg-gradient-to-b from-[#fbbf24] via-[#d97706] to-[#92400e] rounded-full border-2 border-[#78350f] shadow-lg flex items-center justify-center">
+    <div className="absolute top-[52%] left-[55%] -translate-x-1/2 -translate-y-1/2 w-11 h-11 bg-gradient-to-b from-[#fbbf24] via-[#d97706] to-[#92400e] rounded-full border-[3px] border-[#78350f] shadow-xl flex items-center justify-center">
       {/* Coin Inner Detail */}
-      <div className="w-6 h-6 border border-white/20 rounded-full flex items-center justify-center">
-        <div className="w-3 h-3 bg-white/10 rounded-full" />
+      <div className="w-8 h-8 border border-white/30 rounded-full flex items-center justify-center">
+        <div className="w-4 h-4 bg-white/20 rounded-full blur-[1px]" />
       </div>
     </div>
 
     {/* The White R - Large, Bold, and 3D */}
     <div className="absolute inset-0 flex items-center justify-center">
-      <span className="text-white font-black text-4xl drop-shadow-[0_4px_6px_rgba(0,0,0,0.5)] select-none transform -translate-x-1 -translate-y-0.5">R</span>
+      <span className="text-white font-black text-5xl drop-shadow-[0_6px_8px_rgba(0,0,0,0.6)] select-none transform -translate-x-1.5 -translate-y-1 tracking-tighter">R</span>
     </div>
   </div>
 );
@@ -465,25 +465,27 @@ export default function App() {
 
   const handleGuestSignIn = async () => {
     setIsAuthLoading(true);
-    try {
-      await firebaseService.signInAnonymously();
-    } catch (error: any) {
-      console.error("Guest sign in failed, falling back to local mode:", error);
-      
-      // ABSOLUTE FALLBACK: Local Guest Mode
-      // This ensures the user can ALWAYS enter the app even if Firebase is blocked or misconfigured
-      const localUid = 'local_guest_' + Math.random().toString(36).substr(2, 9);
-      const guestProfile: UserProfile = {
-        uid: localUid,
-        email: 'Guest User',
-        points: 0,
-        claimsToday: 0,
-        lastClaimDate: null,
-        totalEarned: 0,
-      };
-      setUser(guestProfile);
-      setIsAuthLoading(false);
-    }
+    
+    // Create local guest profile immediately
+    const localUid = 'local_guest_' + Math.random().toString(36).substr(2, 9);
+    const guestProfile: UserProfile = {
+      uid: localUid,
+      email: 'Guest User',
+      points: 0,
+      claimsToday: 0,
+      lastClaimDate: null,
+      totalEarned: 0,
+    };
+
+    // Set local state immediately to bypass Firebase hang
+    setFirebaseUser({ uid: localUid, isAnonymous: true } as any);
+    setUser(guestProfile);
+    setIsAuthLoading(false);
+
+    // Try to sign in anonymously in background, but don't wait for it
+    firebaseService.signInAnonymously().catch(err => {
+      console.warn("Background anonymous sign-in failed, staying in local guest mode:", err);
+    });
   };
 
   const handleSignOut = async () => {
