@@ -35,27 +35,21 @@ function cn(...inputs: ClassValue[]) {
 // --- Components ---
 
 const Logo = () => (
-  <div className="relative w-10 h-10 group cursor-pointer">
-    {/* Main Body with 3D depth and gradients */}
-    <div className="absolute inset-0 bg-gradient-to-br from-violet-500 via-purple-600 to-indigo-900 rounded-xl shadow-[0_4px_12px_rgba(79,70,229,0.5),inset_0_1px_2px_rgba(255,255,255,0.4)] transition-all duration-300 group-hover:scale-105 group-hover:rotate-3 active:scale-95" />
-    
-    {/* Glossy Overlay */}
-    <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/10 to-white/20 rounded-xl pointer-events-none" />
-    
-    {/* Stylized R with shadow */}
-    <div className="absolute inset-0 flex items-center justify-center">
-      <span className="text-white font-black text-2xl italic tracking-tighter drop-shadow-[0_3px_2px_rgba(0,0,0,0.4)] select-none transform -translate-y-0.5">R</span>
+  <div className="relative w-12 h-12 group cursor-pointer">
+    {/* Purple Background - Rounded Square */}
+    <div className="absolute inset-0 bg-[#7c3aed] rounded-2xl shadow-[0_8px_16px_rgba(124,58,237,0.4)] overflow-hidden">
+      {/* Subtle Radial Gradient to match the image rays */}
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.15)_0%,transparent_70%)]" />
     </div>
     
-    {/* Golden Shining Coin - 3D Style */}
-    <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-gradient-to-b from-yellow-200 via-amber-400 to-amber-700 rounded-full border-2 border-purple-900 shadow-[0_2px_6px_rgba(0,0,0,0.3)] flex items-center justify-center overflow-hidden">
-      {/* Coin Shimmer */}
-      <div className="absolute inset-0 bg-[linear-gradient(45deg,transparent_25%,rgba(255,255,255,0.6)_50%,transparent_75%)] bg-[length:250%_250%] animate-[shimmer_3s_infinite]" />
-      
-      {/* Coin Detail */}
-      <div className="relative w-3.5 h-3.5 border border-amber-200/50 rounded-full flex items-center justify-center">
-        <div className="w-1.5 h-1.5 bg-white rounded-full blur-[1px] opacity-80" />
-      </div>
+    {/* The Gold Coin - Positioned behind the R */}
+    <div className="absolute top-1/2 left-1/2 -translate-x-1/4 -translate-y-1/2 w-8 h-8 bg-gradient-to-b from-[#ffd700] via-[#f59e0b] to-[#b45309] rounded-full border-2 border-[#78350f] shadow-lg flex items-center justify-center">
+      <div className="w-5 h-5 border border-white/30 rounded-full" />
+    </div>
+
+    {/* The White R - Large and Bold */}
+    <div className="absolute inset-0 flex items-center justify-center">
+      <span className="text-white font-black text-3xl drop-shadow-[0_4px_4px_rgba(0,0,0,0.3)] select-none transform -translate-x-1">R</span>
     </div>
   </div>
 );
@@ -460,7 +454,35 @@ export default function App() {
       await firebaseService.signInWithGoogle();
     } catch (error) {
       console.error("Sign in failed:", error);
-      alert("Sign in failed. Please try again.");
+      alert("Google Sign-In failed. This is usually due to missing SHA-1 in Firebase for APKs. Try 'Continue as Guest' for testing.");
+    }
+  };
+
+  const handleGuestSignIn = async () => {
+    try {
+      setIsAuthLoading(true);
+      await firebaseService.signInAnonymously();
+    } catch (error: any) {
+      console.error("Guest sign in failed:", error);
+      
+      if (error.code === 'auth/configuration-not-found') {
+        // Fallback to Local Guest Mode if Firebase Anonymous is not enabled
+        console.log("Anonymous auth not enabled in console, using Local Guest Mode");
+        const localUid = 'local_guest_' + Math.random().toString(36).substr(2, 9);
+        const guestProfile: UserProfile = {
+          uid: localUid,
+          email: 'Guest User',
+          points: 0,
+          claimsToday: 0,
+          lastClaimDate: null,
+          totalEarned: 0,
+        };
+        setUser(guestProfile);
+        setIsAuthLoading(false);
+      } else {
+        alert("Guest login failed. Please check your internet connection.");
+        setIsAuthLoading(false);
+      }
     }
   };
 
@@ -484,10 +506,18 @@ export default function App() {
         <p className="text-sm text-zinc-500 mb-8 max-w-xs">Sign in with Google to start earning points and save your progress.</p>
         <button 
           onClick={handleSignIn}
-          className="w-full max-w-xs bg-white border border-zinc-200 py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-sm hover:shadow-md transition-all active:scale-95"
+          className="w-full max-w-xs bg-white border border-zinc-200 py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-sm hover:shadow-md transition-all active:scale-95 mb-3"
         >
           <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
           Continue with Google
+        </button>
+
+        <button 
+          onClick={handleGuestSignIn}
+          className="w-full max-w-xs bg-zinc-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg shadow-zinc-200 hover:bg-zinc-800 transition-all active:scale-95"
+        >
+          <User size={20} />
+          Continue as Guest
         </button>
       </div>
     );
