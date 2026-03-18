@@ -249,6 +249,47 @@ const AdSimulatorModal = ({ isOpen, onClose, onReward }: { isOpen: boolean, onCl
   );
 };
 
+const PrivacyModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
+      />
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.9, y: 20 }}
+        className="relative w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl overflow-hidden"
+      >
+        <div className="p-8">
+          <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center mb-6">
+            <ShieldCheck size={24} className="text-indigo-600" />
+          </div>
+          <h3 className="text-xl font-black text-zinc-900 mb-4">Privacy Policy</h3>
+          <div className="space-y-4 text-sm text-zinc-600 leading-relaxed max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
+            <p className="font-bold text-zinc-900">RewardHub Privacy Policy:</p>
+            <p>We only collect your login information (email) to securely store and sync your earned points across devices.</p>
+            <p>We do not sell your data or share it with third parties.</p>
+            <p>We use Google AdMob for advertisements, which may collect device identifiers for ad personalization.</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-full mt-8 bg-indigo-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all active:scale-95"
+          >
+            Got it
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 // --- Main App ---
 
 export default function App() {
@@ -256,6 +297,7 @@ export default function App() {
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [user, setUser] = useState<UserProfile | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
 
   useEffect(() => {
     // Safety timeout: if auth takes too long, stop loading
@@ -399,13 +441,8 @@ export default function App() {
     }
   };
 
-  const openPrivacyPolicy = async () => {
-    try {
-      await Browser.open({ url: 'https://docs.google.com/document/d/1D3u9UqwckecjQsdylWgCgMKaYhRu9FFMaAXNWKKCH5I/edit?usp=sharing' });
-    } catch (error) {
-      console.error('Error opening privacy policy:', error);
-      await Toast.show({ text: 'Could not open privacy policy link' });
-    }
+  const openPrivacyPolicy = () => {
+    setIsPrivacyModalOpen(true);
   };
 
   const handleClaimOffer = (offer: Offer, currentCost: number) => {
@@ -489,7 +526,14 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
-    await firebaseService.logout();
+    try {
+      await firebaseService.logout();
+    } catch (error) {
+      console.error("Logout error:", error);
+    } finally {
+      setFirebaseUser(null);
+      setUser(null);
+    }
   };
 
   if (isAuthLoading) {
@@ -823,6 +867,13 @@ export default function App() {
         onClose={() => setIsAdOpen(false)} 
         onReward={handleAdReward} 
       />
+
+      <AnimatePresence>
+        <PrivacyModal 
+          isOpen={isPrivacyModalOpen} 
+          onClose={() => setIsPrivacyModalOpen(false)} 
+        />
+      </AnimatePresence>
 
       {/* Simulated Banner Ad */}
       <div className="fixed bottom-20 left-0 right-0 px-6 pointer-events-none">
