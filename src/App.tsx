@@ -17,7 +17,8 @@ import {
   History,
   Copy,
   ExternalLink,
-  ShieldCheck
+  ShieldCheck,
+  Trash2
 } from 'lucide-react';
 import { Clipboard } from '@capacitor/clipboard';
 import { Toast } from '@capacitor/toast';
@@ -273,10 +274,14 @@ const PrivacyModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => voi
           </div>
           <h3 className="text-xl font-black text-zinc-900 mb-4">Privacy Policy</h3>
           <div className="space-y-4 text-sm text-zinc-600 leading-relaxed max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
-            <p className="font-bold text-zinc-900">RewardHub Privacy Policy:</p>
+            <p className="font-bold text-zinc-900">Data Collection:</p>
             <p>We only collect your login information (email) to securely store and sync your earned points across devices.</p>
-            <p>We do not sell your data or share it with third parties.</p>
-            <p>We use Google AdMob for advertisements, which may collect device identifiers for ad personalization.</p>
+            
+            <p className="font-bold text-zinc-900">Data Deletion & User Rights:</p>
+            <p>We respect your privacy. You can delete your account and all associated data at any time directly through the "Delete Account" option in the app settings. Once you confirm deletion, all your personal information, including your email and earned points, will be permanently removed from our databases.</p>
+            
+            <p className="font-bold text-zinc-900">Third Parties & Ads:</p>
+            <p>We do not sell your data or share it with third parties. Our app uses Google AdMob for advertisements, which may collect device identifiers and usage data for ad personalization and analytics.</p>
           </div>
           <button
             onClick={onClose}
@@ -284,6 +289,51 @@ const PrivacyModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => voi
           >
             Got it
           </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+const DeleteAccountModal = ({ isOpen, onClose, onConfirm }: { isOpen: boolean, onClose: () => void, onConfirm: () => void }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
+      />
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.9, y: 20 }}
+        className="relative w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl overflow-hidden"
+      >
+        <div className="p-8">
+          <div className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center mb-6">
+            <AlertCircle size={24} className="text-rose-600" />
+          </div>
+          <h3 className="text-xl font-black text-zinc-900 mb-2">Delete Account?</h3>
+          <p className="text-sm text-zinc-500 mb-8">This action is permanent. All your points and history will be deleted forever.</p>
+          
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={onConfirm}
+              className="w-full bg-rose-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-rose-200 hover:bg-rose-700 transition-all active:scale-95"
+            >
+              Yes, Delete Everything
+            </button>
+            <button
+              onClick={onClose}
+              className="w-full bg-zinc-100 text-zinc-600 py-4 rounded-2xl font-bold hover:bg-zinc-200 transition-all active:scale-95"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       </motion.div>
     </div>
@@ -298,6 +348,7 @@ export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
   useEffect(() => {
     // Safety timeout: if auth takes too long, stop loading
@@ -533,6 +584,35 @@ export default function App() {
     } finally {
       setFirebaseUser(null);
       setUser(null);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!user) return;
+    
+    setIsAuthLoading(true);
+    try {
+      // 1. Delete Firestore data
+      await firebaseService.deleteUserProfile(user.uid);
+      
+      // 2. Delete Auth account (if not a local guest)
+      if (!user.uid.startsWith('local_guest_')) {
+        await firebaseService.deleteAccount();
+      }
+      
+      await Toast.show({ text: 'Account deleted successfully', duration: 'long' });
+    } catch (error: any) {
+      console.error("Delete account error:", error);
+      if (error.code === 'auth/requires-recent-login') {
+        alert("For security, please sign out and sign in again before deleting your account.");
+      } else {
+        alert("Failed to delete account. Please try again later.");
+      }
+    } finally {
+      setFirebaseUser(null);
+      setUser(null);
+      setIsAuthLoading(false);
+      setIsDeleteModalOpen(false);
     }
   };
 
@@ -784,6 +864,21 @@ export default function App() {
                     </div>
                     <ChevronRight size={18} className="text-rose-300 group-hover:text-rose-500 transition-colors" />
                   </button>
+                  <button 
+                    onClick={() => setIsDeleteModalOpen(true)}
+                    className="w-full flex items-center justify-between p-4 bg-zinc-50 rounded-2xl border border-zinc-100 hover:bg-rose-50 hover:border-rose-100 transition-colors group mt-3"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border border-zinc-200 shadow-sm group-hover:border-rose-200">
+                        <Trash2 size={18} className="text-zinc-400 group-hover:text-rose-600" />
+                      </div>
+                      <div className="text-left">
+                        <h4 className="text-sm font-bold text-zinc-500 group-hover:text-rose-900">Delete Account</h4>
+                        <p className="text-[10px] text-zinc-400 font-medium group-hover:text-rose-400">Permanently remove all data</p>
+                      </div>
+                    </div>
+                    <ChevronRight size={18} className="text-zinc-300 group-hover:text-rose-500 transition-colors" />
+                  </button>
                 </div>
               </div>
 
@@ -872,6 +967,14 @@ export default function App() {
         <PrivacyModal 
           isOpen={isPrivacyModalOpen} 
           onClose={() => setIsPrivacyModalOpen(false)} 
+        />
+      </AnimatePresence>
+
+      <AnimatePresence>
+        <DeleteAccountModal 
+          isOpen={isDeleteModalOpen} 
+          onClose={() => setIsDeleteModalOpen(false)} 
+          onConfirm={handleDeleteAccount}
         />
       </AnimatePresence>
 
