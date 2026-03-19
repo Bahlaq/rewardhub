@@ -7,14 +7,17 @@ import {
   orderBy,
   doc,
   getDoc,
-  setDoc
+  setDoc,
+  deleteDoc
 } from 'firebase/firestore';
 import { 
   getAuth, 
   GoogleAuthProvider, 
-  signInWithPopup, 
+  signInWithPopup,
   onAuthStateChanged,
   signOut,
+  signInAnonymously,
+  deleteUser,
   User as FirebaseUser
 } from 'firebase/auth';
 import { Offer, UserProfile } from '../types';
@@ -68,12 +71,43 @@ export const firebaseService = {
     }
   },
 
+  async signInAnonymously() {
+    if (!auth) throw new Error("Firebase Auth not initialized");
+    try {
+      const result = await signInAnonymously(auth);
+      return result.user;
+    } catch (error) {
+      console.error("Error signing in anonymously:", error);
+      throw error;
+    }
+  },
+
   async logout() {
     if (!auth) return;
     try {
       await signOut(auth);
     } catch (error) {
       console.error("Error signing out:", error);
+    }
+  },
+
+  async deleteAccount() {
+    if (!auth || !auth.currentUser) return;
+    try {
+      await deleteUser(auth.currentUser);
+    } catch (error) {
+      console.error("Error deleting auth account:", error);
+      throw error;
+    }
+  },
+
+  async deleteUserProfile(uid: string) {
+    if (!db) return;
+    try {
+      await deleteDoc(doc(db, 'users', uid));
+    } catch (error) {
+      console.error("Error deleting user profile:", error);
+      throw error;
     }
   },
 
