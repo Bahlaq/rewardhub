@@ -5,9 +5,9 @@ workflows:
     instance_type: mac_mini_m1
     environment:
       groups:
-        - admob_secrets # Create this group in Codemagic UI
-        - firebase_secrets # Create this group in Codemagic UI
-        - android_signing # Create this group in Codemagic UI
+        - admob_secrets 
+        - firebase_secrets 
+        - android_signing # هذا الجروب اللي فيه الـ Keystore والباسوردات
       node: 22
       java: 21
     scripts:
@@ -15,101 +15,60 @@ workflows:
         script: |
           brew install node@22
           brew link --overwrite node@22
-          node -v # To verify installation
+          node -v 
       - name: Install dependencies
         script: npm install --legacy-peer-deps
       - name: Build and Sync Capacitor
         script: |
-          # 🛠️ Ensure assets directory exists to prevent tool failure
           mkdir -p assets
-          
-          # 🏗️ Build Web Assets
           npm run build
           
-          # 🔍 Verify dist exists
           if [ ! -d "dist" ]; then
-            echo "❌ Error: dist directory was not created by npm run build"
+            echo "❌ Error: dist directory was not created"
             exit 1
           fi
           
-          echo "--- DIST FOLDER CONTENTS ---"
-          ls -R dist | head -n 20
-          
-          # 📱 Prepare Android Project
           rm -rf android
           npx cap add android
           
-          # 🎨 Generate Assets
-          mkdir -p assets
-          # Use high-quality placeholders that match the purple/gold theme
-          # We provide icon-only, icon-foreground, and icon-background for best Android support
-          if [ ! -f "assets/icon-only.png" ]; then
-            curl -L -o assets/icon-only.png "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=7c3aed&fontSize=50&fontWeight=900&radius=20"
-          fi
-          cp assets/icon-only.png assets/icon.png
-          if [ ! -f "assets/icon-foreground.png" ]; then
-            curl -L -o assets/icon-foreground.png "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=transparent&fontSize=50&fontWeight=900"
-          fi
-          if [ ! -f "assets/icon-background.png" ]; then
-            curl -L -o assets/icon-background.png "https://placehold.co/1024x1024/7c3aed/7c3aed/png"
-          fi
-          if [ ! -f "assets/splash.png" ]; then
-            curl -L -o assets/splash.png "https://api.dicebear.com/7.x/initials/png?seed=RewardHub&backgroundColor=7c3aed&fontSize=30&fontWeight=900"
-          fi
-          
-          # Generate icons and splash screens
+          # توليد الأيقونات
           npx @capacitor/assets generate --android --assetPath assets
           
-          # 🔢 Set Version Code and Name
+          # ضبط الإصدار (Version 1.0.0)
           if [ -f "android/app/build.gradle" ]; then
             sed -i '' 's/versionCode [0-9]*/versionCode 1/g' android/app/build.gradle
             sed -i '' 's/versionName "[0-9.]*"/versionName "1.0.0"/g' android/app/build.gradle
-            echo "✅ Set Version Code: 1, Version Name: 1.0.0"
           fi
           
-          # 🔄 Sync Capacitor
           npx cap sync android
           
-          # 🛠️ PATCH 1: Force Gradle 8.7 (Supports Java 21)
+          # ضبط Gradle ليتوافق مع Java 21
           if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
             printf "distributionBase=GRADLE_USER_HOME\ndistributionPath=wrapper/dists\ndistributionUrl=https\://services.gradle.org/distributions/gradle-8.7-all.zip\nzipStoreBase=GRADLE_USER_HOME\nzipStorePath=wrapper/dists\n" > android/gradle/wrapper/gradle-wrapper.properties
-            echo "Forced Gradle version to 8.7"
-            cat android/gradle/wrapper/gradle-wrapper.properties
           fi
-          
-          # 🛠️ PATCH 2: Force AGP 8.2.1 (Supports Java 21)
-          if [ -f "android/build.gradle" ]; then
-            sed -i '' 's/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:8.2.1/g' android/build.gradle
-            echo "Forced AGP version to 8.2.1"
-            grep "com.android.tools.build:gradle" android/build.gradle
-          fi
-          
-          echo "--- NATIVE ASSETS CONTENTS ---"
-          ls -R android/app/src/main/assets/public
-      - name: Build Android AAB and APK
+      
+      - name: Build Signed Android AAB
         script: |
-          # Isolate Gradle cache
-          export GRADLE_USER_HOME=$FCI_BUILD_DIR/.gradle
-          mkdir -p $GRADLE_USER_HOME
+          # 1️⃣ فك تشفير ملف الـ Keystore وحفظه في مسار مؤقت
+          echo $CM_KEYSTORE | base64 --decode > $FCI_BUILD_DIR/rewardhub-key.jks
           
+          # 2️⃣ بناء التطبيق وتوقيعه (Signed) باستخدام المتغيرات
           cd android
           chmod +x gradlew
-          
-          # Aggressive clean
-          ./gradlew clean --no-daemon
-          
-          # Build
-          ./gradlew assembleDebug --no-daemon --stacktrace
-          ./gradlew bundleRelease --no-daemon --stacktrace
+          ./gradlew bundleRelease \
+            -Pandroid.injected.signing.store.file=$FCI_BUILD_DIR/rewardhub-key.jks \
+            -Pandroid.injected.signing.store.password=$CM_KEYSTORE_PASSWORD \
+            -Pandroid.injected.signing.key.alias=$CM_KEY_ALIAS \
+            -Pandroid.injected.signing.key.password=$CM_KEY_PASSWORD \
+            --no-daemon --stacktrace
+
     artifacts:
       - android/app/build/outputs/bundle/release/*.aab
       - android/app/build/outputs/apk/debug/*.apk
-      - android/app/build/outputs/mapping/release/*.txt
     publishing:
       email:
         recipients:
-          - m.bahlaq@dv8dm.com # User email from context
+          - m.bahlaq@dv8dm.com
         notify:
           success: true
           failure: true
-      # You can also configure Google Play Store publishing here
