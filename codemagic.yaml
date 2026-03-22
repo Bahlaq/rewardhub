@@ -93,7 +93,7 @@ workflows:
                 } \
             }' android/app/build.gradle
             
-            sed -i '' '/release {/a \
+            sed -i '' '/proguardFiles/a \
                 signingConfig signingConfigs.release' android/app/build.gradle
           fi
       - name: Build Signed Android (APK & AAB)
