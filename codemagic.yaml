@@ -84,17 +84,17 @@ workflows:
           # 🛠️ PATCH: Add Signing Configs to build.gradle
           if [ -f "android/app/build.gradle" ]; then
             sed -i '' '/buildTypes {/i \
-    signingConfigs { \
-        release { \
-            storeFile file(System.getenv("CM_KEYSTORE_PATH") ?: "rewardhub-key.jks") \
-            storePassword System.getenv("CM_KEYSTORE_PASSWORD") ?: "123456" \
-            keyAlias System.getenv("CM_KEY_ALIAS") ?: "rewardhub" \
-            keyPassword System.getenv("CM_KEY_PASSWORD") ?: "123456" \
-        } \
-    }' android/app/build.gradle
+            signingConfigs { \
+                release { \
+                    storeFile file(System.getenv("CM_KEYSTORE_PATH") ?: "rewardhub-key.jks") \
+                    storePassword System.getenv("CM_KEYSTORE_PASSWORD") ?: "123456" \
+                    keyAlias System.getenv("CM_KEY_ALIAS") ?: "rewardhub" \
+                    keyPassword System.getenv("CM_KEY_PASSWORD") ?: "123456" \
+                } \
+            }' android/app/build.gradle
             
             sed -i '' '/release {/a \
-            signingConfig signingConfigs.release' android/app/build.gradle
+                signingConfig signingConfigs.release' android/app/build.gradle
           fi
       - name: Build Signed Android (APK & AAB)
         script: |
