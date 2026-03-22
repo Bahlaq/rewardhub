@@ -56,12 +56,45 @@ workflows:
           # 🔄 Sync Capacitor
           npx cap sync android
           
+          # 🔢 Set Version Code and Name
+          if [ -f "android/app/build.gradle" ]; then
+            sed -i '' 's/versionCode [0-9]*/versionCode 2/g' android/app/build.gradle
+            sed -i '' 's/versionName "[0-9.]*"/versionName "2.0.0"/g' android/app/build.gradle
+          fi
+          
           # 🛠️ PATCH: Force Gradle 8.7 and AGP 8.2.1 for Java 21 compatibility
           if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
             printf "distributionBase=GRADLE_USER_HOME\ndistributionPath=wrapper/dists\ndistributionUrl=https\://services.gradle.org/distributions/gradle-8.7-all.zip\nzipStoreBase=GRADLE_USER_HOME\nzipStorePath=wrapper/dists\n" > android/gradle/wrapper/gradle-wrapper.properties
           fi
           if [ -f "android/build.gradle" ]; then
             sed -i '' 's/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:8.2.1/g' android/build.gradle
+          fi
+          
+          # 🛠️ PATCH: Set SDK 35
+          if [ -f "android/variables.gradle" ]; then
+            sed -i '' 's/compileSdkVersion = [0-9]*/compileSdkVersion = 35/g' android/variables.gradle
+            sed -i '' 's/targetSdkVersion = [0-9]*/targetSdkVersion = 35/g' android/variables.gradle
+          fi
+          
+          # 🛠️ PATCH: Add AD_ID permission
+          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
+            sed -i '' 's/<application/<uses-permission android:name="com.google.android.gms.permission.AD_ID"\/>\n    <application/g' android/app/src/main/AndroidManifest.xml
+          fi
+          
+          # 🛠️ PATCH: Add Signing Configs to build.gradle
+          if [ -f "android/app/build.gradle" ]; then
+            sed -i '' '/buildTypes {/i \
+    signingConfigs { \
+        release { \
+            storeFile file(System.getenv("CM_KEYSTORE_PATH") ?: "rewardhub-key.jks") \
+            storePassword System.getenv("CM_KEYSTORE_PASSWORD") ?: "123456" \
+            keyAlias System.getenv("CM_KEY_ALIAS") ?: "rewardhub" \
+            keyPassword System.getenv("CM_KEY_PASSWORD") ?: "123456" \
+        } \
+    }' android/app/build.gradle
+            
+            sed -i '' '/release {/a \
+            signingConfig signingConfigs.release' android/app/build.gradle
           fi
       - name: Build Signed Android (APK & AAB)
         script: |
