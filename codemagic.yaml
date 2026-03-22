@@ -15,7 +15,7 @@ workflows:
         script: |
           brew install node@22
           brew link --overwrite node@22
-          node -v
+          node -v # To verify installation
       - name: Install dependencies
         script: npm install --legacy-peer-deps
       - name: Build and Sync Capacitor
@@ -84,7 +84,8 @@ workflows:
     publishing:
       email:
         recipients:
-          - m.bahlaq@dv8dm.com
+          - m.bahlaq@dv8dm.com # User email from context
         notify:
           success: true
           failure: true
+      # You can also configure Google Play Store publishing here
