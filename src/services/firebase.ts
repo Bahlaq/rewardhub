@@ -143,20 +143,98 @@ export const firebaseService = {
   },
 
   async getOffers(): Promise<Offer[]> {
+    const defaultOffers: Offer[] = [
+      {
+        id: 'hm-brand-offer',
+        title: 'H&M - UAE & KSA',
+        description: 'Get 30%-70% discount on your purchase. Valid in AE, BH, JR, KW, QA, SA.',
+        reward: 'https://go.urtrackinglink.com/aff_c?offer_id=1945&aff_id=165522',
+        rewardType: 'link',
+        type: 'discount',
+        pointsRequired: 500,
+        dailyLimit: 1000,
+        imageUrl: 'https://logo.clearbit.com/hm.com',
+        expiryDate: '2026-12-31',
+        category: 'Fashion'
+      },
+      {
+        id: 'adidas-uae',
+        title: 'Adidas - UAE',
+        description: 'Get 25% to 50% discount on your purchase. Valid in UAE.',
+        reward: 'http://go.urtrackinglink.com/aff_c?offer_id=1943&aff_id=165522',
+        rewardType: 'link',
+        type: 'discount',
+        pointsRequired: 500,
+        dailyLimit: 1000,
+        imageUrl: 'https://logo.clearbit.com/adidas.com',
+        expiryDate: '2026-12-31',
+        category: 'Fashion'
+      },
+      {
+        id: 'nike-ksa-uae',
+        title: 'Nike - KSA & UAE',
+        description: 'Get 25% to 50% discount on your purchase. Valid in KSA & UAE.',
+        reward: 'https://go.urtrackinglink.com/aff_c?offer_id=1924&aff_id=165522',
+        rewardType: 'link',
+        type: 'discount',
+        pointsRequired: 500,
+        dailyLimit: 1000,
+        imageUrl: 'https://logo.clearbit.com/nike.com',
+        expiryDate: '2026-12-31',
+        category: 'Fashion'
+      },
+      {
+        id: 'virgin-uae',
+        title: 'Virgin Megastore - UAE',
+        description: 'Enjoy different discounts on your purchase. Valid in UAE.',
+        reward: 'https://go.urtrackinglink.com/aff_c?offer_id=1939&aff_id=165522',
+        rewardType: 'link',
+        type: 'discount',
+        pointsRequired: 500,
+        dailyLimit: 1000,
+        imageUrl: 'https://logo.clearbit.com/virginmegastore.ae',
+        expiryDate: '2026-12-31',
+        category: 'Shopping'
+      },
+      {
+        id: 'noon-uae-ksa',
+        title: 'Noon - UAE & KSA',
+        description: 'Enjoy different discounts on your purchase. Valid in UAE & KSA.',
+        reward: 'http://go.urtrackinglink.com/aff_c?offer_id=1886&aff_id=165522',
+        rewardType: 'link',
+        type: 'discount',
+        pointsRequired: 500,
+        dailyLimit: 1000,
+        imageUrl: 'https://logo.clearbit.com/noon.com',
+        expiryDate: '2026-12-31',
+        category: 'Delivery apps'
+      }
+    ];
+
     if (!db || !isConfigValid) {
-      console.warn("Firebase not initialized or config invalid. Returning empty offers.");
-      return [];
+      console.warn("Firebase not initialized or config invalid. Returning default offers.");
+      return defaultOffers;
     }
     try {
       const q = query(collection(db, 'offers'), orderBy('pointsRequired', 'asc'));
       const querySnapshot = await getDocs(q);
-      return querySnapshot.docs.map(doc => ({
+      const firestoreOffers = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       } as Offer));
+      
+      // Merge default offers with firestore offers, avoiding duplicates by ID
+      const mergedOffers = [...defaultOffers];
+      firestoreOffers.forEach(fo => {
+        if (!mergedOffers.some(mo => mo.id === fo.id)) {
+          mergedOffers.push(fo);
+        }
+      });
+      
+      return mergedOffers;
     } catch (error) {
       console.error("Error fetching offers:", error);
-      return [];
+      return defaultOffers;
     }
   }
 };
