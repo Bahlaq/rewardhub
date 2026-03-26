@@ -9,6 +9,7 @@ export interface Offer {
   dailyLimit: number;
   imageUrl: string;
   expiryDate: string;
+  category: 'Fashion' | 'Delivery apps' | 'TV\'s' | 'Travel' | 'Food' | 'Shopping' | 'General';
 }
 
 export interface Transaction {
