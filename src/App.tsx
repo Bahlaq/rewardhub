@@ -12,6 +12,7 @@ import {
   AlertCircle,
   X,
   ChevronRight,
+  ChevronDown,
   Zap,
   Search,
   History,
@@ -129,12 +130,15 @@ const OfferCard = ({ offer, onClaim, user, currentCost, isClaimedToday }: OfferC
           Claimed
         </div>
       )}
-      <div className="relative h-40">
+      <div className="relative h-40 flex items-center justify-center bg-zinc-50">
         <img 
           src={offer.imageUrl} 
           alt={offer.title} 
-          className="w-full h-full object-cover"
+          className="w-full h-full object-contain p-4"
           referrerPolicy="no-referrer"
+          onError={(e) => {
+            (e.target as HTMLImageElement).src = 'https://cdn-icons-png.flaticon.com/512/1162/1162456.png';
+          }}
         />
         <div className="absolute top-3 right-3 bg-white/90 backdrop-blur px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide text-zinc-700 border border-white/20 shadow-sm">
           {offer.type}
@@ -159,11 +163,11 @@ const OfferCard = ({ offer, onClaim, user, currentCost, isClaimedToday }: OfferC
                 "text-sm font-bold",
                 currentCost > offer.pointsRequired ? "text-amber-600" : "text-zinc-900"
               )}>
-                {currentCost} pts
+                {currentCost === 0 ? 'FREE' : `${currentCost.toLocaleString()} pts`}
               </span>
               {currentCost > offer.pointsRequired && (
                 <span className="text-[10px] text-zinc-400 line-through decoration-zinc-300">
-                  {offer.pointsRequired}
+                  {offer.pointsRequired.toLocaleString()}
                 </span>
               )}
             </div>
@@ -178,8 +182,8 @@ const OfferCard = ({ offer, onClaim, user, currentCost, isClaimedToday }: OfferC
                 : "bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95"
             )}
           >
-            {isLocked ? <Clock size={14} /> : <Gift size={14} />}
-            {isLocked ? 'Locked' : 'Claim'}
+            {isLocked ? <Clock size={14} /> : (offer.rewardType === 'link' ? <ExternalLink size={14} /> : <Gift size={14} />)}
+            {isLocked ? 'Locked' : (currentCost === 0 ? 'Get Offer' : 'Claim')}
           </button>
         </div>
       </div>
@@ -414,6 +418,9 @@ export default function App() {
   }, []);
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  
+  const categories = ['All', 'Fashion', 'Delivery apps', "TV's", 'Shopping', 'Travel', 'Food'];
   
   // Progressive Ad State
   const [adWatchesForCurrentBoost, setAdWatchesForCurrentBoost] = useState(0);
@@ -443,12 +450,16 @@ export default function App() {
 
   // Filtered Offers
   const filteredOffers = useMemo(() => {
-    return offers.filter(offer => 
-      offer.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      offer.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      offer.type.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [offers, searchQuery]);
+    return offers.filter(offer => {
+      const matchesSearch = offer.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        offer.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        offer.type.toLowerCase().includes(searchQuery.toLowerCase());
+      
+      const matchesCategory = selectedCategory === 'All' || offer.category === selectedCategory;
+      
+      return matchesSearch && matchesCategory;
+    });
+  }, [offers, searchQuery, selectedCategory]);
 
   // Simulate App Open Ad
   useEffect(() => {
@@ -536,7 +547,11 @@ export default function App() {
     addLog('banner', 'reward', `Claimed ${offer.title} for ${currentCost} pts. Next claim will cost ${currentCost * 2} pts.`);
     
     if (offer.rewardType === 'link') {
-      alert(`Success! Click "Open Link" in your Profile history to activate your reward.`);
+      if (currentCost === 0) {
+        Browser.open({ url: offer.reward });
+      } else {
+        alert(`Success! Click "Open Link" in your Profile history to activate your reward.`);
+      }
     } else {
       alert(`Success! Your code for ${offer.title} is: ${offer.reward}. You can find it in your Profile history.`);
     }
@@ -666,15 +681,38 @@ export default function App() {
               className="space-y-6"
             >
               {/* Search Bar */}
-              <div className="relative group">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 group-focus-within:text-indigo-600 transition-colors" size={18} />
-                <input 
-                  type="text"
-                  placeholder="Search coupons, brands, or types..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-white border border-zinc-200 rounded-2xl py-3.5 pl-12 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm"
-                />
+              <div className="space-y-4">
+                <div className="relative group">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 group-focus-within:text-indigo-600 transition-colors" size={18} />
+                  <input 
+                    type="text"
+                    placeholder="Search coupons, brands, or types..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-white border border-zinc-200 rounded-2xl py-3.5 pl-12 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm"
+                  />
+                </div>
+
+                {/* Categories Dropdown */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest ml-1">Categories</label>
+                  <div className="relative">
+                    <select
+                      value={selectedCategory}
+                      onChange={(e) => setSelectedCategory(e.target.value)}
+                      className="w-full bg-white border border-zinc-200 rounded-2xl py-3.5 pl-4 pr-10 text-sm font-bold text-zinc-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm appearance-none cursor-pointer"
+                    >
+                      {categories.map((cat) => (
+                        <option key={cat} value={cat}>
+                          {cat}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-400">
+                      <ChevronDown size={18} />
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Daily Task Card */}
@@ -922,15 +960,19 @@ export default function App() {
                         </span>
                         {tx.code && (
                           tx.rewardType === 'link' ? (
-                            <a 
-                              href={tx.code}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <button 
+                              onClick={async () => {
+                                try {
+                                  await Browser.open({ url: tx.code! });
+                                } catch (error) {
+                                  window.open(tx.code!, '_blank');
+                                }
+                              }}
                               className="flex items-center gap-1 text-[10px] font-bold bg-indigo-600 px-2 py-0.5 rounded text-white border border-indigo-700 hover:bg-indigo-700 transition-colors"
                             >
                               Open Link
                               <ExternalLink size={10} />
-                            </a>
+                            </button>
                           ) : (
                             <button 
                               onClick={async () => {
