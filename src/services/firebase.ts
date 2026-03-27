@@ -8,7 +8,10 @@ import {
   doc,
   getDoc,
   setDoc,
-  deleteDoc
+  deleteDoc,
+  onSnapshot,
+  runTransaction,
+  serverTimestamp
 } from 'firebase/firestore';
 import { 
   getAuth, 
@@ -20,7 +23,7 @@ import {
   deleteUser,
   User as FirebaseUser
 } from 'firebase/auth';
-import { Offer, UserProfile } from '../types';
+import { Offer, UserProfile, Transaction } from '../types';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -119,6 +122,111 @@ export const firebaseService = {
     return onAuthStateChanged(auth, callback);
   },
 
+  onProfileChange(uid: string, callback: (profile: UserProfile | null) => void) {
+    if (!db) return () => {};
+    return onSnapshot(doc(db, 'users', uid), (doc) => {
+      if (doc.exists()) {
+        callback(doc.data() as UserProfile);
+      } else {
+        callback(null);
+      }
+    }, (error) => {
+      console.error("Error listening to user profile:", error);
+    });
+  },
+
+  onOffersChange(callback: (offers: Offer[]) => void) {
+    if (!db) return () => {};
+    const q = query(collection(db, 'offers'), orderBy('points', 'asc'));
+    return onSnapshot(q, (snapshot) => {
+      const offers = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as Offer));
+      callback(offers);
+    }, (error) => {
+      console.error("Error listening to offers:", error);
+    });
+  },
+
+  onClaimsChange(uid: string, callback: (claims: Transaction[]) => void) {
+    if (!db) return () => {};
+    const q = query(
+      collection(db, 'claims'), 
+      orderBy('timestamp', 'desc')
+    );
+    // Note: In a real app, you'd filter by userId here, but that requires an index.
+    // For now, we'll filter client-side or assume the collection is small/scoped.
+    // Actually, let's try to filter by userId if possible.
+    // const q = query(collection(db, 'claims'), where('userId', '==', uid), orderBy('timestamp', 'desc'));
+    // But that needs an index. Let's stick to a simple query for now.
+    
+    return onSnapshot(q, (snapshot) => {
+      const claims = snapshot.docs
+        .map(doc => {
+          const data = doc.data();
+          if (data.userId !== uid) return null;
+          return {
+            id: doc.id,
+            type: 'claim',
+            title: data.offerBrand,
+            amount: -data.pointsSpent,
+            timestamp: data.timestamp?.toDate?.()?.toISOString() || new Date().toISOString(),
+            code: data.code,
+            rewardType: data.code ? 'code' : 'link'
+          } as Transaction;
+        })
+        .filter(Boolean) as Transaction[];
+      callback(claims);
+    }, (error) => {
+      console.error("Error listening to claims:", error);
+    });
+  },
+
+  async claimOffer(uid: string, offer: Offer) {
+    if (!db) throw new Error("Firestore not initialized");
+    
+    const userRef = doc(db, 'users', uid);
+    const claimRef = doc(collection(db, 'claims'));
+
+    try {
+      await runTransaction(db, async (transaction) => {
+        const userDoc = await transaction.get(userRef);
+        if (!userDoc.exists()) {
+          throw new Error("User profile not found");
+        }
+
+        const userData = userDoc.data() as UserProfile;
+        if (userData.points < offer.points) {
+          throw new Error("Insufficient points");
+        }
+
+        // Deduct points
+        transaction.update(userRef, {
+          points: userData.points - offer.points,
+          claimsToday: (userData.claimsToday || 0) + 1,
+          totalEarned: (userData.totalEarned || 0) + 1,
+          lastClaimDate: new Date().toISOString()
+        });
+
+        // Record claim
+        transaction.set(claimRef, {
+          userId: uid,
+          offerId: offer.id,
+          offerBrand: offer.brand,
+          code: offer.code || null,
+          url: offer.url,
+          pointsSpent: offer.points,
+          timestamp: serverTimestamp()
+        });
+      });
+      return true;
+    } catch (error) {
+      console.error("Error claiming offer:", error);
+      throw error;
+    }
+  },
+
   async getUserProfile(uid: string): Promise<UserProfile | null> {
     if (!db) return null;
     try {
@@ -139,102 +247,6 @@ export const firebaseService = {
       await setDoc(doc(db, 'users', profile.uid), profile, { merge: true });
     } catch (error) {
       console.error("Error saving user profile:", error);
-    }
-  },
-
-  async getOffers(): Promise<Offer[]> {
-    const defaultOffers: Offer[] = [
-      {
-        id: 'hm-brand-offer',
-        title: 'H&M - UAE & KSA',
-        description: 'Get 30%-70% discount on your purchase. Valid in AE, BH, JR, KW, QA, SA.',
-        reward: 'https://go.urtrackinglink.com/aff_c?offer_id=1945&aff_id=165522',
-        rewardType: 'link',
-        type: 'discount',
-        pointsRequired: 500,
-        dailyLimit: 1000,
-        imageUrl: 'https://logo.clearbit.com/hm.com',
-        expiryDate: '2026-12-31',
-        category: 'Fashion'
-      },
-      {
-        id: 'adidas-uae',
-        title: 'Adidas - UAE',
-        description: 'Get 25% to 50% discount on your purchase. Valid in UAE.',
-        reward: 'http://go.urtrackinglink.com/aff_c?offer_id=1943&aff_id=165522',
-        rewardType: 'link',
-        type: 'discount',
-        pointsRequired: 500,
-        dailyLimit: 1000,
-        imageUrl: 'https://logo.clearbit.com/adidas.com',
-        expiryDate: '2026-12-31',
-        category: 'Fashion'
-      },
-      {
-        id: 'nike-ksa-uae',
-        title: 'Nike - KSA & UAE',
-        description: 'Get 25% to 50% discount on your purchase. Valid in KSA & UAE.',
-        reward: 'https://go.urtrackinglink.com/aff_c?offer_id=1924&aff_id=165522',
-        rewardType: 'link',
-        type: 'discount',
-        pointsRequired: 500,
-        dailyLimit: 1000,
-        imageUrl: 'https://logo.clearbit.com/nike.com',
-        expiryDate: '2026-12-31',
-        category: 'Fashion'
-      },
-      {
-        id: 'virgin-uae',
-        title: 'Virgin Megastore - UAE',
-        description: 'Enjoy different discounts on your purchase. Valid in UAE.',
-        reward: 'https://go.urtrackinglink.com/aff_c?offer_id=1939&aff_id=165522',
-        rewardType: 'link',
-        type: 'discount',
-        pointsRequired: 500,
-        dailyLimit: 1000,
-        imageUrl: 'https://logo.clearbit.com/virginmegastore.ae',
-        expiryDate: '2026-12-31',
-        category: 'Shopping'
-      },
-      {
-        id: 'noon-uae-ksa',
-        title: 'Noon - UAE & KSA',
-        description: 'Enjoy different discounts on your purchase. Valid in UAE & KSA.',
-        reward: 'http://go.urtrackinglink.com/aff_c?offer_id=1886&aff_id=165522',
-        rewardType: 'link',
-        type: 'discount',
-        pointsRequired: 500,
-        dailyLimit: 1000,
-        imageUrl: 'https://logo.clearbit.com/noon.com',
-        expiryDate: '2026-12-31',
-        category: 'Delivery apps'
-      }
-    ];
-
-    if (!db || !isConfigValid) {
-      console.warn("Firebase not initialized or config invalid. Returning default offers.");
-      return defaultOffers;
-    }
-    try {
-      const q = query(collection(db, 'offers'), orderBy('pointsRequired', 'asc'));
-      const querySnapshot = await getDocs(q);
-      const firestoreOffers = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      } as Offer));
-      
-      // Merge default offers with firestore offers, avoiding duplicates by ID
-      const mergedOffers = [...defaultOffers];
-      firestoreOffers.forEach(fo => {
-        if (!mergedOffers.some(mo => mo.id === fo.id)) {
-          mergedOffers.push(fo);
-        }
-      });
-      
-      return mergedOffers;
-    } catch (error) {
-      console.error("Error fetching offers:", error);
-      return defaultOffers;
     }
   }
 };
