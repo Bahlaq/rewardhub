@@ -554,11 +554,21 @@ export default function App() {
   // Filtered Offers
   const filteredOffers = useMemo(() => {
     return offers.filter(offer => {
-      const matchesSearch = offer.brand.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        offer.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        offer.type.toLowerCase().includes(searchQuery.toLowerCase());
+      const searchLower = searchQuery.toLowerCase();
+      const matchesSearch = 
+        offer.brand.toLowerCase().includes(searchLower) ||
+        offer.description.toLowerCase().includes(searchLower) ||
+        offer.type.toLowerCase().includes(searchLower);
       
-      const matchesCategory = selectedCategory === 'All' || (Array.isArray(offer.category) && offer.category.includes(selectedCategory as any));
+      // Flexible category filtering: case-insensitive and supports 'all'
+      const selectedLower = selectedCategory.toLowerCase();
+      const offerCategories = Array.isArray(offer.category) 
+        ? offer.category.map(cat => String(cat).toLowerCase())
+        : [String(offer.category || '').toLowerCase()];
+
+      const matchesCategory = selectedLower === 'all' || 
+        offerCategories.includes(selectedLower) || 
+        offerCategories.includes('all');
       
       return matchesSearch && matchesCategory;
     });
@@ -892,7 +902,7 @@ export default function App() {
                 {isLoading ? (
                   <div className="flex flex-col items-center justify-center py-12 space-y-4">
                     <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-                    <p className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Loading Rewards...</p>
+                    <p className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Refreshing deals...</p>
                   </div>
                 ) : filteredOffers.length > 0 ? (
                   filteredOffers.map((offer) => {
@@ -967,6 +977,9 @@ export default function App() {
                   </div>
                 </div>
               )}
+              
+              {/* Extra space at the bottom of the list to prevent overlap with Banner Ad and Navbar */}
+              <div className="h-40" />
             </motion.div>
           )}
 
@@ -1115,6 +1128,9 @@ export default function App() {
                     </div>
                   ))
                 )}
+                
+                {/* Extra space at the bottom of the list to prevent overlap with Banner Ad and Navbar */}
+                <div className="h-40" />
               </div>
             </motion.div>
           )}
