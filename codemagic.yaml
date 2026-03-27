@@ -35,19 +35,32 @@ workflows:
           
           # 🎨 Generate Assets (Ensure assets directory exists)
           mkdir -p assets
-          # Use high-quality placeholders if they don't exist
-          if [ ! -f "assets/icon-only.png" ]; then
-            curl -L -o assets/icon-only.png "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=7c3aed&fontSize=50&fontWeight=900&radius=20"
-          fi
-          cp assets/icon-only.png assets/icon.png
-          if [ ! -f "assets/icon-foreground.png" ]; then
-            curl -L -o assets/icon-foreground.png "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=transparent&fontSize=50&fontWeight=900"
-          fi
-          if [ ! -f "assets/icon-background.png" ]; then
-            curl -L -o assets/icon-background.png "https://placehold.co/1024x1024/7c3aed/7c3aed/png"
-          fi
-          if [ ! -f "assets/splash.png" ]; then
-            curl -L -o assets/splash.png "https://api.dicebear.com/7.x/initials/png?seed=RewardHub&backgroundColor=7c3aed&fontSize=30&fontWeight=900"
+          
+          # Use user-provided icon.png if it exists
+          if [ -f "assets/icon.png" ]; then
+            echo "✅ Using user-provided icon.png"
+            cp assets/icon.png assets/icon-only.png
+            cp assets/icon.png assets/icon-foreground.png
+            cp assets/icon.png assets/splash.png
+            # Create a simple background if it doesn't exist
+            if [ ! -f "assets/icon-background.png" ]; then
+              curl -L -o assets/icon-background.png "https://placehold.co/1024x1024/7c3aed/7c3aed/png"
+            fi
+          else
+            # Use high-quality placeholders if they don't exist
+            if [ ! -f "assets/icon-only.png" ]; then
+              curl -L -o assets/icon-only.png "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=7c3aed&fontSize=50&fontWeight=900&radius=20"
+            fi
+            cp assets/icon-only.png assets/icon.png
+            if [ ! -f "assets/icon-foreground.png" ]; then
+              curl -L -o assets/icon-foreground.png "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=transparent&fontSize=50&fontWeight=900"
+            fi
+            if [ ! -f "assets/icon-background.png" ]; then
+              curl -L -o assets/icon-background.png "https://placehold.co/1024x1024/7c3aed/7c3aed/png"
+            fi
+            if [ ! -f "assets/splash.png" ]; then
+              curl -L -o assets/splash.png "https://api.dicebear.com/7.x/initials/png?seed=RewardHub&backgroundColor=7c3aed&fontSize=30&fontWeight=900"
+            fi
           fi
           
           # Generate icons and splash screens
