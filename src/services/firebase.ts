@@ -35,7 +35,7 @@ const firebaseConfig = {
 };
 
 // Check if config is valid
-const isConfigValid = !!firebaseConfig.apiKey && !!firebaseConfig.projectId;
+export const isConfigValid = !!firebaseConfig.apiKey && !!firebaseConfig.projectId;
 
 // Initialize Firebase
 let app;
@@ -174,11 +174,6 @@ export const firebaseService = {
       collection(db, 'claims'), 
       orderBy('timestamp', 'desc')
     );
-    // Note: In a real app, you'd filter by userId here, but that requires an index.
-    // For now, we'll filter client-side or assume the collection is small/scoped.
-    // Actually, let's try to filter by userId if possible.
-    // const q = query(collection(db, 'claims'), where('userId', '==', uid), orderBy('timestamp', 'desc'));
-    // But that needs an index. Let's stick to a simple query for now.
     
     return onSnapshot(q, (snapshot) => {
       const claims = snapshot.docs
