@@ -131,7 +131,10 @@ export const firebaseService = {
   },
 
   onProfileChange(uid: string, callback: (profile: UserProfile | null) => void) {
-    if (!db) return () => {};
+    if (!db) {
+      callback(null);
+      return () => {};
+    }
     return onSnapshot(doc(db, 'users', uid), (doc) => {
       if (doc.exists()) {
         callback(doc.data() as UserProfile);
@@ -140,11 +143,15 @@ export const firebaseService = {
       }
     }, (error) => {
       console.error("Error listening to user profile:", error);
+      callback(null);
     });
   },
 
   onOffersChange(callback: (offers: Offer[]) => void) {
-    if (!db) return () => {};
+    if (!db) {
+      callback([]);
+      return () => {};
+    }
     const q = query(collection(db, 'offers'), orderBy('points', 'asc'));
     return onSnapshot(q, (snapshot) => {
       const offers = snapshot.docs.map(doc => ({
@@ -154,11 +161,15 @@ export const firebaseService = {
       callback(offers);
     }, (error) => {
       console.error("Error listening to offers:", error);
+      callback([]); // Call with empty array on error to prevent stuck loading
     });
   },
 
   onClaimsChange(uid: string, callback: (claims: Transaction[]) => void) {
-    if (!db) return () => {};
+    if (!db) {
+      callback([]);
+      return () => {};
+    }
     const q = query(
       collection(db, 'claims'), 
       orderBy('timestamp', 'desc')
@@ -188,6 +199,7 @@ export const firebaseService = {
       callback(claims);
     }, (error) => {
       console.error("Error listening to claims:", error);
+      callback([]);
     });
   },
 
