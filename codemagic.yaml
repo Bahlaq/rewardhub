@@ -83,8 +83,8 @@ workflows:
           
           # 🔢 Set Version Code and Name
           if [ -f "android/app/build.gradle" ]; then
-            sed -i '' 's/versionCode [0-9]*/versionCode 5/g' android/app/build.gradle
-            sed -i '' 's/versionName "[0-9.]*"/versionName "5.0.0"/g' android/app/build.gradle
+            sed -i '' 's/versionCode [0-9]*/versionCode 6/g' android/app/build.gradle
+            sed -i '' 's/versionName "[0-9.]*"/versionName "6.0.0"/g' android/app/build.gradle
           fi
           
           # 🛠️ PATCH: Force Gradle 8.7 and AGP 8.2.1 for Java 21 compatibility
