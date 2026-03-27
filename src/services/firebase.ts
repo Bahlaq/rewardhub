@@ -59,6 +59,14 @@ const db = app ? initializeFirestore(app, {
 const auth = app ? getAuth(app) : null;
 const googleProvider = new GoogleAuthProvider();
 
+// If a Web Client ID is provided, set it. This is often required for 
+// Google Sign-In to work correctly on Android/iOS in hybrid apps.
+if (import.meta.env.VITE_FIREBASE_WEB_CLIENT_ID) {
+  googleProvider.setCustomParameters({
+    client_id: import.meta.env.VITE_FIREBASE_WEB_CLIENT_ID
+  });
+}
+
 export { auth, googleProvider };
 export type { FirebaseUser };
 
