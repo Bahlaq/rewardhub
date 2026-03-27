@@ -4,7 +4,6 @@ import {
   Gift, 
   User, 
   LayoutDashboard, 
-  Terminal, 
   PlayCircle, 
   TrendingUp, 
   Clock, 
@@ -26,9 +25,10 @@ import { Toast } from '@capacitor/toast';
 import { Browser } from '@capacitor/browser';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { Offer, UserProfile, AdLog, ClaimRecord, Transaction } from './types';
+import { Offer, UserProfile, Transaction } from './types';
 import { useAds } from './hooks/useAds';
-import { firebaseService, FirebaseUser } from './services/firebase';
+import { firebaseService, FirebaseUser, isConfigValid } from './services/firebase';
+import { APP_NAME, APP_VERSION } from './constants';
 
 import icon from '../assets/icon.png';
 
@@ -39,11 +39,11 @@ function cn(...inputs: ClassValue[]) {
 // --- Components ---
 
 const Logo = () => (
-  <div className="relative w-16 h-16 group cursor-pointer mx-auto">
+  <div className="relative w-10 h-10 group cursor-pointer">
     <img 
       src={icon} 
-      alt="RewardHub Logo" 
-      className="w-full h-full object-contain rounded-[22%] shadow-[0_10px_25px_rgba(124,58,237,0.4)] transition-transform group-hover:scale-105"
+      alt={`${APP_NAME} Logo`} 
+      className="w-full h-full object-contain rounded-xl shadow-md transition-transform group-hover:scale-105"
       referrerPolicy="no-referrer"
     />
   </div>
@@ -88,7 +88,7 @@ const Header = ({ user }: { user: UserProfile }) => (
       <div className="flex items-center gap-3">
         <Logo />
         <div>
-          <h1 className="text-lg font-black tracking-tight text-zinc-900 leading-none">RewardHub</h1>
+          <h1 className="text-lg font-black tracking-tight text-zinc-900 leading-none">{APP_NAME}</h1>
           <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mt-1">Earn while you play</p>
         </div>
       </div>
@@ -385,6 +385,62 @@ const DeleteAccountModal = ({ isOpen, onClose, onConfirm }: { isOpen: boolean, o
   );
 };
 
+const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, confirmText, cancelText }: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  onConfirm: () => void, 
+  title: string, 
+  message: string,
+  confirmText?: string,
+  cancelText?: string
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
+      />
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.9, y: 20 }}
+        className="relative w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl overflow-hidden"
+      >
+        <div className="p-8">
+          <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center mb-6">
+            <AlertCircle size={24} className="text-indigo-600" />
+          </div>
+          <h3 className="text-xl font-black text-zinc-900 mb-2">{title}</h3>
+          <p className="text-sm text-zinc-500 mb-8">{message}</p>
+          
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={() => {
+                onConfirm();
+                onClose();
+              }}
+              className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all active:scale-95"
+            >
+              {confirmText || 'Confirm'}
+            </button>
+            <button
+              onClick={onClose}
+              className="w-full bg-zinc-100 text-zinc-600 py-4 rounded-2xl font-bold hover:bg-zinc-200 transition-all active:scale-95"
+            >
+              {cancelText || 'Cancel'}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 // --- Main App ---
 
 export default function App() {
@@ -394,6 +450,8 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [confirmConfig, setConfirmConfig] = useState({ title: '', message: '', onConfirm: () => {} });
 
   useEffect(() => {
     const unsubscribeAuth = firebaseService.onAuthChange(async (fUser) => {
@@ -420,7 +478,7 @@ export default function App() {
 
         // Listen to claims/transactions in real-time
         const unsubscribeClaims = firebaseService.onClaimsChange(fUser.uid, (claims) => {
-          setTransactions(claims);
+          setFirestoreClaims(claims);
         });
 
         return () => {
@@ -443,7 +501,26 @@ export default function App() {
   const [adWatchesForCurrentBoost, setAdWatchesForCurrentBoost] = useState(0);
   const [boostsClaimedToday, setBoostsClaimedToday] = useState(0);
   const [isAdOpen, setIsAdOpen] = useState(false);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  
+  const [localTransactions, setLocalTransactions] = useState<Transaction[]>(() => {
+    const saved = localStorage.getItem('local_transactions');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [firestoreClaims, setFirestoreClaims] = useState<Transaction[]>([]);
+
+  const transactions = useMemo(() => {
+    const all = [...localTransactions, ...firestoreClaims];
+    // Remove duplicates by ID
+    const unique = Array.from(new Map(all.map(tx => [tx.id, tx])).values());
+    return unique.sort((a, b) => 
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+  }, [localTransactions, firestoreClaims]);
+
+  useEffect(() => {
+    localStorage.setItem('local_transactions', JSON.stringify(localTransactions.slice(0, 50)));
+  }, [localTransactions]);
+
   const [offers, setOffers] = useState<Offer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { logs, addLog } = useAds();
@@ -515,21 +592,21 @@ export default function App() {
         setAdWatchesForCurrentBoost(0);
         
         const newTransaction: Transaction = {
-          id: Math.random().toString(36).substr(2, 9),
+          id: 'earn_' + Math.random().toString(36).substr(2, 9),
           type: 'earn',
           title: 'Daily Boost Reward',
           amount: 100,
           timestamp: new Date().toISOString(),
         };
-        setTransactions(prev => [newTransaction, ...prev]);
+        setLocalTransactions(prev => [newTransaction, ...prev]);
         
         addLog('rewarded', 'reward', `User earned 100 points (Boost #${boostsClaimedToday + 1})`);
-        alert("Congratulations! You've earned 100 points!");
+        Toast.show({ text: "Congratulations! You've earned 100 points!", duration: 'long' });
       }
     } else {
       setAdWatchesForCurrentBoost(nextWatchCount);
       addLog('rewarded', 'reward', `Ad watched (${nextWatchCount}/${adsNeededForNextBoost})`);
-      alert(`Ad watched! Watch ${adsNeededForNextBoost - nextWatchCount} more to get your reward.`);
+      Toast.show({ text: `Ad watched! Watch ${adsNeededForNextBoost - nextWatchCount} more to get your reward.`, duration: 'short' });
     }
   };
 
@@ -543,38 +620,36 @@ export default function App() {
     // Check eligibility
     if (user.points < currentCost) {
       addLog('rewarded', 'error', 'Insufficient points for claim');
-      const confirmAd = window.confirm(`Not enough points! You need ${currentCost - user.points} more points. Would you like to watch a short ad to earn 100 points?`);
-      if (confirmAd) {
-        handleWatchAd();
-      }
+      setConfirmConfig({
+        title: 'Not Enough Points',
+        message: `You need ${currentCost - user.points} more points. Would you like to watch a short ad to earn 100 points?`,
+        onConfirm: handleWatchAd
+      });
+      setIsConfirmModalOpen(true);
       return;
     }
 
     try {
       await firebaseService.claimOffer(user.uid, offer);
       
-      // Add local transaction for history (though real-time claims listener would be better)
-      const newTransaction: Transaction = {
-        id: Math.random().toString(36).substr(2, 9),
-        type: 'claim',
-        title: offer.brand,
-        amount: -currentCost,
-        timestamp: new Date().toISOString(),
-        code: offer.code,
-        rewardType: offer.code ? 'code' : 'link',
-      };
-
-      setTransactions(prev => [newTransaction, ...prev]);
       addLog('banner', 'reward', `Successfully claimed ${offer.brand}`);
       
       if (!offer.code) {
         Browser.open({ url: offer.url });
       } else {
-        alert(`Success! Your code for ${offer.brand} is: ${offer.code}. You can find it in your Profile history.`);
+        setConfirmConfig({
+          title: 'Success!',
+          message: `Your code for ${offer.brand} is: ${offer.code}. It has been saved to your history.`,
+          onConfirm: () => {
+            Clipboard.write({ string: offer.code! });
+            Toast.show({ text: 'Code copied!', duration: 'short' });
+          }
+        });
+        setIsConfirmModalOpen(true);
       }
     } catch (error) {
       console.error("Claim failed:", error);
-      alert("Failed to claim offer. Please try again.");
+      Toast.show({ text: "Failed to claim offer. Please try again.", duration: 'long' });
     }
   };
 
@@ -583,7 +658,10 @@ export default function App() {
       await firebaseService.signInWithGoogle();
     } catch (error) {
       console.error("Sign in failed:", error);
-      alert("Google Sign-In failed. This is usually due to missing SHA-1 in Firebase for APKs. Try 'Continue as Guest' for testing.");
+      Toast.show({ 
+        text: "Google Sign-In failed. Please try 'Continue as Guest' if you are testing on an APK.", 
+        duration: 'long' 
+      });
     }
   };
 
@@ -640,9 +718,9 @@ export default function App() {
     } catch (error: any) {
       console.error("Delete account error:", error);
       if (error.code === 'auth/requires-recent-login') {
-        alert("For security, please sign out and sign in again before deleting your account.");
+        Toast.show({ text: "Please sign out and sign in again before deleting your account.", duration: 'long' });
       } else {
-        alert("Failed to delete account. Please try again later.");
+        Toast.show({ text: "Failed to delete account. Please try again later.", duration: 'long' });
       }
     } finally {
       setFirebaseUser(null);
@@ -651,6 +729,18 @@ export default function App() {
       setIsDeleteModalOpen(false);
     }
   };
+
+  if (!isConfigValid) {
+    return (
+      <div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-6 text-center">
+        <AlertCircle size={48} className="text-rose-500 mb-4" />
+        <h1 className="text-xl font-bold text-zinc-900 mb-2">Configuration Error</h1>
+        <p className="text-sm text-zinc-500 max-w-xs">
+          Firebase configuration is missing. Please check your environment variables and restart the app.
+        </p>
+      </div>
+    );
+  }
 
   if (isAuthLoading) {
     return (
@@ -700,22 +790,20 @@ export default function App() {
   if (!user) return null;
 
   return (
-    <div 
-      className="min-h-screen bg-zinc-50 font-sans selection:bg-indigo-100 selection:text-indigo-900"
-      style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 6rem)' }}
-    >
-      <Header user={user} />
+    <div className="h-screen flex flex-col bg-zinc-50 font-sans selection:bg-indigo-100 selection:text-indigo-900 overflow-hidden">
+      <div className="flex-1 overflow-y-auto scroll-smooth relative">
+        <Header user={user} />
 
-      <main className="max-w-md mx-auto px-6 py-6">
-        <AnimatePresence mode="wait">
-          {activeTab === 'offers' && (
-            <motion.div
-              key="offers"
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 10 }}
-              className="space-y-6"
-            >
+        <main className="max-w-md mx-auto px-6 py-6 pb-48">
+          <AnimatePresence mode="wait">
+            {activeTab === 'offers' && (
+              <motion.div
+                key="offers"
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 10 }}
+                className="space-y-6"
+              >
               {/* Search Bar */}
               <div className="space-y-4">
                 <div className="relative group">
@@ -895,7 +983,7 @@ export default function App() {
                   <User size={40} className="text-indigo-600" />
                 </div>
                 <h2 className="text-xl font-bold text-zinc-900">{user.email}</h2>
-                <p className="text-xs text-zinc-500 font-medium">Member since Feb 2026</p>
+                <p className="text-xs text-zinc-500 font-medium">Member since {APP_VERSION}</p>
                 
                 <div className="grid grid-cols-2 gap-4 mt-8">
                   <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100">
@@ -1033,36 +1121,37 @@ export default function App() {
 
         </AnimatePresence>
       </main>
+    </div>
 
-      <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
-      
-      <AdSimulatorModal 
-        isOpen={isAdOpen} 
-        onClose={() => setIsAdOpen(false)} 
-        onReward={handleAdReward} 
+    <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
+    
+    <AdSimulatorModal 
+      isOpen={isAdOpen} 
+      onClose={() => setIsAdOpen(false)} 
+      onReward={handleAdReward} 
+    />
+
+    <AnimatePresence>
+      <PrivacyModal 
+        isOpen={isPrivacyModalOpen} 
+        onClose={() => setIsPrivacyModalOpen(false)} 
       />
+    </AnimatePresence>
 
-      <AnimatePresence>
-        <PrivacyModal 
-          isOpen={isPrivacyModalOpen} 
-          onClose={() => setIsPrivacyModalOpen(false)} 
-        />
-      </AnimatePresence>
+    <AnimatePresence>
+      <DeleteAccountModal 
+        isOpen={isDeleteModalOpen} 
+        onClose={() => setIsDeleteModalOpen(false)} 
+        onConfirm={handleDeleteAccount}
+      />
+    </AnimatePresence>
 
-      <AnimatePresence>
-        <DeleteAccountModal 
-          isOpen={isDeleteModalOpen} 
-          onClose={() => setIsDeleteModalOpen(false)} 
-          onConfirm={handleDeleteAccount}
-        />
-      </AnimatePresence>
-
-      {/* Simulated Banner Ad */}
-      <div className="fixed bottom-20 left-0 right-0 px-6 pointer-events-none">
-        <div className="max-w-md mx-auto bg-zinc-100 border border-zinc-200 h-12 rounded-lg flex items-center justify-center text-[10px] font-bold text-zinc-400 uppercase tracking-widest pointer-events-auto">
-          Sponsored Banner Ad
-        </div>
+    {/* Simulated Banner Ad */}
+    <div className="fixed bottom-20 left-0 right-0 px-6 pointer-events-none z-30">
+      <div className="max-w-md mx-auto bg-zinc-100/90 backdrop-blur-sm border border-zinc-200 h-12 rounded-lg flex items-center justify-center text-[10px] font-bold text-zinc-400 uppercase tracking-widest pointer-events-auto shadow-sm">
+        Sponsored Banner Ad
       </div>
     </div>
-  );
+  </div>
+);
 }
