@@ -1,15 +1,14 @@
 export interface Offer {
   id: string;
-  title: string;
+  brand: string;
+  logoUrl: string;
   description: string;
-  reward: string;
-  rewardType: 'code' | 'link';
+  url: string;
+  code?: string;
+  points: number;
+  category: ('Fashion' | 'Delivery apps' | 'TV\'s' | 'Travel' | 'Food' | 'Shopping' | 'General')[];
   type: 'discount' | 'giftcard' | 'coupon' | 'subscription';
-  pointsRequired: number;
-  dailyLimit: number;
-  imageUrl: string;
   expiryDate: string;
-  category: 'Fashion' | 'Delivery apps' | 'TV\'s' | 'Travel' | 'Food' | 'Shopping' | 'General';
 }
 
 export interface Transaction {
