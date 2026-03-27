@@ -111,12 +111,29 @@ interface OfferCardProps {
   onClaim: (offer: Offer, currentCost: number) => void;
   user: UserProfile;
   currentCost: number;
+  isClaimedToday: boolean;
+  claimedCode?: string;
   key?: string | number;
 }
 
-const OfferCard = ({ offer, onClaim, user, currentCost, isClaimedToday }: OfferCardProps & { isClaimedToday: boolean }) => {
-  const isLocked = user.points < currentCost;
+const OfferCard = ({ offer, onClaim, user, isClaimedToday, claimedCode }: OfferCardProps) => {
+  const isLocked = user.points < offer.points && !isClaimedToday;
   
+  const handleCopyCode = async () => {
+    if (claimedCode || offer.code) {
+      await Clipboard.write({ string: claimedCode || offer.code! });
+      await Toast.show({ text: 'Code copied!', duration: 'short' });
+    }
+  };
+
+  const handleGoToStore = async () => {
+    try {
+      await Browser.open({ url: offer.url });
+    } catch (error) {
+      window.open(offer.url, '_blank');
+    }
+  };
+
   return (
     <motion.div 
       layout
@@ -127,13 +144,13 @@ const OfferCard = ({ offer, onClaim, user, currentCost, isClaimedToday }: OfferC
       {isClaimedToday && (
         <div className="absolute top-3 left-3 z-20 flex items-center gap-1.5 bg-emerald-500 text-white px-2 py-1 rounded-lg font-bold text-[10px] shadow-lg uppercase tracking-wider">
           <CheckCircle2 size={12} />
-          Claimed
+          Unlocked
         </div>
       )}
       <div className="relative h-40 flex items-center justify-center bg-zinc-50">
         <img 
-          src={offer.imageUrl} 
-          alt={offer.title} 
+          src={offer.logoUrl} 
+          alt={offer.brand} 
           className="w-full h-full object-contain p-4"
           referrerPolicy="no-referrer"
           onError={(e) => {
@@ -146,46 +163,58 @@ const OfferCard = ({ offer, onClaim, user, currentCost, isClaimedToday }: OfferC
       </div>
       <div className="p-4">
         <div className="flex justify-between items-start mb-1">
-          <h3 className="font-bold text-zinc-900 leading-tight">{offer.title}</h3>
-          {currentCost > offer.pointsRequired && (
-            <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100">
-              Cost Doubled
-            </span>
-          )}
+          <h3 className="font-bold text-zinc-900 leading-tight">{offer.brand}</h3>
         </div>
         <p className="text-xs text-zinc-500 mb-4 line-clamp-2">{offer.description}</p>
         
-        <div className="flex items-center justify-between mt-auto">
-          <div className="flex flex-col">
-            <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Cost</span>
-            <div className="flex items-center gap-1.5">
-              <span className={cn(
-                "text-sm font-bold",
-                currentCost > offer.pointsRequired ? "text-amber-600" : "text-zinc-900"
-              )}>
-                {currentCost === 0 ? 'FREE' : `${currentCost.toLocaleString()} pts`}
-              </span>
-              {currentCost > offer.pointsRequired && (
-                <span className="text-[10px] text-zinc-400 line-through decoration-zinc-300">
-                  {offer.pointsRequired.toLocaleString()}
-                </span>
-              )}
-            </div>
-          </div>
-          <button
-            onClick={() => onClaim(offer, currentCost)}
-            disabled={isLocked}
-            className={cn(
-              "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2",
-              isLocked 
-                ? "bg-zinc-100 text-zinc-400 cursor-not-allowed" 
-                : "bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95"
+        {isClaimedToday ? (
+          <div className="space-y-3">
+            {(claimedCode || offer.code) && (
+              <div className="flex items-center gap-2">
+                <div className="flex-1 bg-zinc-100 px-3 py-2 rounded-xl font-mono text-sm font-bold text-zinc-700 border border-zinc-200 truncate">
+                  {claimedCode || offer.code}
+                </div>
+                <button 
+                  onClick={handleCopyCode}
+                  className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition-colors"
+                >
+                  <Copy size={18} />
+                </button>
+              </div>
             )}
-          >
-            {isLocked ? <Clock size={14} /> : (offer.rewardType === 'link' ? <ExternalLink size={14} /> : <Gift size={14} />)}
-            {isLocked ? 'Locked' : (currentCost === 0 ? 'Get Offer' : 'Claim')}
-          </button>
-        </div>
+            <button
+              onClick={handleGoToStore}
+              className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 hover:bg-indigo-700 active:scale-95 transition-all"
+            >
+              <ExternalLink size={14} />
+              Go to Store
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between mt-auto">
+            <div className="flex flex-col">
+              <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Cost</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-bold text-zinc-900">
+                  {offer.points === 0 ? 'FREE' : `${offer.points.toLocaleString()} pts`}
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() => onClaim(offer, offer.points)}
+              disabled={isLocked}
+              className={cn(
+                "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2",
+                isLocked 
+                  ? "bg-zinc-100 text-zinc-400 cursor-not-allowed" 
+                  : "bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95"
+              )}
+            >
+              {isLocked ? <Clock size={14} /> : <Zap size={14} />}
+              {isLocked ? 'Locked' : 'Unlock'}
+            </button>
+          </div>
+        )}
       </div>
     </motion.div>
   );
@@ -355,22 +384,15 @@ export default function App() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
   useEffect(() => {
-    // Safety timeout: if auth takes too long, stop loading
-    const timeout = setTimeout(() => {
-      if (isAuthLoading) {
-        console.warn("Auth loading timed out");
-        setIsAuthLoading(false);
-      }
-    }, 5000);
-
-    const unsubscribe = firebaseService.onAuthChange(async (fUser) => {
-      try {
-        setFirebaseUser(fUser);
-        if (fUser) {
-          const profile = await firebaseService.getUserProfile(fUser.uid);
+    const unsubscribeAuth = firebaseService.onAuthChange(async (fUser) => {
+      setFirebaseUser(fUser);
+      if (fUser) {
+        // Listen to profile changes in real-time
+        const unsubscribeProfile = firebaseService.onProfileChange(fUser.uid, (profile) => {
           if (profile) {
             setUser(profile);
           } else {
+            // Create profile if it doesn't exist
             const newProfile: UserProfile = {
               uid: fUser.uid,
               email: fUser.email || '',
@@ -379,31 +401,54 @@ export default function App() {
               lastClaimDate: null,
               totalEarned: 0,
             };
-            await firebaseService.saveUserProfile(newProfile);
-            setUser(newProfile);
+            firebaseService.saveUserProfile(newProfile);
           }
-        } else {
-          setUser(null);
-        }
-      } catch (error) {
-        console.error("Error in auth change handler:", error);
-      } finally {
+          setIsAuthLoading(false);
+        });
+
+        // Listen to claims/transactions in real-time
+        const unsubscribeClaims = firebaseService.onClaimsChange(fUser.uid, (claims) => {
+          setTransactions(claims);
+        });
+
+        return () => {
+          unsubscribeProfile();
+          unsubscribeClaims();
+        };
+      } else {
+        setUser(null);
         setIsAuthLoading(false);
-        clearTimeout(timeout);
       }
     });
 
-    return () => {
-      unsubscribe();
-      clearTimeout(timeout);
-    };
+    return () => unsubscribeAuth();
   }, []);
 
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const categories = ['All', 'Fashion', 'Delivery apps', "TV's", 'Shopping', 'Travel', 'Food'];
+  
+  const [adWatchesForCurrentBoost, setAdWatchesForCurrentBoost] = useState(0);
+  const [boostsClaimedToday, setBoostsClaimedToday] = useState(0);
+  const [isAdOpen, setIsAdOpen] = useState(false);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [offers, setOffers] = useState<Offer[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const { logs, addLog } = useAds();
+
+  const adsNeededForNextBoost = useMemo(() => {
+    if (boostsClaimedToday === 0) return 1;
+    return boostsClaimedToday * 2;
+  }, [boostsClaimedToday]);
+
   useEffect(() => {
-    if (user) {
-      firebaseService.saveUserProfile(user);
-    }
-  }, [user]);
+    // Listen to offers in real-time
+    const unsubscribeOffers = firebaseService.onOffersChange((data) => {
+      setOffers(data);
+      setIsLoading(false);
+    });
+    return () => unsubscribeOffers();
+  }, []);
 
   useEffect(() => {
     // Daily Reset Simulation
@@ -417,45 +462,14 @@ export default function App() {
     }
   }, []);
 
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  
-  const categories = ['All', 'Fashion', 'Delivery apps', "TV's", 'Shopping', 'Travel', 'Food'];
-  
-  // Progressive Ad State
-  const [adWatchesForCurrentBoost, setAdWatchesForCurrentBoost] = useState(0);
-  const [boostsClaimedToday, setBoostsClaimedToday] = useState(0);
-  
-  const adsNeededForNextBoost = useMemo(() => {
-    if (boostsClaimedToday === 0) return 1;
-    return boostsClaimedToday * 2;
-  }, [boostsClaimedToday]);
-
-  const [isAdOpen, setIsAdOpen] = useState(false);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const { logs, addLog } = useAds();
-
-  const [offers, setOffers] = useState<Offer[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchOffers = async () => {
-      setIsLoading(true);
-      const data = await firebaseService.getOffers();
-      setOffers(data);
-      setIsLoading(false);
-    };
-    fetchOffers();
-  }, []);
-
   // Filtered Offers
   const filteredOffers = useMemo(() => {
     return offers.filter(offer => {
-      const matchesSearch = offer.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      const matchesSearch = offer.brand.toLowerCase().includes(searchQuery.toLowerCase()) ||
         offer.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
         offer.type.toLowerCase().includes(searchQuery.toLowerCase());
       
-      const matchesCategory = selectedCategory === 'All' || offer.category === selectedCategory;
+      const matchesCategory = selectedCategory === 'All' || offer.category.includes(selectedCategory as any);
       
       return matchesSearch && matchesCategory;
     });
@@ -477,25 +491,29 @@ export default function App() {
     addLog('rewarded', 'show');
   };
 
-  const handleAdReward = () => {
+  const handleAdReward = async () => {
     const nextWatchCount = adWatchesForCurrentBoost + 1;
     
     if (nextWatchCount >= adsNeededForNextBoost) {
-      setUser(prev => ({ ...prev, points: prev.points + 100 }));
-      setBoostsClaimedToday(prev => prev + 1);
-      setAdWatchesForCurrentBoost(0);
-      
-      const newTransaction: Transaction = {
-        id: Math.random().toString(36).substr(2, 9),
-        type: 'earn',
-        title: 'Daily Boost Reward',
-        amount: 100,
-        timestamp: new Date().toISOString(),
-      };
-      setTransactions(prev => [newTransaction, ...prev]);
-      
-      addLog('rewarded', 'reward', `User earned 100 points (Boost #${boostsClaimedToday + 1})`);
-      alert("Congratulations! You've earned 100 points!");
+      if (user) {
+        const newPoints = user.points + 100;
+        await firebaseService.saveUserProfile({ ...user, points: newPoints });
+        
+        setBoostsClaimedToday(prev => prev + 1);
+        setAdWatchesForCurrentBoost(0);
+        
+        const newTransaction: Transaction = {
+          id: Math.random().toString(36).substr(2, 9),
+          type: 'earn',
+          title: 'Daily Boost Reward',
+          amount: 100,
+          timestamp: new Date().toISOString(),
+        };
+        setTransactions(prev => [newTransaction, ...prev]);
+        
+        addLog('rewarded', 'reward', `User earned 100 points (Boost #${boostsClaimedToday + 1})`);
+        alert("Congratulations! You've earned 100 points!");
+      }
     } else {
       setAdWatchesForCurrentBoost(nextWatchCount);
       addLog('rewarded', 'reward', `Ad watched (${nextWatchCount}/${adsNeededForNextBoost})`);
@@ -507,53 +525,44 @@ export default function App() {
     setIsPrivacyModalOpen(true);
   };
 
-  const handleClaimOffer = (offer: Offer, currentCost: number) => {
+  const handleClaimOffer = async (offer: Offer, currentCost: number) => {
+    if (!user) return;
+
     // Check eligibility
     if (user.points < currentCost) {
-      alert(`Not enough points! You need ${currentCost - user.points} more points to claim this.`);
-      return;
-    }
-
-    const claimsTodayForOffer = transactions.filter(t => 
-      t.type === 'claim' && 
-      t.title === offer.title &&
-      new Date(t.timestamp).toDateString() === new Date().toDateString()
-    ).length;
-
-    if (claimsTodayForOffer >= 2) { // Limit to 2 claims per day
-      alert(`Daily limit reached for ${offer.title}. You can claim each offer up to 2 times per day.`);
-      addLog('banner', 'error', `Daily limit reached for offer ${offer.id}`);
-      return;
-    }
-
-    const newTransaction: Transaction = {
-      id: Math.random().toString(36).substr(2, 9),
-      type: 'claim',
-      title: offer.title,
-      amount: -currentCost,
-      timestamp: new Date().toISOString(),
-      code: offer.reward,
-      rewardType: offer.rewardType,
-    };
-
-    setTransactions(prev => [newTransaction, ...prev]);
-    setUser(prev => ({
-      ...prev,
-      points: prev.points - currentCost,
-      claimsToday: prev.claimsToday + 1,
-      totalEarned: prev.totalEarned + 1,
-    }));
-    
-    addLog('banner', 'reward', `Claimed ${offer.title} for ${currentCost} pts. Next claim will cost ${currentCost * 2} pts.`);
-    
-    if (offer.rewardType === 'link') {
-      if (currentCost === 0) {
-        Browser.open({ url: offer.reward });
-      } else {
-        alert(`Success! Click "Open Link" in your Profile history to activate your reward.`);
+      addLog('rewarded', 'error', 'Insufficient points for claim');
+      const confirmAd = window.confirm(`Not enough points! You need ${currentCost - user.points} more points. Would you like to watch a short ad to earn 100 points?`);
+      if (confirmAd) {
+        handleWatchAd();
       }
-    } else {
-      alert(`Success! Your code for ${offer.title} is: ${offer.reward}. You can find it in your Profile history.`);
+      return;
+    }
+
+    try {
+      await firebaseService.claimOffer(user.uid, offer);
+      
+      // Add local transaction for history (though real-time claims listener would be better)
+      const newTransaction: Transaction = {
+        id: Math.random().toString(36).substr(2, 9),
+        type: 'claim',
+        title: offer.brand,
+        amount: -currentCost,
+        timestamp: new Date().toISOString(),
+        code: offer.code,
+        rewardType: offer.code ? 'code' : 'link',
+      };
+
+      setTransactions(prev => [newTransaction, ...prev]);
+      addLog('banner', 'reward', `Successfully claimed ${offer.brand}`);
+      
+      if (!offer.code) {
+        Browser.open({ url: offer.url });
+      } else {
+        alert(`Success! Your code for ${offer.brand} is: ${offer.code}. You can find it in your Profile history.`);
+      }
+    } catch (error) {
+      console.error("Claim failed:", error);
+      alert("Failed to claim offer. Please try again.");
     }
   };
 
@@ -786,8 +795,9 @@ export default function App() {
                         offer={offer} 
                         onClaim={handleClaimOffer} 
                         user={user} 
-                        currentCost={currentCost}
+                        currentCost={offer.points}
                         isClaimedToday={isClaimedToday}
+                        claimedCode={isClaimedToday ? (transactions.find(t => t.title === offer.brand)?.code) : undefined}
                       />
                     );
                   })
