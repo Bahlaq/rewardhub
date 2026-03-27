@@ -19,7 +19,6 @@ export function useAds() {
       message: `${message || ''} ${adId ? `(ID: ${adId.slice(0, 8)}...)` : ''}`,
     };
     setLogs(prev => [newLog, ...prev].slice(0, 100));
-    console.log(`[Ad ${type}] ${event}: ${message || ''}`);
   }, []);
 
   const simulateAd = useCallback(async (type: AdLog['type']): Promise<boolean> => {
