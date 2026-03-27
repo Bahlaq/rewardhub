@@ -59,11 +59,17 @@ const db = app ? initializeFirestore(app, {
 const auth = app ? getAuth(app) : null;
 const googleProvider = new GoogleAuthProvider();
 
+// Production Credentials for Google Play
+// SHA-1 (App Signing): 56:FB:BC:58:9D:88:6D:B9:09:D4:95:8E:42:2C:D6:AC:5A:F0:A9:4E
+// SHA-1 (Upload): 30:F6:0A:82:AD:F4:9C:5F:0F:9C:01:9B:39:8D:1E:C0:66:8E:F5:A9
+const PRODUCTION_WEB_CLIENT_ID = "563861371307-3moj6n7qanfg0tgn1vrv8ok59rnh8pj2.apps.googleusercontent.com";
+
 // If a Web Client ID is provided, set it. This is often required for 
 // Google Sign-In to work correctly on Android/iOS in hybrid apps.
-if (import.meta.env.VITE_FIREBASE_WEB_CLIENT_ID) {
+const webClientId = import.meta.env.VITE_FIREBASE_WEB_CLIENT_ID || PRODUCTION_WEB_CLIENT_ID;
+if (webClientId) {
   googleProvider.setCustomParameters({
-    client_id: import.meta.env.VITE_FIREBASE_WEB_CLIENT_ID
+    client_id: webClientId
   });
 }
 
@@ -154,10 +160,17 @@ export const firebaseService = {
     }
     const q = query(collection(db, 'offers'), orderBy('points', 'asc'));
     return onSnapshot(q, (snapshot) => {
-      const offers = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      } as Offer));
+      if (snapshot.empty) {
+        console.log("[DEBUG] Firestore 'offers' collection returned 0 results.");
+      }
+      const offers = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          points: Number(data.points || 0) // Ensure points is a Number/Integer
+        } as Offer;
+      });
       callback(offers);
     }, (error) => {
       console.error("Error listening to offers:", error);
