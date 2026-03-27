@@ -481,7 +481,7 @@ export default function App() {
         offer.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
         offer.type.toLowerCase().includes(searchQuery.toLowerCase());
       
-      const matchesCategory = selectedCategory === 'All' || offer.category.includes(selectedCategory as any);
+      const matchesCategory = selectedCategory === 'All' || (Array.isArray(offer.category) && offer.category.includes(selectedCategory as any));
       
       return matchesSearch && matchesCategory;
     });
@@ -810,10 +810,10 @@ export default function App() {
                   filteredOffers.map((offer) => {
                     const claimsTodayForThisOffer = transactions.filter(t => 
                       t.type === 'claim' &&
-                      t.title === offer.title &&
+                      t.title === offer.brand &&
                       new Date(t.timestamp).toDateString() === new Date().toDateString()
                     ).length;
-                    const currentCost = offer.pointsRequired * Math.pow(2, claimsTodayForThisOffer);
+                    const currentCost = offer.points * Math.pow(2, claimsTodayForThisOffer);
                     const isClaimedToday = claimsTodayForThisOffer > 0;
 
                     return (
@@ -822,7 +822,7 @@ export default function App() {
                         offer={offer} 
                         onClaim={handleClaimOffer} 
                         user={user} 
-                        currentCost={offer.points}
+                        currentCost={currentCost}
                         isClaimedToday={isClaimedToday}
                         claimedCode={isClaimedToday ? (transactions.find(t => t.title === offer.brand)?.code) : undefined}
                       />
