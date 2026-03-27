@@ -30,6 +30,8 @@ import { Offer, UserProfile, AdLog, ClaimRecord, Transaction } from './types';
 import { useAds } from './hooks/useAds';
 import { firebaseService, FirebaseUser } from './services/firebase';
 
+import icon from '../assets/icon.png';
+
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
@@ -38,26 +40,12 @@ function cn(...inputs: ClassValue[]) {
 
 const Logo = () => (
   <div className="relative w-16 h-16 group cursor-pointer mx-auto">
-    {/* Purple Background - Rounded Square with 3D depth and rays */}
-    <div className="absolute inset-0 bg-[#7c3aed] rounded-[22%] shadow-[0_10px_25px_rgba(124,58,237,0.6),inset_0_2px_4px_rgba(255,255,255,0.4)] overflow-hidden">
-      {/* Radial Rays Effect - More pronounced to match image */}
-      <div className="absolute inset-0 opacity-30" 
-           style={{ background: 'conic-gradient(from 0deg at 50% 50%, transparent 0deg, rgba(255,255,255,0.4) 10deg, transparent 20deg, rgba(255,255,255,0.4) 30deg, transparent 40deg, rgba(255,255,255,0.4) 50deg, transparent 60deg, rgba(255,255,255,0.4) 70deg, transparent 80deg, rgba(255,255,255,0.4) 90deg, transparent 100deg, rgba(255,255,255,0.4) 110deg, transparent 120deg, rgba(255,255,255,0.4) 130deg, transparent 140deg, rgba(255,255,255,0.4) 150deg, transparent 160deg, rgba(255,255,255,0.4) 170deg, transparent 180deg, rgba(255,255,255,0.4) 190deg, transparent 200deg, rgba(255,255,255,0.4) 210deg, transparent 220deg, rgba(255,255,255,0.4) 230deg, transparent 240deg, rgba(255,255,255,0.4) 250deg, transparent 260deg, rgba(255,255,255,0.4) 270deg, transparent 280deg, rgba(255,255,255,0.4) 290deg, transparent 300deg, rgba(255,255,255,0.4) 310deg, transparent 320deg, rgba(255,255,255,0.4) 330deg, transparent 340deg, rgba(255,255,255,0.4) 350deg, transparent 360deg)' }} />
-      <div className="absolute inset-0 bg-gradient-to-br from-white/20 via-transparent to-black/20" />
-    </div>
-    
-    {/* The Gold Coin - Positioned behind the R, slightly offset to the right */}
-    <div className="absolute top-[52%] left-[55%] -translate-x-1/2 -translate-y-1/2 w-11 h-11 bg-gradient-to-b from-[#fbbf24] via-[#d97706] to-[#92400e] rounded-full border-[3px] border-[#78350f] shadow-xl flex items-center justify-center">
-      {/* Coin Inner Detail */}
-      <div className="w-8 h-8 border border-white/30 rounded-full flex items-center justify-center">
-        <div className="w-4 h-4 bg-white/20 rounded-full blur-[1px]" />
-      </div>
-    </div>
-
-    {/* The White R - Large, Bold, and 3D */}
-    <div className="absolute inset-0 flex items-center justify-center">
-      <span className="text-white font-black text-5xl drop-shadow-[0_6px_8px_rgba(0,0,0,0.6)] select-none transform -translate-x-1.5 -translate-y-1 tracking-tighter">R</span>
-    </div>
+    <img 
+      src={icon} 
+      alt="RewardHub Logo" 
+      className="w-full h-full object-contain rounded-[22%] shadow-[0_10px_25px_rgba(124,58,237,0.4)] transition-transform group-hover:scale-105"
+      referrerPolicy="no-referrer"
+    />
   </div>
 );
 
@@ -68,7 +56,10 @@ const Navbar = ({ activeTab, setActiveTab }: { activeTab: string, setActiveTab: 
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-zinc-200 px-6 py-3 z-50">
+    <nav 
+      className="fixed bottom-0 left-0 right-0 bg-white border-t border-zinc-200 px-6 pt-3 z-50"
+      style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.75rem)' }}
+    >
       <div className="max-w-md mx-auto flex justify-between items-center">
         {tabs.map((tab) => (
           <button
@@ -89,7 +80,10 @@ const Navbar = ({ activeTab, setActiveTab }: { activeTab: string, setActiveTab: 
 };
 
 const Header = ({ user }: { user: UserProfile }) => (
-  <header className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-zinc-100 px-6 py-4 z-40">
+  <header 
+    className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-zinc-100 px-6 pb-4 z-40"
+    style={{ paddingTop: 'calc(env(safe-area-inset-top) + 1rem)' }}
+  >
     <div className="max-w-md mx-auto flex justify-between items-center">
       <div className="flex items-center gap-3">
         <Logo />
@@ -247,7 +241,13 @@ const AdSimulatorModal = ({ isOpen, onClose, onReward }: { isOpen: boolean, onCl
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/90 backdrop-blur-sm">
+    <div 
+      className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/90 backdrop-blur-sm"
+      style={{ 
+        paddingTop: 'calc(env(safe-area-inset-top) + 1.5rem)',
+        paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)'
+      }}
+    >
       <div className="w-full max-w-sm bg-zinc-900 rounded-3xl overflow-hidden border border-zinc-800 shadow-2xl">
         <div className="relative aspect-video bg-zinc-800 flex items-center justify-center">
           <PlayCircle size={48} className="text-zinc-600 animate-pulse" />
@@ -287,7 +287,13 @@ const PrivacyModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => voi
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+    <div 
+      className="fixed inset-0 z-[100] flex items-center justify-center p-6"
+      style={{ 
+        paddingTop: 'calc(env(safe-area-inset-top) + 1.5rem)',
+        paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)'
+      }}
+    >
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -332,7 +338,13 @@ const DeleteAccountModal = ({ isOpen, onClose, onConfirm }: { isOpen: boolean, o
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+    <div 
+      className="fixed inset-0 z-[100] flex items-center justify-center p-6"
+      style={{ 
+        paddingTop: 'calc(env(safe-area-inset-top) + 1.5rem)',
+        paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)'
+      }}
+    >
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -642,7 +654,13 @@ export default function App() {
 
   if (isAuthLoading) {
     return (
-      <div className="min-h-screen bg-zinc-50 flex items-center justify-center">
+      <div 
+        className="min-h-screen bg-zinc-50 flex items-center justify-center"
+        style={{ 
+          paddingTop: 'env(safe-area-inset-top)',
+          paddingBottom: 'env(safe-area-inset-bottom)'
+        }}
+      >
         <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -650,7 +668,13 @@ export default function App() {
 
   if (!firebaseUser) {
     return (
-      <div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-6 text-center">
+      <div 
+        className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-6 text-center"
+        style={{ 
+          paddingTop: 'calc(env(safe-area-inset-top) + 1.5rem)',
+          paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)'
+        }}
+      >
         <Logo />
         <h1 className="text-2xl font-black tracking-tight text-zinc-900 mt-6 mb-2">Welcome to RewardHub</h1>
         <p className="text-sm text-zinc-500 mb-8 max-w-xs">Sign in with Google to start earning points and save your progress.</p>
@@ -676,7 +700,10 @@ export default function App() {
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-zinc-50 pb-24 font-sans selection:bg-indigo-100 selection:text-indigo-900">
+    <div 
+      className="min-h-screen bg-zinc-50 font-sans selection:bg-indigo-100 selection:text-indigo-900"
+      style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 6rem)' }}
+    >
       <Header user={user} />
 
       <main className="max-w-md mx-auto px-6 py-6">
