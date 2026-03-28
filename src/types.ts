@@ -28,6 +28,9 @@ export interface UserProfile {
   claimsToday: number;
   lastClaimDate: string | null;
   totalEarned: number;
+  boostLevel?: number;
+  adsWatchedToday?: number;
+  lastBoostDate?: string | null;
 }
 
 export interface ClaimRecord {
