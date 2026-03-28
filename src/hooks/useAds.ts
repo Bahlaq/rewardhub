@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react';
 import { AdLog } from '../types';
+import { firebaseService } from '../services/firebase';
 
-export function useAds() {
+export function useAds(uid?: string) {
   const [logs, setLogs] = useState<AdLog[]>([]);
 
   const addLog = useCallback((type: AdLog['type'], event: AdLog['event'], message?: string) => {
@@ -23,14 +24,10 @@ export function useAds() {
 
   const simulateAd = useCallback(async (type: AdLog['type']): Promise<boolean> => {
     addLog(type, 'load');
-    
-    // Simulate loading delay
     await new Promise(resolve => setTimeout(resolve, 1000));
-    
     addLog(type, 'show');
     
     if (type === 'rewarded') {
-      // Simulate watching delay
       await new Promise(resolve => setTimeout(resolve, 3000));
       addLog(type, 'reward', 'User watched full video');
       return true;
@@ -39,5 +36,19 @@ export function useAds() {
     return true;
   }, [addLog]);
 
-  return { logs, addLog, simulateAd };
+  const watchAd = useCallback(async () => {
+    const success = await simulateAd('rewarded');
+    if (success && uid) {
+      try {
+        const result = await firebaseService.recordAdWatch(uid);
+        return result;
+      } catch (error) {
+        console.error("Error recording ad watch:", error);
+        return null;
+      }
+    }
+    return null;
+  }, [simulateAd, uid]);
+
+  return { logs, addLog, simulateAd, watchAd };
 }
