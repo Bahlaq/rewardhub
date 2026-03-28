@@ -1,0 +1,75 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores user points and metadata.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "points": { "type": "number" },
+        "totalEarned": { "type": "number" },
+        "claimsToday": { "type": "number" },
+        "lastClaimDate": { "type": "string" }
+      },
+      "required": ["uid", "points"]
+    },
+    "Offer": {
+      "title": "Offer",
+      "description": "Discount codes and reward offers.",
+      "type": "object",
+      "properties": {
+        "brand": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "description": { "type": "string" },
+        "points": { "type": "number" },
+        "category": { "type": "string" },
+        "type": { "type": "string" }
+      },
+      "required": ["brand", "points"]
+    },
+    "Claim": {
+      "title": "Claim Record",
+      "description": "Records of users claiming offers.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "offerId": { "type": "string" },
+        "pointsSpent": { "type": "number" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["userId", "offerId", "pointsSpent"]
+    },
+    "History": {
+      "title": "Reward History",
+      "description": "Records of users earning points from ads.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "type": { "type": "string" },
+        "title": { "type": "string" },
+        "amount": { "type": "number" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["userId", "amount"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile documents."
+    },
+    "/offers/{offerId}": {
+      "schema": "Offer",
+      "description": "Available rewards and offers."
+    },
+    "/claims/{claimId}": {
+      "schema": "Claim",
+      "description": "User claim history."
+    },
+    "/history/{historyId}": {
+      "schema": "History",
+      "description": "User earning history."
+    }
+  }
+}
