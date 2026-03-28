@@ -22,9 +22,31 @@ import {
   signOut,
   signInAnonymously,
   deleteUser,
-  User as FirebaseUser
+  User as FirebaseUser,
+  signInWithCredential
 } from 'firebase/auth';
+import { Capacitor } from '@capacitor/core';
 import { Offer, UserProfile, Transaction } from '../types';
+
+// Hardcoded Client ID for Native Auth
+const PRODUCTION_WEB_CLIENT_ID = "563861371307-3moj6n7qanfg0tgn1vrv8ok59rnh8pj2.apps.googleusercontent.com";
+
+// Initialize Google Auth for Capacitor
+if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+  import('@codetrix-studio/capacitor-google-auth').then(({ GoogleAuth }) => {
+    try {
+      GoogleAuth.initialize({
+        clientId: PRODUCTION_WEB_CLIENT_ID,
+        scopes: ['profile', 'email'],
+        grantOfflineAccess: true,
+      });
+    } catch (error) {
+      console.warn("GoogleAuth.initialize failed:", error);
+    }
+  }).catch(err => {
+    console.warn("Failed to load GoogleAuth plugin:", err);
+  });
+}
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyAs-some-key-here", 
@@ -63,7 +85,6 @@ const googleProvider = new GoogleAuthProvider();
 // Production Credentials for Google Play
 // SHA-1 (App Signing): 56:FB:BC:58:9D:88:6D:B9:09:D4:95:8E:42:2C:D6:AC:5A:F0:A9:4E
 // SHA-1 (Upload): 30:F6:0A:82:AD:F4:9C:5F:0F:9C:01:9B:39:8D:1E:C0:66:8E:F5:A9
-const PRODUCTION_WEB_CLIENT_ID = "563861371307-3moj6n7qanfg0tgn1vrv8ok59rnh8pj2.apps.googleusercontent.com";
 
 // If a Web Client ID is provided, set it. This is often required for 
 // Google Sign-In to work correctly on Android/iOS in hybrid apps.
@@ -81,11 +102,24 @@ export const firebaseService = {
   async signInWithGoogle() {
     if (!auth) throw new Error("Firebase Auth not initialized");
     try {
-      const result = await signInWithPopup(auth, googleProvider);
-      return result.user;
-    } catch (error) {
-      console.error("Error signing in with Google:", error);
-      throw error;
+      // Try Native Google Auth first if on native platform
+      if (Capacitor.isNativePlatform()) {
+        const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
+        const googleUser = await GoogleAuth.signIn();
+        const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
+        const result = await signInWithCredential(auth, credential);
+        return result.user;
+      }
+      throw new Error("Not on native platform, using popup");
+    } catch (nativeError) {
+      console.warn("Native Google Auth failed, falling back to popup:", nativeError);
+      try {
+        const result = await signInWithPopup(auth, googleProvider);
+        return result.user;
+      } catch (popupError) {
+        console.error("Popup Google Auth failed:", popupError);
+        throw popupError;
+      }
     }
   },
 
@@ -121,8 +155,9 @@ export const firebaseService = {
 
   async deleteUserProfile(uid: string) {
     if (!db) return;
+    const collectionName = uid.startsWith('local_guest_') ? 'guests' : 'users';
     try {
-      await deleteDoc(doc(db, 'users', uid));
+      await deleteDoc(doc(db, collectionName, uid));
     } catch (error) {
       console.error("Error deleting user profile:", error);
       throw error;
@@ -142,7 +177,8 @@ export const firebaseService = {
       callback(null);
       return () => {};
     }
-    return onSnapshot(doc(db, 'users', uid), (doc) => {
+    const collectionName = uid.startsWith('local_guest_') ? 'guests' : 'users';
+    return onSnapshot(doc(db, collectionName, uid), (doc) => {
       if (doc.exists()) {
         callback(doc.data() as UserProfile);
       } else {
@@ -253,10 +289,14 @@ export const firebaseService = {
   async rewardUserPoints(uid: string, points: number, title: string) {
     if (!db) throw new Error("Firestore not initialized");
     
-    const userRef = doc(db, 'users', uid);
+    const collectionName = uid.startsWith('local_guest_') ? 'guests' : 'users';
+    const userRef = doc(db, collectionName, uid);
     const historyRef = doc(collection(db, 'history'));
 
     try {
+      // Ensure user document exists first using setDoc with merge: true
+      await setDoc(userRef, { uid, points: 0, totalEarned: 0 }, { merge: true });
+
       await runTransaction(db, async (transaction) => {
         const userDoc = await transaction.get(userRef);
         if (!userDoc.exists()) {
@@ -290,15 +330,29 @@ export const firebaseService = {
   async recordAdWatch(uid: string) {
     if (!db) throw new Error("Firestore not initialized");
     
-    const userRef = doc(db, 'users', uid);
+    const isGuest = uid.startsWith('local_guest_');
+    const collectionName = isGuest ? 'guests' : 'users';
+    const userRef = doc(db, collectionName, uid);
     const historyRef = doc(collection(db, 'history'));
     const today = new Date().toDateString();
 
     try {
+      // Ensure user document exists first using setDoc with merge: true
+      // This is a critical fix for Android APK to ensure points are saved
+      const initialProfile: Partial<UserProfile> = {
+        uid,
+        points: 0,
+        totalEarned: 0,
+        boostLevel: 1,
+        adsWatchedToday: 0,
+        lastBoostDate: today
+      };
+      await setDoc(userRef, initialProfile, { merge: true });
+
       return await runTransaction(db, async (transaction) => {
         const userDoc = await transaction.get(userRef);
         if (!userDoc.exists()) {
-          throw new Error("User profile not found");
+          throw new Error("User profile not found even after creation");
         }
 
         const userData = userDoc.data() as UserProfile;
@@ -306,14 +360,14 @@ export const firebaseService = {
         let adsWatchedToday = userData.adsWatchedToday || 0;
         const lastBoostDate = userData.lastBoostDate || null;
 
-        // Daily Reset Check
+        // Daily Reset Check (1, 2, 3 progression)
         if (lastBoostDate !== today) {
           boostLevel = 1;
           adsWatchedToday = 0;
         }
 
         adsWatchedToday += 1;
-        const adsNeeded = boostLevel;
+        const adsNeeded = boostLevel; // Level 1 needs 1, Level 2 needs 2, Level 3 needs 3
 
         let rewardClaimed = false;
         let updatedPoints = userData.points || 0;
@@ -361,7 +415,8 @@ export const firebaseService = {
   async claimOffer(uid: string, offer: Offer) {
     if (!db) throw new Error("Firestore not initialized");
     
-    const userRef = doc(db, 'users', uid);
+    const collectionName = uid.startsWith('local_guest_') ? 'guests' : 'users';
+    const userRef = doc(db, collectionName, uid);
     const claimRef = doc(collection(db, 'claims'));
 
     try {
@@ -404,8 +459,9 @@ export const firebaseService = {
 
   async getUserProfile(uid: string): Promise<UserProfile | null> {
     if (!db) return null;
+    const collectionName = uid.startsWith('local_guest_') ? 'guests' : 'users';
     try {
-      const userDoc = await getDoc(doc(db, 'users', uid));
+      const userDoc = await getDoc(doc(db, collectionName, uid));
       if (userDoc.exists()) {
         return userDoc.data() as UserProfile;
       }
@@ -418,8 +474,9 @@ export const firebaseService = {
 
   async saveUserProfile(profile: UserProfile) {
     if (!db) return;
+    const collectionName = profile.uid.startsWith('local_guest_') ? 'guests' : 'users';
     try {
-      await setDoc(doc(db, 'users', profile.uid), profile, { merge: true });
+      await setDoc(doc(db, collectionName, profile.uid), profile, { merge: true });
     } catch (error) {
       console.error("Error saving user profile:", error);
     }
