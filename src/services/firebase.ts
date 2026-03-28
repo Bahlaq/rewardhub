@@ -287,6 +287,77 @@ export const firebaseService = {
     }
   },
 
+  async recordAdWatch(uid: string) {
+    if (!db) throw new Error("Firestore not initialized");
+    
+    const userRef = doc(db, 'users', uid);
+    const historyRef = doc(collection(db, 'history'));
+    const today = new Date().toDateString();
+
+    try {
+      return await runTransaction(db, async (transaction) => {
+        const userDoc = await transaction.get(userRef);
+        if (!userDoc.exists()) {
+          throw new Error("User profile not found");
+        }
+
+        const userData = userDoc.data() as UserProfile;
+        let boostLevel = userData.boostLevel || 1;
+        let adsWatchedToday = userData.adsWatchedToday || 0;
+        const lastBoostDate = userData.lastBoostDate || null;
+
+        // Daily Reset Check
+        if (lastBoostDate !== today) {
+          boostLevel = 1;
+          adsWatchedToday = 0;
+        }
+
+        adsWatchedToday += 1;
+        const adsNeeded = boostLevel;
+
+        let rewardClaimed = false;
+        let updatedPoints = userData.points || 0;
+        let updatedTotalEarned = userData.totalEarned || 0;
+
+        if (adsWatchedToday >= adsNeeded) {
+          const rewardAmount = 100;
+          updatedPoints += rewardAmount;
+          updatedTotalEarned += rewardAmount;
+          
+          boostLevel += 1;
+          adsWatchedToday = 0;
+          rewardClaimed = true;
+
+          transaction.set(historyRef, {
+            userId: uid,
+            type: 'earn',
+            title: `Daily Boost (Level ${boostLevel - 1})`,
+            amount: rewardAmount,
+            timestamp: serverTimestamp()
+          });
+        }
+
+        transaction.update(userRef, {
+          points: updatedPoints,
+          totalEarned: updatedTotalEarned,
+          boostLevel,
+          adsWatchedToday,
+          lastBoostDate: today
+        });
+
+        return {
+          rewardClaimed,
+          boostLevel,
+          adsWatchedToday,
+          adsNeeded: boostLevel
+        };
+      });
+    } catch (error) {
+      console.error("Error recording ad watch:", error);
+      throw error;
+    }
+  },
+
   async claimOffer(uid: string, offer: Offer) {
     if (!db) throw new Error("Firestore not initialized");
     
