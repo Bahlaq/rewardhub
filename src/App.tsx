@@ -412,19 +412,13 @@ export default function App() {
     localStorage.setItem('local_transactions', JSON.stringify(localTransactions.slice(0, 50)));
   }, [localTransactions]);
 
-  const [offers, setOffers] = useState<Offer[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const { logs, addLog, watchAd } = useAds(user?.uid);
+  const { logs, addLog, watchAd, offers, isLoading, onOffersChange } = useAds(user?.uid);
 
   useEffect(() => {
     // Listen to offers in real-time
-    setIsLoading(true);
-    const unsubscribeOffers = firebaseService.onOffersChange(selectedCategory, (data) => {
-      setOffers(data);
-      setIsLoading(false);
-    });
-    return () => unsubscribeOffers();
-  }, [selectedCategory]);
+    const unsubscribe = onOffersChange(selectedCategory);
+    return () => unsubscribe();
+  }, [selectedCategory, onOffersChange]);
 
   // Filtered Offers
   const filteredOffers = useMemo(() => {
@@ -540,8 +534,13 @@ export default function App() {
   const handleGuestSignIn = async () => {
     setIsAuthLoading(true);
     
-    // Create local guest profile immediately
-    const localUid = 'local_guest_' + Math.random().toString(36).substr(2, 9);
+    // Get or create persistent local guest ID
+    let localUid = localStorage.getItem('persistent_guest_id');
+    if (!localUid) {
+      localUid = 'local_guest_' + Math.random().toString(36).substr(2, 9);
+      localStorage.setItem('persistent_guest_id', localUid);
+    }
+
     const guestProfile: UserProfile = {
       uid: localUid,
       email: 'Guest User',
@@ -551,14 +550,21 @@ export default function App() {
       totalEarned: 0,
     };
 
-    // Set local state immediately to bypass Firebase hang
+    // Set local state immediately
     setFirebaseUser({ uid: localUid, isAnonymous: true } as any);
     setUser(guestProfile);
     setIsAuthLoading(false);
 
-    // Try to sign in anonymously in background, but don't wait for it
+    // Save to Firestore 'guests' collection to ensure points are persistent
+    try {
+      await firebaseService.saveUserProfile(guestProfile);
+    } catch (err) {
+      console.warn("Failed to save guest profile to Firestore:", err);
+    }
+
+    // Try to sign in anonymously in background
     firebaseService.signInAnonymously().catch(err => {
-      console.warn("Background anonymous sign-in failed, staying in local guest mode:", err);
+      console.warn("Background anonymous sign-in failed:", err);
     });
   };
 
