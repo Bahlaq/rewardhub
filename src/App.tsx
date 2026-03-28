@@ -112,6 +112,7 @@ interface OfferCardProps {
 
 const OfferCard = ({ offer, onClaim, user, isClaimedToday, claimedCode }: OfferCardProps) => {
   const isLocked = user.points < offer.points && !isClaimedToday;
+  const [imageError, setImageError] = useState(false);
   
   const handleCopyCode = async () => {
     if (claimedCode || offer.code) {
@@ -142,15 +143,19 @@ const OfferCard = ({ offer, onClaim, user, isClaimedToday, claimedCode }: OfferC
         </div>
       )}
       <div className="relative h-40 flex items-center justify-center bg-zinc-50">
-        <img 
-          src={offer.logoUrl} 
-          alt={offer.brand} 
-          className="w-full h-full object-contain p-4"
-          referrerPolicy="no-referrer"
-          onError={(e) => {
-            (e.target as HTMLImageElement).src = 'https://cdn-icons-png.flaticon.com/512/1162/1162456.png';
-          }}
-        />
+        {!imageError ? (
+          <img 
+            src={offer.logoUrl} 
+            alt={offer.brand} 
+            className="w-full h-full object-contain p-4"
+            referrerPolicy="no-referrer"
+            onError={() => setImageError(true)}
+          />
+        ) : (
+          <div className="w-20 h-20 bg-indigo-600 rounded-full flex items-center justify-center text-white font-black text-3xl uppercase shadow-lg shadow-indigo-200">
+            {offer.brand.charAt(0)}
+          </div>
+        )}
         <div className="absolute top-3 right-3 bg-white/90 backdrop-blur px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide text-zinc-700 border border-white/20 shadow-sm">
           {offer.type}
         </div>
@@ -481,9 +486,14 @@ export default function App() {
           setFirestoreClaims(claims);
         });
 
+        const unsubscribeHistory = firebaseService.onHistoryChange(fUser.uid, (history) => {
+          setFirestoreHistory(history);
+        });
+
         return () => {
           unsubscribeProfile();
           unsubscribeClaims();
+          unsubscribeHistory();
         };
       } else {
         setUser(null);
@@ -495,8 +505,8 @@ export default function App() {
   }, []);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const categories = ['All', 'Fashion', 'Delivery apps', "TV's", 'Shopping', 'Travel', 'Food'];
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const categories = ['all', 'fashion', 'delivery', 'shopping', 'travel', 'food'];
   
   const [adWatchesForCurrentBoost, setAdWatchesForCurrentBoost] = useState(0);
   const [boostsClaimedToday, setBoostsClaimedToday] = useState(0);
@@ -507,15 +517,16 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
   const [firestoreClaims, setFirestoreClaims] = useState<Transaction[]>([]);
+  const [firestoreHistory, setFirestoreHistory] = useState<Transaction[]>([]);
 
   const transactions = useMemo(() => {
-    const all = [...localTransactions, ...firestoreClaims];
+    const all = [...localTransactions, ...firestoreClaims, ...firestoreHistory];
     // Remove duplicates by ID
     const unique = Array.from(new Map(all.map(tx => [tx.id, tx])).values());
     return unique.sort((a, b) => 
       new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     );
-  }, [localTransactions, firestoreClaims]);
+  }, [localTransactions, firestoreClaims, firestoreHistory]);
 
   useEffect(() => {
     localStorage.setItem('local_transactions', JSON.stringify(localTransactions.slice(0, 50)));
@@ -532,12 +543,13 @@ export default function App() {
 
   useEffect(() => {
     // Listen to offers in real-time
-    const unsubscribeOffers = firebaseService.onOffersChange((data) => {
+    setIsLoading(true);
+    const unsubscribeOffers = firebaseService.onOffersChange(selectedCategory, (data) => {
       setOffers(data);
       setIsLoading(false);
     });
     return () => unsubscribeOffers();
-  }, []);
+  }, [selectedCategory]);
 
   useEffect(() => {
     // Daily Reset Simulation
@@ -560,19 +572,17 @@ export default function App() {
         offer.description.toLowerCase().includes(searchLower) ||
         offer.type.toLowerCase().includes(searchLower);
       
-      // Flexible category filtering: case-insensitive and supports 'all'
-      const selectedLower = selectedCategory.toLowerCase();
-      const offerCategories = Array.isArray(offer.category) 
-        ? offer.category.map(cat => String(cat).toLowerCase())
-        : [String(offer.category || '').toLowerCase()];
-
-      const matchesCategory = selectedLower === 'all' || 
-        offerCategories.includes(selectedLower) || 
-        offerCategories.includes('all');
-      
-      return matchesSearch && matchesCategory;
+      return matchesSearch;
     });
-  }, [offers, searchQuery, selectedCategory]);
+  }, [offers, searchQuery]);
+
+  const displayPoints = useMemo(() => {
+    return transactions.reduce((acc, tx) => {
+      if (tx.type === 'earn') return acc + tx.amount;
+      if (tx.type === 'claim') return acc - tx.amount;
+      return acc;
+    }, 0);
+  }, [transactions]);
 
   // Simulate App Open Ad
   useEffect(() => {
@@ -595,23 +605,18 @@ export default function App() {
     
     if (nextWatchCount >= adsNeededForNextBoost) {
       if (user) {
-        const newPoints = user.points + 100;
-        await firebaseService.saveUserProfile({ ...user, points: newPoints });
-        
-        setBoostsClaimedToday(prev => prev + 1);
-        setAdWatchesForCurrentBoost(0);
-        
-        const newTransaction: Transaction = {
-          id: 'earn_' + Math.random().toString(36).substr(2, 9),
-          type: 'earn',
-          title: 'Daily Boost Reward',
-          amount: 100,
-          timestamp: new Date().toISOString(),
-        };
-        setLocalTransactions(prev => [newTransaction, ...prev]);
-        
-        addLog('rewarded', 'reward', `User earned 100 points (Boost #${boostsClaimedToday + 1})`);
-        Toast.show({ text: "Congratulations! You've earned 100 points!", duration: 'long' });
+        try {
+          await firebaseService.rewardUserPoints(user.uid, 100, 'Daily Boost Reward');
+          
+          setBoostsClaimedToday(prev => prev + 1);
+          setAdWatchesForCurrentBoost(0);
+          
+          addLog('rewarded', 'reward', `User earned 100 points (Boost #${boostsClaimedToday + 1})`);
+          Toast.show({ text: "Congratulations! You've earned 100 points!", duration: 'long' });
+        } catch (error) {
+          console.error("Failed to reward points:", error);
+          Toast.show({ text: "Error rewarding points. Please try again.", duration: 'short' });
+        }
       }
     } else {
       setAdWatchesForCurrentBoost(nextWatchCount);
@@ -780,10 +785,15 @@ export default function App() {
         <p className="text-sm text-zinc-500 mb-8 max-w-xs">Sign in with Google to start earning points and save your progress.</p>
         <button 
           onClick={handleSignIn}
-          className="w-full max-w-xs bg-white border border-zinc-200 py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-sm hover:shadow-md transition-all active:scale-95 mb-3"
+          disabled={isAuthLoading}
+          className="w-full max-w-xs bg-white border border-zinc-200 py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-sm hover:shadow-md transition-all active:scale-95 mb-3 disabled:opacity-70 disabled:cursor-not-allowed"
         >
-          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
-          Continue with Google
+          {isAuthLoading ? (
+            <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
+          )}
+          {isAuthLoading ? 'Signing in...' : 'Continue with Google'}
         </button>
 
         <button 
@@ -802,7 +812,7 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col bg-zinc-50 font-sans selection:bg-indigo-100 selection:text-indigo-900 overflow-hidden">
       <div className="flex-1 overflow-y-auto scroll-smooth relative">
-        <Header user={user} />
+        <Header user={{ ...user, points: displayPoints }} />
 
         <main className="max-w-md mx-auto px-6 py-6 pb-48">
           <AnimatePresence mode="wait">
@@ -827,24 +837,24 @@ export default function App() {
                   />
                 </div>
 
-                {/* Categories Dropdown */}
-                <div className="space-y-1.5">
+                {/* Categories Buttons */}
+                <div className="space-y-2">
                   <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest ml-1">Categories</label>
-                  <div className="relative">
-                    <select
-                      value={selectedCategory}
-                      onChange={(e) => setSelectedCategory(e.target.value)}
-                      className="w-full bg-white border border-zinc-200 rounded-2xl py-3.5 pl-4 pr-10 text-sm font-bold text-zinc-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm appearance-none cursor-pointer"
-                    >
-                      {categories.map((cat) => (
-                        <option key={cat} value={cat}>
-                          {cat}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-400">
-                      <ChevronDown size={18} />
-                    </div>
+                  <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-1 px-1">
+                    {categories.map((cat) => (
+                      <button
+                        key={cat}
+                        onClick={() => setSelectedCategory(cat)}
+                        className={cn(
+                          "px-4 py-2 rounded-xl text-xs font-bold capitalize transition-all border shadow-sm active:scale-95",
+                          selectedCategory === cat 
+                            ? "bg-indigo-600 border-indigo-700 text-white shadow-indigo-100" 
+                            : "bg-white border-zinc-200 text-zinc-600 hover:border-zinc-300"
+                        )}
+                      >
+                        {cat}
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -935,49 +945,6 @@ export default function App() {
                 )}
               </div>
 
-              {/* Recent Activity Mini-Section */}
-              {transactions.length > 0 && (
-                <div className="space-y-3 pt-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Recent Activity</h3>
-                    <button 
-                      onClick={() => setActiveTab('profile')}
-                      className="text-[10px] font-bold text-indigo-600 hover:underline"
-                    >
-                      View All
-                    </button>
-                  </div>
-                  <div className="space-y-2">
-                    {transactions.slice(0, 2).map((tx) => (
-                      <div key={tx.id} className="bg-white p-3 rounded-xl border border-zinc-100 flex items-center justify-between shadow-sm">
-                        <div className="flex items-center gap-2">
-                          <div className={cn(
-                            "w-8 h-8 rounded-lg flex items-center justify-center",
-                            tx.type === 'earn' ? "bg-emerald-50" : "bg-indigo-50"
-                          )}>
-                            {tx.type === 'earn' ? (
-                              <TrendingUp size={14} className="text-emerald-600" />
-                            ) : (
-                              <Gift size={14} className="text-indigo-600" />
-                            )}
-                          </div>
-                          <div>
-                            <h4 className="text-[11px] font-bold text-zinc-900">{tx.title}</h4>
-                            <p className="text-[9px] text-zinc-400">{new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                          </div>
-                        </div>
-                        <span className={cn(
-                          "text-xs font-bold",
-                          tx.type === 'earn' ? "text-emerald-600" : "text-rose-600"
-                        )}>
-                          {tx.type === 'earn' ? '+' : ''}{tx.amount}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              
               {/* Extra space at the bottom of the list to prevent overlap with Banner Ad and Navbar */}
               <div className="h-40" />
             </motion.div>
@@ -1001,11 +968,11 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-4 mt-8">
                   <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100">
                     <span className="block text-[10px] uppercase font-bold text-zinc-400 tracking-wider mb-1">Total Points</span>
-                    <span className="text-lg font-bold text-zinc-900">{user.points}</span>
+                    <span className="text-lg font-bold text-zinc-900">{displayPoints}</span>
                   </div>
                   <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100">
                     <span className="block text-[10px] uppercase font-bold text-zinc-400 tracking-wider mb-1">Claims</span>
-                    <span className="text-lg font-bold text-zinc-900">{user.totalEarned}</span>
+                    <span className="text-lg font-bold text-zinc-900">{transactions.filter(t => t.type === 'claim').length}</span>
                   </div>
                 </div>
 
