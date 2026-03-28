@@ -1,9 +1,22 @@
-import { useState, useCallback } from 'react';
-import { AdLog } from '../types';
+import { useState, useCallback, useEffect } from 'react';
+import { AdLog, Offer } from '../types';
 import { firebaseService } from '../services/firebase';
 
 export function useAds(uid?: string) {
   const [logs, setLogs] = useState<AdLog[]>([]);
+  const [offers, setOffers] = useState<Offer[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const onOffersChange = useCallback((category: string) => {
+    setIsLoading(true);
+    // Simple where query WITHOUT any orderBy as requested for APK fix
+    // Ensure the category values are compared in lowercase to match Firestore
+    const unsubscribe = firebaseService.onOffersChange(category.toLowerCase(), (data) => {
+      setOffers(data);
+      setIsLoading(false);
+    });
+    return unsubscribe;
+  }, []);
 
   const addLog = useCallback((type: AdLog['type'], event: AdLog['event'], message?: string) => {
     const adId = 
@@ -50,5 +63,5 @@ export function useAds(uid?: string) {
     return null;
   }, [simulateAd, uid]);
 
-  return { logs, addLog, simulateAd, watchAd };
+  return { logs, addLog, simulateAd, watchAd, offers, isLoading, onOffersChange };
 }
