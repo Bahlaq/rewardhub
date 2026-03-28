@@ -169,8 +169,11 @@ export const HomeScreen = ({
   handleWatchAd,
   handleClaimOffer
 }: HomeScreenProps) => {
-  const boostLevel = user.boostLevel || 1;
-  const adsWatchedToday = user.adsWatchedToday || 0;
+  const today = new Date().toDateString();
+  const isNewDay = user.lastBoostDate !== today;
+  
+  const boostLevel = isNewDay ? 1 : (user.boostLevel || 1);
+  const adsWatchedToday = isNewDay ? 0 : (user.adsWatchedToday || 0);
   const adsNeeded = boostLevel;
 
   const boostTitle = boostLevel === 1 ? 'First Boost' : 
