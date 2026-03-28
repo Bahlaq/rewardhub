@@ -29,6 +29,7 @@ import { Offer, UserProfile, Transaction } from './types';
 import { useAds } from './hooks/useAds';
 import { firebaseService, FirebaseUser, isConfigValid } from './services/firebase';
 import { APP_NAME, APP_VERSION } from './constants';
+import { HomeScreen } from './components/HomeScreen';
 
 import icon from '../assets/icon.png';
 
@@ -99,125 +100,6 @@ const Header = ({ user }: { user: UserProfile }) => (
     </div>
   </header>
 );
-
-interface OfferCardProps {
-  offer: Offer;
-  onClaim: (offer: Offer, currentCost: number) => void;
-  user: UserProfile;
-  currentCost: number;
-  isClaimedToday: boolean;
-  claimedCode?: string;
-  key?: string | number;
-}
-
-const OfferCard = ({ offer, onClaim, user, isClaimedToday, claimedCode }: OfferCardProps) => {
-  const isLocked = user.points < offer.points && !isClaimedToday;
-  const [imageError, setImageError] = useState(false);
-  
-  const handleCopyCode = async () => {
-    if (claimedCode || offer.code) {
-      await Clipboard.write({ string: claimedCode || offer.code! });
-      await Toast.show({ text: 'Code copied!', duration: 'short' });
-    }
-  };
-
-  const handleGoToStore = async () => {
-    try {
-      await Browser.open({ url: offer.url });
-    } catch (error) {
-      window.open(offer.url, '_blank');
-    }
-  };
-
-  return (
-    <motion.div 
-      layout
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="bg-white rounded-2xl border border-zinc-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow relative"
-    >
-      {isClaimedToday && (
-        <div className="absolute top-3 left-3 z-20 flex items-center gap-1.5 bg-emerald-500 text-white px-2 py-1 rounded-lg font-bold text-[10px] shadow-lg uppercase tracking-wider">
-          <CheckCircle2 size={12} />
-          Unlocked
-        </div>
-      )}
-      <div className="relative h-40 flex items-center justify-center bg-zinc-50">
-        {!imageError ? (
-          <img 
-            src={offer.logoUrl} 
-            alt={offer.brand} 
-            className="w-full h-full object-contain p-4"
-            referrerPolicy="no-referrer"
-            onError={() => setImageError(true)}
-          />
-        ) : (
-          <div className="w-20 h-20 bg-indigo-600 rounded-full flex items-center justify-center text-white font-black text-3xl uppercase shadow-lg shadow-indigo-200">
-            {offer.brand.charAt(0)}
-          </div>
-        )}
-        <div className="absolute top-3 right-3 bg-white/90 backdrop-blur px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide text-zinc-700 border border-white/20 shadow-sm">
-          {offer.type}
-        </div>
-      </div>
-      <div className="p-4">
-        <div className="flex justify-between items-start mb-1">
-          <h3 className="font-bold text-zinc-900 leading-tight">{offer.brand}</h3>
-        </div>
-        <p className="text-xs text-zinc-500 mb-4 line-clamp-2">{offer.description}</p>
-        
-        {isClaimedToday ? (
-          <div className="space-y-3">
-            {(claimedCode || offer.code) && (
-              <div className="flex items-center gap-2">
-                <div className="flex-1 bg-zinc-100 px-3 py-2 rounded-xl font-mono text-sm font-bold text-zinc-700 border border-zinc-200 truncate">
-                  {claimedCode || offer.code}
-                </div>
-                <button 
-                  onClick={handleCopyCode}
-                  className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition-colors"
-                >
-                  <Copy size={18} />
-                </button>
-              </div>
-            )}
-            <button
-              onClick={handleGoToStore}
-              className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 hover:bg-indigo-700 active:scale-95 transition-all"
-            >
-              <ExternalLink size={14} />
-              Go to Store
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between mt-auto">
-            <div className="flex flex-col">
-              <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Cost</span>
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-bold text-zinc-900">
-                  {offer.points === 0 ? 'FREE' : `${offer.points.toLocaleString()} pts`}
-                </span>
-              </div>
-            </div>
-            <button
-              onClick={() => onClaim(offer, offer.points)}
-              disabled={isLocked}
-              className={cn(
-                "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2",
-                isLocked 
-                  ? "bg-zinc-100 text-zinc-400 cursor-not-allowed" 
-                  : "bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95"
-              )}
-            >
-              {isLocked ? <Clock size={14} /> : <Zap size={14} />}
-              {isLocked ? 'Locked' : 'Unlock'}
-            </button>
-          </div>
-        )}
-      </div>
-    </motion.div>
-  );
-};
 
 const AdSimulatorModal = ({ isOpen, onClose, onReward }: { isOpen: boolean, onClose: () => void, onReward: () => void }) => {
   const [timeLeft, setTimeLeft] = useState(5);
@@ -508,8 +390,6 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const categories = ['all', 'fashion', 'delivery', 'shopping', 'travel', 'food'];
   
-  const [adWatchesForCurrentBoost, setAdWatchesForCurrentBoost] = useState(0);
-  const [boostsClaimedToday, setBoostsClaimedToday] = useState(0);
   const [isAdOpen, setIsAdOpen] = useState(false);
   
   const [localTransactions, setLocalTransactions] = useState<Transaction[]>(() => {
@@ -534,12 +414,7 @@ export default function App() {
 
   const [offers, setOffers] = useState<Offer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const { logs, addLog } = useAds();
-
-  const adsNeededForNextBoost = useMemo(() => {
-    if (boostsClaimedToday === 0) return 1;
-    return boostsClaimedToday * 2;
-  }, [boostsClaimedToday]);
+  const { logs, addLog, watchAd } = useAds(user?.uid);
 
   useEffect(() => {
     // Listen to offers in real-time
@@ -550,18 +425,6 @@ export default function App() {
     });
     return () => unsubscribeOffers();
   }, [selectedCategory]);
-
-  useEffect(() => {
-    // Daily Reset Simulation
-    const lastReset = localStorage.getItem('last_daily_reset');
-    const today = new Date().toDateString();
-    
-    if (lastReset !== today) {
-      setBoostsClaimedToday(0);
-      setAdWatchesForCurrentBoost(0);
-      localStorage.setItem('last_daily_reset', today);
-    }
-  }, []);
 
   // Filtered Offers
   const filteredOffers = useMemo(() => {
@@ -594,34 +457,28 @@ export default function App() {
     showAppOpen();
   }, []);
 
-  const handleWatchAd = () => {
+  const handleWatchAd = async () => {
     addLog('rewarded', 'load');
     setIsAdOpen(true);
     addLog('rewarded', 'show');
   };
 
   const handleAdReward = async () => {
-    const nextWatchCount = adWatchesForCurrentBoost + 1;
-    
-    if (nextWatchCount >= adsNeededForNextBoost) {
-      if (user) {
-        try {
-          await firebaseService.rewardUserPoints(user.uid, 100, 'Daily Boost Reward');
-          
-          setBoostsClaimedToday(prev => prev + 1);
-          setAdWatchesForCurrentBoost(0);
-          
-          addLog('rewarded', 'reward', `User earned 100 points (Boost #${boostsClaimedToday + 1})`);
+    try {
+      const result = await watchAd();
+      
+      if (result) {
+        if (result.rewardClaimed) {
+          addLog('rewarded', 'reward', `User earned 100 points (Boost Level ${result.boostLevel - 1} completed)`);
           Toast.show({ text: "Congratulations! You've earned 100 points!", duration: 'long' });
-        } catch (error) {
-          console.error("Failed to reward points:", error);
-          Toast.show({ text: "Error rewarding points. Please try again.", duration: 'short' });
+        } else {
+          addLog('rewarded', 'reward', `Ad watched (${result.adsWatchedToday}/${result.adsNeeded})`);
+          Toast.show({ text: `Ad watched! Watch ${result.adsNeeded - result.adsWatchedToday} more to get your reward.`, duration: 'short' });
         }
       }
-    } else {
-      setAdWatchesForCurrentBoost(nextWatchCount);
-      addLog('rewarded', 'reward', `Ad watched (${nextWatchCount}/${adsNeededForNextBoost})`);
-      Toast.show({ text: `Ad watched! Watch ${adsNeededForNextBoost - nextWatchCount} more to get your reward.`, duration: 'short' });
+    } catch (error) {
+      console.error("Failed to reward points:", error);
+      Toast.show({ text: "Error rewarding points. Please try again.", duration: 'short' });
     }
   };
 
@@ -817,140 +674,23 @@ export default function App() {
         <main className="max-w-md mx-auto px-6 py-6 pb-48">
           <AnimatePresence mode="wait">
             {activeTab === 'offers' && (
-              <motion.div
-                key="offers"
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 10 }}
-                className="space-y-6"
-              >
-              {/* Search Bar */}
-              <div className="space-y-4">
-                <div className="relative group">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 group-focus-within:text-indigo-600 transition-colors" size={18} />
-                  <input 
-                    type="text"
-                    placeholder="Search coupons, brands, or types..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-white border border-zinc-200 rounded-2xl py-3.5 pl-12 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm"
-                  />
-                </div>
+              <HomeScreen 
+                user={user}
+                offers={offers}
+                isLoading={isLoading}
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
+                selectedCategory={selectedCategory}
+                setSelectedCategory={setSelectedCategory}
+                categories={categories}
+                filteredOffers={filteredOffers}
+                transactions={transactions}
+                handleWatchAd={handleWatchAd}
+                handleClaimOffer={handleClaimOffer}
+              />
+            )}
 
-                {/* Categories Buttons */}
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest ml-1">Categories</label>
-                  <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-1 px-1">
-                    {categories.map((cat) => (
-                      <button
-                        key={cat}
-                        onClick={() => setSelectedCategory(cat)}
-                        className={cn(
-                          "px-4 py-2 rounded-xl text-xs font-bold capitalize transition-all border shadow-sm active:scale-95",
-                          selectedCategory === cat 
-                            ? "bg-indigo-600 border-indigo-700 text-white shadow-indigo-100" 
-                            : "bg-white border-zinc-200 text-zinc-600 hover:border-zinc-300"
-                        )}
-                      >
-                        {cat}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Daily Task Card */}
-              <div className="bg-gradient-to-br from-indigo-600 to-violet-700 rounded-3xl p-6 text-white shadow-xl shadow-indigo-200 overflow-hidden relative">
-                <div className="relative z-10">
-                  <div className="flex justify-between items-start mb-1">
-                    <h2 className="text-lg font-bold">Daily Boost</h2>
-                    <span className="bg-white/20 backdrop-blur px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider">
-                      {boostsClaimedToday > 0 ? `Boost #${boostsClaimedToday + 1}` : 'First Boost'}
-                    </span>
-                  </div>
-                  <p className="text-indigo-100 text-xs mb-4">
-                    {adWatchesForCurrentBoost > 0 
-                      ? `Progress: ${adWatchesForCurrentBoost}/${adsNeededForNextBoost} ads watched`
-                      : `Watch ${adsNeededForNextBoost} ${adsNeededForNextBoost === 1 ? 'ad' : 'ads'} to get +100 points!`}
-                  </p>
-                  
-                  <div className="flex items-center gap-3">
-                    <button 
-                      onClick={handleWatchAd}
-                      className="bg-white text-indigo-600 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-indigo-50 transition-colors"
-                    >
-                      <PlayCircle size={16} />
-                      Watch Now
-                    </button>
-                    
-                    {adsNeededForNextBoost > 1 && (
-                      <div className="flex-1 h-1.5 bg-white/20 rounded-full overflow-hidden">
-                        <motion.div 
-                          initial={{ width: 0 }}
-                          animate={{ width: `${(adWatchesForCurrentBoost / adsNeededForNextBoost) * 100}%` }}
-                          className="h-full bg-white"
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <TrendingUp className="absolute -bottom-4 -right-4 text-white/10 w-32 h-32" />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">
-                  {searchQuery ? `Search Results (${filteredOffers.length})` : 'Available Rewards'}
-                </h2>
-                {!searchQuery && (
-                  <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
-                    {offers.length} Offers
-                  </span>
-                )}
-              </div>
-
-              <div className="grid gap-4">
-                {isLoading ? (
-                  <div className="flex flex-col items-center justify-center py-12 space-y-4">
-                    <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-                    <p className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Refreshing deals...</p>
-                  </div>
-                ) : filteredOffers.length > 0 ? (
-                  filteredOffers.map((offer) => {
-                    const claimsTodayForThisOffer = transactions.filter(t => 
-                      t.type === 'claim' &&
-                      t.title === offer.brand &&
-                      new Date(t.timestamp).toDateString() === new Date().toDateString()
-                    ).length;
-                    const currentCost = offer.points * Math.pow(2, claimsTodayForThisOffer);
-                    const isClaimedToday = claimsTodayForThisOffer > 0;
-
-                    return (
-                      <OfferCard 
-                        key={offer.id} 
-                        offer={offer} 
-                        onClaim={handleClaimOffer} 
-                        user={user} 
-                        currentCost={currentCost}
-                        isClaimedToday={isClaimedToday}
-                        claimedCode={isClaimedToday ? (transactions.find(t => t.title === offer.brand)?.code) : undefined}
-                      />
-                    );
-                  })
-                ) : (
-                  <div className="bg-white rounded-3xl p-12 border border-dashed border-zinc-200 text-center">
-                    <Gift size={32} className="text-zinc-300 mx-auto mb-3" />
-                    <h3 className="text-sm font-bold text-zinc-900 mb-1">More rewards coming soon!</h3>
-                    <p className="text-xs text-zinc-500">We're working on bringing you the best deals.</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Extra space at the bottom of the list to prevent overlap with Banner Ad and Navbar */}
-              <div className="h-40" />
-            </motion.div>
-          )}
-
-          {activeTab === 'profile' && (
+            {activeTab === 'profile' && (
             <motion.div
               key="profile"
               initial={{ opacity: 0, x: -10 }}
