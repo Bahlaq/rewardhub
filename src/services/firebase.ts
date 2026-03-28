@@ -4,6 +4,7 @@ import {
   collection,
   getDocs,
   query,
+  where,
   orderBy,
   doc,
   getDoc,
@@ -26,16 +27,16 @@ import {
 import { Offer, UserProfile, Transaction } from '../types';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyAs-some-key-here", 
+  authDomain: "rewardhub-1ea27.firebaseapp.com",
+  projectId: "rewardhub-1ea27",
+  storageBucket: "rewardhub-1ea27.appspot.com",
+  messagingSenderId: "563861371307",
+  appId: "1:563861371307:android:02f4cdfdbe8b17a247aee",
 };
 
 // Check if config is valid
-export const isConfigValid = !!firebaseConfig.apiKey && !!firebaseConfig.projectId;
+export const isConfigValid = true; // Hardcoded to true since we are providing the config
 
 // Initialize Firebase
 let app;
@@ -153,28 +154,40 @@ export const firebaseService = {
     });
   },
 
-  onOffersChange(callback: (offers: Offer[]) => void) {
+  onOffersChange(category: string, callback: (offers: Offer[]) => void) {
     if (!db) {
       callback([]);
       return () => {};
     }
-    const q = query(collection(db, 'offers'), orderBy('points', 'asc'));
+    
+    let q;
+    const selected = category.toLowerCase();
+    
+    if (selected === 'all') {
+      q = query(collection(db, 'offers'));
+    } else {
+      q = query(
+        collection(db, 'offers'), 
+        where('category', '==', selected)
+      );
+    }
+
     return onSnapshot(q, (snapshot) => {
       if (snapshot.empty) {
-        console.log("[DEBUG] Firestore 'offers' collection returned 0 results.");
+        console.log(`[DEBUG] Firestore 'offers' collection returned 0 results for category: ${selected}`);
       }
       const offers = snapshot.docs.map(doc => {
         const data = doc.data();
         return {
           id: doc.id,
           ...data,
-          points: Number(data.points || 0) // Ensure points is a Number/Integer
+          points: Number(data.points || 0)
         } as Offer;
       });
       callback(offers);
     }, (error) => {
       console.error("Error listening to offers:", error);
-      callback([]); // Call with empty array on error to prevent stuck loading
+      callback([]);
     });
   },
 
@@ -184,15 +197,14 @@ export const firebaseService = {
       return () => {};
     }
     const q = query(
-      collection(db, 'claims'), 
-      orderBy('timestamp', 'desc')
+      collection(db, 'claims'),
+      where('userId', '==', uid)
     );
     
     return onSnapshot(q, (snapshot) => {
       const claims = snapshot.docs
         .map(doc => {
           const data = doc.data();
-          if (data.userId !== uid) return null;
           return {
             id: doc.id,
             type: 'claim',
@@ -202,13 +214,77 @@ export const firebaseService = {
             code: data.code,
             rewardType: data.code ? 'code' : 'link'
           } as Transaction;
-        })
-        .filter(Boolean) as Transaction[];
+        });
       callback(claims);
     }, (error) => {
       console.error("Error listening to claims:", error);
       callback([]);
     });
+  },
+
+  onHistoryChange(uid: string, callback: (history: Transaction[]) => void) {
+    if (!db) {
+      callback([]);
+      return () => {};
+    }
+    const q = query(
+      collection(db, 'history'), 
+      where('userId', '==', uid)
+    );
+    
+    return onSnapshot(q, (snapshot) => {
+      const history = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          type: 'earn',
+          title: data.title,
+          amount: data.amount,
+          timestamp: data.timestamp?.toDate?.()?.toISOString() || new Date().toISOString(),
+        } as Transaction;
+      });
+      callback(history);
+    }, (error) => {
+      console.error("Error listening to history:", error);
+      callback([]);
+    });
+  },
+
+  async rewardUserPoints(uid: string, points: number, title: string) {
+    if (!db) throw new Error("Firestore not initialized");
+    
+    const userRef = doc(db, 'users', uid);
+    const historyRef = doc(collection(db, 'history'));
+
+    try {
+      await runTransaction(db, async (transaction) => {
+        const userDoc = await transaction.get(userRef);
+        if (!userDoc.exists()) {
+          throw new Error("User profile not found");
+        }
+
+        const userData = userDoc.data() as UserProfile;
+        
+        // Update user points
+        transaction.update(userRef, {
+          points: (userData.points || 0) + points,
+          totalEarned: (userData.totalEarned || 0) + points
+        });
+
+        // Record history
+        transaction.set(historyRef, {
+          userId: uid,
+          type: 'earn',
+          title: title,
+          amount: points,
+          timestamp: serverTimestamp()
+        });
+      });
+      return true;
+    } catch (error) {
+      console.error("Error rewarding user points:", error);
+      throw error;
+    }
   },
 
   async claimOffer(uid: string, offer: Offer) {
