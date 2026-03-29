@@ -128,7 +128,7 @@ interface FirestoreErrorInfo {
   }
 }
 
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null, shouldThrow = true) {
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
@@ -148,31 +148,23 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     path
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  if (shouldThrow) {
+    throw new Error(JSON.stringify(errInfo));
+  }
 }
 
 export const firebaseService = {
   async signInWithGoogle() {
     if (!auth) throw new Error("Firebase Auth not initialized");
     try {
+      console.log("[DEBUG] signInWithGoogle started");
       // Try Native Google Auth first if on native platform
       if (Capacitor.isNativePlatform()) {
+        console.log("[DEBUG] Native platform detected, using GoogleAuth plugin");
         const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
         
-        // Ensure initialization with hardcoded production Client ID
-        try {
-          await (GoogleAuth as any).initialize({
-            clientId: PRODUCTION_WEB_CLIENT_ID,
-            serverClientId: PRODUCTION_WEB_CLIENT_ID,
-            androidClientId: PRODUCTION_WEB_CLIENT_ID,
-            scopes: ['profile', 'email'],
-            grantOfflineAccess: true,
-          });
-        } catch (initError) {
-          console.warn("GoogleAuth.initialize error (might already be initialized):", initError);
-        }
-
         const googleUser = await GoogleAuth.signIn();
+        console.log("[DEBUG] GoogleAuth.signIn success", googleUser.email);
         const idToken = googleUser.authentication.idToken;
         
         if (!idToken) {
@@ -183,10 +175,12 @@ export const firebaseService = {
         // This is the ONLY way to fix 'Invalid Action' on Android.
         const credential = GoogleAuthProvider.credential(idToken);
         const result = await signInWithCredential(auth, credential);
+        console.log("[DEBUG] Firebase signInWithCredential success", result.user.uid);
         return result.user;
       }
       
       // On web, use popup
+      console.log("[DEBUG] Web platform detected, using signInWithPopup");
       const result = await signInWithPopup(auth, googleProvider);
       return result.user;
     } catch (error) {
@@ -257,7 +251,7 @@ export const firebaseService = {
         callback(null);
       }
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, `${collectionName}/${uid}`);
+      handleFirestoreError(error, OperationType.GET, `${collectionName}/${uid}`, false);
       callback(null);
     });
   },
@@ -268,14 +262,9 @@ export const firebaseService = {
       return () => {};
     }
     
-    // Version 7.4.0: Fetch ALL offers once and filter client-side for stability
-    // This fixes the 'Disappearing Offers' and 'Firestore Index' issues forever.
     const q = query(collection(db, 'offers'));
 
     return onSnapshot(q, (snapshot) => {
-      if (snapshot.empty) {
-        console.log(`[DEBUG] Firestore 'offers' collection is empty`);
-      }
       const offers = snapshot.docs.map(doc => {
         const data = doc.data();
         return {
@@ -286,7 +275,7 @@ export const firebaseService = {
       });
       callback(offers);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'offers');
+      handleFirestoreError(error, OperationType.LIST, 'offers', false);
       callback([]);
     });
   },
@@ -317,7 +306,7 @@ export const firebaseService = {
         });
       callback(claims);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'claims');
+      handleFirestoreError(error, OperationType.LIST, 'claims', false);
       callback([]);
     });
   },
@@ -345,7 +334,7 @@ export const firebaseService = {
       });
       callback(history);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'history');
+      handleFirestoreError(error, OperationType.LIST, 'history', false);
       callback([]);
     });
   },
