@@ -196,7 +196,7 @@ const DebugLogsModal = ({ isOpen, onClose, logs }: { isOpen: boolean, onClose: (
               )}>
                 <div className="flex justify-between mb-1 opacity-50">
                   <span>{log.type.toUpperCase()}</span>
-                  <span>{log.timestamp.toLocaleTimeString()}</span>
+                  <span>{new Date(log.timestamp).toLocaleTimeString()}</span>
                 </div>
                 <div className="break-all">{log.message}</div>
               </div>
@@ -483,13 +483,14 @@ export default function App() {
 
   // Filtered Offers (Client-Side Filtering)
   const filteredOffers = useMemo(() => {
-    return offers.filter(offer => {
+    const result = offers.filter(offer => {
       // 1. Category Filter
       const selected = selectedCategory.toLowerCase();
       const matchesCategory = selected === 'all' || 
         (Array.isArray(offer.category) 
-          ? offer.category.some(cat => cat.toLowerCase() === selected)
+          ? offer.category.some(cat => String(cat).toLowerCase() === selected)
           : String(offer.category || '').toLowerCase() === selected);
+      
       if (!matchesCategory) return false;
 
       // 2. Search Filter
@@ -501,6 +502,9 @@ export default function App() {
       
       return matchesSearch;
     });
+    
+    console.log(`[DEBUG] Filtering: ${offers.length} total -> ${result.length} filtered (Category: ${selectedCategory}, Search: "${searchQuery}")`);
+    return result;
   }, [offers, searchQuery, selectedCategory]);
 
   const displayPoints = useMemo(() => {
@@ -590,6 +594,7 @@ export default function App() {
   };
 
   const handleSignIn = async () => {
+    setIsAuthLoading(true);
     try {
       addLog('app_open', 'load', 'Starting Google Sign-In...');
       await firebaseService.signInWithGoogle();
@@ -602,22 +607,29 @@ export default function App() {
         text: `Google Sign-In failed: ${errorMessage.slice(0, 50)}...`, 
         duration: 'long' 
       });
+    } finally {
+      setIsAuthLoading(false);
     }
   };
 
   const handleGuestSignIn = async () => {
     setIsAuthLoading(true);
+    addLog('app_open', 'load', 'Starting Guest Sign-In...');
     
     // Version 7.4.0: Prioritize Anonymous Sign-In to ensure proper Firestore permissions
     try {
       const fUser = await firebaseService.signInAnonymously();
+      console.log("[DEBUG] Anonymous sign-in success", fUser.uid);
       setFirebaseUser(fUser);
+      addLog('app_open', 'show', 'Guest Sign-In Success (Firebase)');
       
       // Check if we have a profile for this anonymous user
       const profile = await firebaseService.getUserProfile(fUser.uid);
       if (profile) {
+        console.log("[DEBUG] Profile found for anonymous user");
         setUser(profile);
       } else {
+        console.log("[DEBUG] Creating new profile for anonymous user");
         // Create new profile for anonymous user
         const newProfile: UserProfile = {
           uid: fUser.uid,
@@ -632,6 +644,7 @@ export default function App() {
       }
     } catch (err) {
       console.error("Anonymous sign-in failed:", err);
+      addLog('app_open', 'error', `Firebase Guest Sign-In failed: ${err instanceof Error ? err.message : String(err)}`);
       
       // Fallback to local guest ID if Firebase fails (offline mode)
       let localUid = localStorage.getItem('persistent_guest_id');
@@ -639,6 +652,7 @@ export default function App() {
         localUid = 'local_guest_' + Math.random().toString(36).substr(2, 9);
         localStorage.setItem('persistent_guest_id', localUid);
       }
+      console.log("[DEBUG] Using local guest ID", localUid);
 
       const guestProfile: UserProfile = {
         uid: localUid,
@@ -651,6 +665,7 @@ export default function App() {
 
       setFirebaseUser({ uid: localUid, isAnonymous: true } as any);
       setUser(guestProfile);
+      addLog('app_open', 'show', 'Guest Sign-In Success (Local Fallback)');
     } finally {
       setIsAuthLoading(false);
     }
@@ -708,308 +723,325 @@ export default function App() {
     );
   }
 
-  if (isAuthLoading) {
-    return (
-      <div 
-        className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center gap-6"
-        style={{ 
-          paddingTop: 'env(safe-area-inset-top)',
-          paddingBottom: 'env(safe-area-inset-bottom)'
-        }}
-      >
-        <Logo className="max-w-[120px]" />
-        <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
+  // Version 7.4.0: Refactored return to ensure DebugLogsModal is always available
+  const renderMainContent = () => {
+    if (isAuthLoading) {
+      return (
+        <div 
+          className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center gap-6"
+          style={{ 
+            paddingTop: 'env(safe-area-inset-top)',
+            paddingBottom: 'env(safe-area-inset-bottom)'
+          }}
+        >
+          <Logo className="max-w-[120px]" />
+          <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+        </div>
+      );
+    }
 
-  if (!firebaseUser) {
-    return (
-      <div 
-        className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-8 text-center"
-        style={{ 
-          paddingTop: 'env(safe-area-inset-top)',
-          paddingBottom: 'env(safe-area-inset-bottom)'
-        }}
-      >
-        <div className="w-full max-w-sm flex flex-col items-center">
-          <Logo className="max-w-[160px]" />
-          <h1 className="text-3xl font-black tracking-tight text-zinc-900 mt-8 mb-3">Welcome to RewardHub</h1>
-          <p className="text-sm text-zinc-500 mb-10 max-w-[280px]">Sign in with Google to start earning points and save your progress.</p>
-          
-          <div className="w-full space-y-4">
-            <button 
-              onClick={handleSignIn}
-              disabled={isAuthLoading}
-              className="w-full bg-white border border-zinc-200 py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-sm hover:shadow-md transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
-            >
-              {isAuthLoading ? (
-                <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
-              )}
-              {isAuthLoading ? 'Signing in...' : 'Continue with Google'}
-            </button>
+    if (!firebaseUser) {
+      return (
+        <div 
+          className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-8 text-center"
+          style={{ 
+            paddingTop: 'env(safe-area-inset-top)',
+            paddingBottom: 'env(safe-area-inset-bottom)'
+          }}
+        >
+          <div className="w-full max-w-sm flex flex-col items-center">
+            <Logo className="max-w-[160px]" />
+            <h1 className="text-3xl font-black tracking-tight text-zinc-900 mt-8 mb-3">Welcome to RewardHub</h1>
+            <p className="text-sm text-zinc-500 mb-10 max-w-[280px]">Sign in with Google to start earning points and save your progress.</p>
+            
+            <div className="w-full space-y-4">
+              <button 
+                onClick={handleSignIn}
+                disabled={isAuthLoading}
+                className="w-full bg-white border border-zinc-200 py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-sm hover:shadow-md transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
+              >
+                {isAuthLoading ? (
+                  <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
+                )}
+                {isAuthLoading ? 'Signing in...' : 'Continue with Google'}
+              </button>
+
+              <button 
+                onClick={handleGuestSignIn}
+                className="w-full bg-zinc-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg shadow-zinc-200 hover:bg-zinc-800 transition-all active:scale-95"
+              >
+                <User size={20} />
+                Continue as Guest
+              </button>
+            </div>
+            
+            <p className="mt-12 text-[10px] text-zinc-400 font-medium uppercase tracking-widest">
+              Version {APP_VERSION}
+            </p>
 
             <button 
-              onClick={handleGuestSignIn}
-              className="w-full bg-zinc-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg shadow-zinc-200 hover:bg-zinc-800 transition-all active:scale-95"
+              onClick={() => setIsDebugModalOpen(true)}
+              className="mt-4 flex items-center gap-2 text-[10px] font-bold text-zinc-300 uppercase tracking-wider hover:text-zinc-500 transition-colors"
             >
-              <User size={20} />
-              Continue as Guest
+              <Terminal size={12} />
+              System Debugger
             </button>
           </div>
-          
-          <p className="mt-12 text-[10px] text-zinc-400 font-medium uppercase tracking-widest">
-            Version {APP_VERSION}
-          </p>
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
-  if (!user) return null;
+    if (!user) {
+      return (
+        <div className="h-screen flex flex-col items-center justify-center bg-zinc-50 p-6">
+          <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4" />
+          <p className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Loading Profile...</p>
+        </div>
+      );
+    }
 
-  return (
-    <div className="h-screen flex flex-col bg-zinc-50 font-sans selection:bg-indigo-100 selection:text-indigo-900 overflow-hidden">
-      <div className="flex-1 overflow-y-auto scroll-smooth relative">
-        <Header user={{ ...user, points: displayPoints }} />
+    return (
+      <div className="h-screen flex flex-col bg-zinc-50 font-sans selection:bg-indigo-100 selection:text-indigo-900 overflow-hidden">
+        <div className="flex-1 overflow-y-auto scroll-smooth relative">
+          <Header user={{ ...user, points: displayPoints }} />
 
-        <main className="max-w-md mx-auto px-6 py-6 pb-[120px]">
-          <AnimatePresence mode="wait">
-            {activeTab === 'offers' && (
-              <HomeScreen 
-                user={user}
-                offers={offers}
-                isLoading={isLoading}
-                searchQuery={searchQuery}
-                setSearchQuery={setSearchQuery}
-                selectedCategory={selectedCategory}
-                setSelectedCategory={setSelectedCategory}
-                categories={categories}
-                filteredOffers={filteredOffers}
-                transactions={transactions}
-                handleWatchAd={handleWatchAd}
-                handleClaimOffer={handleClaimOffer}
-              />
-            )}
+          <main className="max-w-md mx-auto px-6 py-6 pb-[120px]">
+            <AnimatePresence mode="wait">
+              {activeTab === 'offers' && (
+                <HomeScreen 
+                  user={user}
+                  offers={offers}
+                  isLoading={isLoading}
+                  searchQuery={searchQuery}
+                  setSearchQuery={setSearchQuery}
+                  selectedCategory={selectedCategory}
+                  setSelectedCategory={setSelectedCategory}
+                  categories={categories}
+                  filteredOffers={filteredOffers}
+                  transactions={transactions}
+                  handleWatchAd={handleWatchAd}
+                  handleClaimOffer={handleClaimOffer}
+                />
+              )}
 
-            {activeTab === 'profile' && (
-            <motion.div
-              key="profile"
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 10 }}
-              className="space-y-6"
-            >
-              <div className="bg-white rounded-3xl p-6 border border-zinc-200 shadow-sm text-center">
-                <div className="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <User size={40} className="text-indigo-600" />
-                </div>
-                <h2 className="text-xl font-bold text-zinc-900">{user.email}</h2>
-                <p className="text-xs text-zinc-500 font-medium">Member since {APP_VERSION}</p>
-                
-                <div className="grid grid-cols-2 gap-4 mt-8">
-                  <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100">
-                    <span className="block text-[10px] uppercase font-bold text-zinc-400 tracking-wider mb-1">Total Points</span>
-                    <span className="text-lg font-bold text-zinc-900">{displayPoints}</span>
+              {activeTab === 'profile' && (
+              <motion.div
+                key="profile"
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 10 }}
+                className="space-y-6"
+              >
+                <div className="bg-white rounded-3xl p-6 border border-zinc-200 shadow-sm text-center">
+                  <div className="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <User size={40} className="text-indigo-600" />
                   </div>
-                  <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100">
-                    <span className="block text-[10px] uppercase font-bold text-zinc-400 tracking-wider mb-1">Claims</span>
-                    <span className="text-lg font-bold text-zinc-900">{transactions.filter(t => t.type === 'claim').length}</span>
+                  <h2 className="text-xl font-bold text-zinc-900">{user.email}</h2>
+                  <p className="text-xs text-zinc-500 font-medium">Member since {APP_VERSION}</p>
+                  
+                  <div className="grid grid-cols-2 gap-4 mt-8">
+                    <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100">
+                      <span className="block text-[10px] uppercase font-bold text-zinc-400 tracking-wider mb-1">Total Points</span>
+                      <span className="text-lg font-bold text-zinc-900">{displayPoints}</span>
+                    </div>
+                    <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100">
+                      <span className="block text-[10px] uppercase font-bold text-zinc-400 tracking-wider mb-1">Claims</span>
+                      <span className="text-lg font-bold text-zinc-900">{transactions.filter(t => t.type === 'claim').length}</span>
+                    </div>
                   </div>
-                </div>
 
-                <div className="mt-6 pt-6 border-t border-zinc-100">
-                  <button 
-                    onClick={() => setIsDebugModalOpen(true)}
-                    className="w-full flex items-center justify-between p-4 bg-zinc-50 rounded-2xl border border-zinc-100 hover:bg-zinc-100 transition-colors group mt-3"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border border-zinc-200 shadow-sm">
-                        <Terminal size={18} className="text-zinc-600" />
-                      </div>
-                      <div className="text-left">
-                        <h4 className="text-sm font-bold text-zinc-900">System Debugger</h4>
-                        <p className="text-[10px] text-zinc-400 font-medium">View logs and error details</p>
-                      </div>
-                    </div>
-                    <ChevronRight size={18} className="text-zinc-300 group-hover:text-zinc-500 transition-colors" />
-                  </button>
-                  <button 
-                    onClick={openPrivacyPolicy}
-                    className="w-full flex items-center justify-between p-4 bg-zinc-50 rounded-2xl border border-zinc-100 hover:bg-zinc-100 transition-colors group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border border-zinc-200 shadow-sm">
-                        <ShieldCheck size={18} className="text-zinc-600" />
-                      </div>
-                      <div className="text-left">
-                        <h4 className="text-sm font-bold text-zinc-900">Privacy Policy</h4>
-                        <p className="text-[10px] text-zinc-400 font-medium">How we handle your data</p>
-                      </div>
-                    </div>
-                    <ChevronRight size={18} className="text-zinc-300 group-hover:text-zinc-500 transition-colors" />
-                  </button>
-                  <button 
-                    onClick={handleSignOut}
-                    className="w-full flex items-center justify-between p-4 bg-rose-50 rounded-2xl border border-rose-100 hover:bg-rose-100 transition-colors group mt-3"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border border-rose-200 shadow-sm">
-                        <X size={18} className="text-rose-600" />
-                      </div>
-                      <div className="text-left">
-                        <h4 className="text-sm font-bold text-rose-900">Sign Out</h4>
-                        <p className="text-[10px] text-rose-400 font-medium">Log out of your account</p>
-                      </div>
-                    </div>
-                    <ChevronRight size={18} className="text-rose-300 group-hover:text-rose-500 transition-colors" />
-                  </button>
-                  <button 
-                    onClick={() => setIsDeleteModalOpen(true)}
-                    className="w-full flex items-center justify-between p-4 bg-zinc-50 rounded-2xl border border-zinc-100 hover:bg-rose-50 hover:border-rose-100 transition-colors group mt-3"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border border-zinc-200 shadow-sm group-hover:border-rose-200">
-                        <Trash2 size={18} className="text-zinc-400 group-hover:text-rose-600" />
-                      </div>
-                      <div className="text-left">
-                        <h4 className="text-sm font-bold text-zinc-500 group-hover:text-rose-900">Delete Account</h4>
-                        <p className="text-[10px] text-zinc-400 font-medium group-hover:text-rose-400">Permanently remove all data</p>
-                      </div>
-                    </div>
-                    <ChevronRight size={18} className="text-zinc-300 group-hover:text-rose-500 transition-colors" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-sm font-bold text-zinc-400 uppercase tracking-widest">
-                  <History size={16} />
-                  Activity History
-                </div>
-                {transactions.length === 0 ? (
-                  <div className="bg-white rounded-2xl p-8 border border-dashed border-zinc-300 text-center">
-                    <History size={24} className="text-zinc-300 mx-auto mb-2" />
-                    <p className="text-xs text-zinc-400">No activity yet. Start earning!</p>
-                  </div>
-                ) : (
-                  transactions.map((tx) => (
-                    <div key={tx.id} className="bg-white p-4 rounded-2xl border border-zinc-200 flex items-center justify-between shadow-sm">
+                  <div className="mt-6 pt-6 border-t border-zinc-100">
+                    <button 
+                      onClick={() => setIsDebugModalOpen(true)}
+                      className="w-full flex items-center justify-between p-4 bg-zinc-50 rounded-2xl border border-zinc-100 hover:bg-zinc-100 transition-colors group mt-3"
+                    >
                       <div className="flex items-center gap-3">
-                        <div className={cn(
-                          "w-10 h-10 rounded-xl flex items-center justify-center",
-                          tx.type === 'earn' ? "bg-emerald-50" : "bg-indigo-50"
-                        )}>
-                          {tx.type === 'earn' ? (
-                            <TrendingUp size={20} className="text-emerald-600" />
-                          ) : (
-                            <Gift size={20} className="text-indigo-600" />
+                        <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border border-zinc-200 shadow-sm">
+                          <Terminal size={18} className="text-zinc-600" />
+                        </div>
+                        <div className="text-left">
+                          <h4 className="text-sm font-bold text-zinc-900">System Debugger</h4>
+                          <p className="text-[10px] text-zinc-400 font-medium">View logs and error details</p>
+                        </div>
+                      </div>
+                      <ChevronRight size={18} className="text-zinc-300 group-hover:text-zinc-500 transition-colors" />
+                    </button>
+                    <button 
+                      onClick={openPrivacyPolicy}
+                      className="w-full flex items-center justify-between p-4 bg-zinc-50 rounded-2xl border border-zinc-100 hover:bg-zinc-100 transition-colors group"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border border-zinc-200 shadow-sm">
+                          <ShieldCheck size={18} className="text-zinc-600" />
+                        </div>
+                        <div className="text-left">
+                          <h4 className="text-sm font-bold text-zinc-900">Privacy Policy</h4>
+                          <p className="text-[10px] text-zinc-400 font-medium">How we handle your data</p>
+                        </div>
+                      </div>
+                      <ChevronRight size={18} className="text-zinc-300 group-hover:text-zinc-500 transition-colors" />
+                    </button>
+                    <button 
+                      onClick={handleSignOut}
+                      className="w-full flex items-center justify-between p-4 bg-rose-50 rounded-2xl border border-rose-100 hover:bg-rose-100 transition-colors group mt-3"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border border-rose-200 shadow-sm">
+                          <X size={18} className="text-rose-600" />
+                        </div>
+                        <div className="text-left">
+                          <h4 className="text-sm font-bold text-rose-900">Sign Out</h4>
+                          <p className="text-[10px] text-rose-400 font-medium">Log out of your account</p>
+                        </div>
+                      </div>
+                      <ChevronRight size={18} className="text-rose-300 group-hover:text-rose-500 transition-colors" />
+                    </button>
+                    <button 
+                      onClick={() => setIsDeleteModalOpen(true)}
+                      className="w-full flex items-center justify-between p-4 bg-zinc-50 rounded-2xl border border-zinc-100 hover:bg-rose-50 hover:border-rose-100 transition-colors group mt-3"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border border-zinc-200 shadow-sm group-hover:border-rose-200">
+                          <Trash2 size={18} className="text-zinc-400 group-hover:text-rose-600" />
+                        </div>
+                        <div className="text-left">
+                          <h4 className="text-sm font-bold text-zinc-500 group-hover:text-rose-900">Delete Account</h4>
+                          <p className="text-[10px] text-zinc-400 font-medium group-hover:text-rose-400">Permanently remove all data</p>
+                        </div>
+                      </div>
+                      <ChevronRight size={18} className="text-zinc-300 group-hover:text-rose-500 transition-colors" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-bold text-zinc-400 uppercase tracking-widest">
+                    <History size={16} />
+                    Activity History
+                  </div>
+                  {transactions.length === 0 ? (
+                    <div className="bg-white rounded-2xl p-8 border border-dashed border-zinc-300 text-center">
+                      <History size={24} className="text-zinc-300 mx-auto mb-2" />
+                      <p className="text-xs text-zinc-400">No activity yet. Start earning!</p>
+                    </div>
+                  ) : (
+                    transactions.map((tx) => (
+                      <div key={tx.id} className="bg-white p-4 rounded-2xl border border-zinc-200 flex items-center justify-between shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <div className={cn(
+                            "w-10 h-10 rounded-xl flex items-center justify-center",
+                            tx.type === 'earn' ? "bg-emerald-50" : "bg-indigo-50"
+                          )}>
+                            {tx.type === 'earn' ? (
+                              <TrendingUp size={20} className="text-emerald-600" />
+                            ) : (
+                              <Gift size={20} className="text-indigo-600" />
+                            )}
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold text-zinc-900">{tx.title}</h4>
+                            <p className="text-[10px] text-zinc-400">
+                              {new Date(tx.timestamp).toLocaleDateString()} at {new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right flex flex-col items-end gap-1">
+                          <span className={cn(
+                            "block text-sm font-bold",
+                            tx.type === 'earn' ? "text-emerald-600" : "text-rose-600"
+                          )}>
+                            {tx.type === 'earn' ? '+' : ''}{tx.amount} pts
+                          </span>
+                          {tx.code && (
+                            tx.rewardType === 'link' ? (
+                              <button 
+                                onClick={async () => {
+                                  try {
+                                    await Browser.open({ url: tx.code! });
+                                  } catch (error) {
+                                    window.open(tx.code!, '_blank');
+                                  }
+                                }}
+                                className="flex items-center gap-1 text-[10px] font-bold bg-indigo-600 px-2 py-0.5 rounded text-white border border-indigo-700 hover:bg-indigo-700 transition-colors"
+                              >
+                                Open Link
+                                <ExternalLink size={10} />
+                              </button>
+                            ) : (
+                              <button 
+                                onClick={async () => {
+                                  await Clipboard.write({ string: tx.code! });
+                                  await Toast.show({ text: 'Code copied!', duration: 'short' });
+                                }}
+                                className="flex items-center gap-1 text-[10px] font-mono bg-zinc-100 px-2 py-0.5 rounded text-zinc-600 border border-zinc-200 hover:bg-zinc-200 transition-colors"
+                              >
+                                {tx.code}
+                                <Copy size={10} />
+                              </button>
+                            )
                           )}
                         </div>
-                        <div>
-                          <h4 className="text-sm font-bold text-zinc-900">{tx.title}</h4>
-                          <p className="text-[10px] text-zinc-400">
-                            {new Date(tx.timestamp).toLocaleDateString()} at {new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </p>
-                        </div>
                       </div>
-                      <div className="text-right flex flex-col items-end gap-1">
-                        <span className={cn(
-                          "block text-sm font-bold",
-                          tx.type === 'earn' ? "text-emerald-600" : "text-rose-600"
-                        )}>
-                          {tx.type === 'earn' ? '+' : ''}{tx.amount} pts
-                        </span>
-                        {tx.code && (
-                          tx.rewardType === 'link' ? (
-                            <button 
-                              onClick={async () => {
-                                try {
-                                  await Browser.open({ url: tx.code! });
-                                } catch (error) {
-                                  window.open(tx.code!, '_blank');
-                                }
-                              }}
-                              className="flex items-center gap-1 text-[10px] font-bold bg-indigo-600 px-2 py-0.5 rounded text-white border border-indigo-700 hover:bg-indigo-700 transition-colors"
-                            >
-                              Open Link
-                              <ExternalLink size={10} />
-                            </button>
-                          ) : (
-                            <button 
-                              onClick={async () => {
-                                await Clipboard.write({ string: tx.code! });
-                                await Toast.show({ text: 'Code copied!', duration: 'short' });
-                              }}
-                              className="flex items-center gap-1 text-[10px] font-mono bg-zinc-100 px-2 py-0.5 rounded text-zinc-600 border border-zinc-200 hover:bg-zinc-200 transition-colors"
-                            >
-                              {tx.code}
-                              <Copy size={10} />
-                            </button>
-                          )
-                        )}
-                      </div>
-                    </div>
-                  ))
-                )}
-                
-                {/* Extra space at the bottom of the list to prevent overlap with Banner Ad and Navbar */}
-                <div className="h-40" />
-              </div>
-            </motion.div>
-          )}
+                    ))
+                  )}
+                  
+                  {/* Extra space at the bottom of the list to prevent overlap with Banner Ad and Navbar */}
+                  <div className="h-40" />
+                </div>
+              </motion.div>
+            )}
 
-        </AnimatePresence>
-      </main>
-    </div>
+          </AnimatePresence>
+        </main>
+      </div>
 
-    <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
-    
-    <AdSimulatorModal 
-      isOpen={isAdOpen} 
-      onClose={() => setIsAdOpen(false)} 
-      onReward={handleAdReward} 
-    />
-
-    <AnimatePresence>
-      <PrivacyModal 
-        isOpen={isPrivacyModalOpen} 
-        onClose={() => setIsPrivacyModalOpen(false)} 
+      <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
+      
+      <AdSimulatorModal 
+        isOpen={isAdOpen} 
+        onClose={() => setIsAdOpen(false)} 
+        onReward={handleAdReward} 
       />
-    </AnimatePresence>
 
-    <AnimatePresence>
-      <DeleteAccountModal 
-        isOpen={isDeleteModalOpen} 
-        onClose={() => setIsDeleteModalOpen(false)} 
-        onConfirm={handleDeleteAccount}
-      />
-    </AnimatePresence>
+      <AnimatePresence>
+        <PrivacyModal 
+          isOpen={isPrivacyModalOpen} 
+          onClose={() => setIsPrivacyModalOpen(false)} 
+        />
+      </AnimatePresence>
 
-    <AnimatePresence>
-      <DebugLogsModal 
-        isOpen={isDebugModalOpen} 
-        onClose={() => setIsDebugModalOpen(false)} 
-        logs={logs}
-      />
-    </AnimatePresence>
+      <AnimatePresence>
+        <DeleteAccountModal 
+          isOpen={isDeleteModalOpen} 
+          onClose={() => setIsDeleteModalOpen(false)} 
+          onConfirm={handleDeleteAccount}
+        />
+      </AnimatePresence>
 
-    <AnimatePresence>
-      <DebugLogsModal 
-        isOpen={isDebugModalOpen} 
-        onClose={() => setIsDebugModalOpen(false)} 
-        logs={logs}
-      />
-    </AnimatePresence>
-
-    {/* Version 7.4.0: Fixed Banner Ad with higher z-index and better placement */}
-    <div className="fixed bottom-24 left-0 right-0 px-6 pointer-events-none z-40">
-      <div className="max-w-md mx-auto bg-zinc-900/95 backdrop-blur-md border border-zinc-800 h-14 rounded-2xl flex items-center justify-center text-[11px] font-black text-white uppercase tracking-[0.2em] pointer-events-auto shadow-2xl shadow-black/20">
-        <span className="opacity-40">Sponsored Ad Space</span>
+      {/* Version 7.4.0: Fixed Banner Ad with higher z-index and better placement */}
+      <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+100px)] left-0 right-0 px-6 pointer-events-none z-[1000]">
+        <div className="max-w-md mx-auto bg-zinc-900/95 backdrop-blur-md border border-zinc-800 h-14 rounded-2xl flex items-center justify-center text-[11px] font-black text-white uppercase tracking-[0.2em] pointer-events-auto shadow-2xl shadow-black/40">
+          <span className="opacity-40">Sponsored Ad Space</span>
+        </div>
       </div>
     </div>
-  </div>
-);
+    );
+  };
+
+  return (
+    <>
+      {renderMainContent()}
+      <AnimatePresence>
+        {isDebugModalOpen && (
+          <DebugLogsModal 
+            isOpen={isDebugModalOpen} 
+            onClose={() => setIsDebugModalOpen(false)} 
+            logs={logs}
+          />
+        )}
+      </AnimatePresence>
+    </>
+  );
 }
