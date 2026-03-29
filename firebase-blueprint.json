@@ -70,6 +70,10 @@
     "/history/{historyId}": {
       "schema": "History",
       "description": "User earning history."
+    },
+    "/guests/{userId}": {
+      "schema": "User",
+      "description": "Guest profile documents."
     }
   }
 }
