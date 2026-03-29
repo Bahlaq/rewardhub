@@ -165,16 +165,13 @@ export const firebaseService = {
         const result = await signInWithCredential(auth, credential);
         return result.user;
       }
-      throw new Error("Not on native platform, using popup");
-    } catch (nativeError) {
-      console.warn("Native Google Auth failed, falling back to popup:", nativeError);
-      try {
-        const result = await signInWithPopup(auth, googleProvider);
-        return result.user;
-      } catch (popupError) {
-        console.error("Popup Google Auth failed:", popupError);
-        throw popupError;
-      }
+      
+      // On web, use popup
+      const result = await signInWithPopup(auth, googleProvider);
+      return result.user;
+    } catch (error) {
+      console.error("Google Auth failed:", error);
+      throw error;
     }
   },
 
