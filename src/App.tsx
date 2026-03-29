@@ -536,12 +536,12 @@ export default function App() {
       const result = await watchAd();
       
       if (result) {
+        addLog('rewarded', 'reward', `User earned 100 points. Progress: ${result.adsWatchedToday}/${result.adsNeeded}`);
+        Toast.show({ text: "Congratulations! You've earned 100 points!", duration: 'long' });
+        
         if (result.rewardClaimed) {
-          addLog('rewarded', 'reward', `User earned 100 points (Boost Level ${result.boostLevel - 1} completed)`);
-          Toast.show({ text: "Congratulations! You've earned 100 points!", duration: 'long' });
-        } else {
-          addLog('rewarded', 'reward', `Ad watched (${result.adsWatchedToday}/${result.adsNeeded})`);
-          Toast.show({ text: `Ad watched! Watch ${result.adsNeeded - result.adsWatchedToday} more to get your reward.`, duration: 'short' });
+          addLog('rewarded', 'reward', `Boost Level ${result.boostLevel - 1} completed!`);
+          Toast.show({ text: "Boost Level Completed! Next level started.", duration: 'short' });
         }
       }
     } catch (error) {
@@ -1019,13 +1019,6 @@ export default function App() {
           onConfirm={handleDeleteAccount}
         />
       </AnimatePresence>
-
-      {/* Version 7.4.0: Fixed Banner Ad with higher z-index and better placement */}
-      <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+100px)] left-0 right-0 px-6 pointer-events-none z-[1000]">
-        <div className="max-w-md mx-auto bg-zinc-900/95 backdrop-blur-md border border-zinc-800 h-14 rounded-2xl flex items-center justify-center text-[11px] font-black text-white uppercase tracking-[0.2em] pointer-events-auto shadow-2xl shadow-black/40">
-          <span className="opacity-40">Sponsored Ad Space</span>
-        </div>
-      </div>
     </div>
     );
   };
