@@ -160,8 +160,28 @@ export const firebaseService = {
       // Try Native Google Auth first if on native platform
       if (Capacitor.isNativePlatform()) {
         const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
+        
+        // Ensure initialization with hardcoded production Client ID
+        try {
+          await (GoogleAuth as any).initialize({
+            clientId: PRODUCTION_WEB_CLIENT_ID,
+            serverClientId: PRODUCTION_WEB_CLIENT_ID,
+            androidClientId: PRODUCTION_WEB_CLIENT_ID,
+            scopes: ['profile', 'email'],
+            grantOfflineAccess: true,
+          });
+        } catch (initError) {
+          console.warn("GoogleAuth.initialize error (might already be initialized):", initError);
+        }
+
         const googleUser = await GoogleAuth.signIn();
-        const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
+        const idToken = googleUser.authentication.idToken;
+        
+        if (!idToken) {
+          throw new Error("No ID Token received from Google Auth. Please ensure your SHA-1 is registered in Firebase.");
+        }
+        
+        const credential = GoogleAuthProvider.credential(idToken);
         const result = await signInWithCredential(auth, credential);
         return result.user;
       }
