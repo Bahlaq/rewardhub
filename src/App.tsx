@@ -39,8 +39,8 @@ function cn(...inputs: ClassValue[]) {
 
 // --- Components ---
 
-const Logo = () => (
-  <div className="relative w-full max-w-[200px] mx-auto group cursor-pointer">
+const Logo = ({ className }: { className?: string }) => (
+  <div className={cn("relative w-full mx-auto group cursor-pointer", className)}>
     <img 
       src={icon} 
       alt={`${APP_NAME} Logo`} 
@@ -82,14 +82,14 @@ const Navbar = ({ activeTab, setActiveTab }: { activeTab: string, setActiveTab: 
 
 const Header = ({ user }: { user: UserProfile }) => (
   <header 
-    className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-zinc-100 px-6 pb-4 z-40"
-    style={{ paddingTop: 'calc(env(safe-area-inset-top) + 1rem)' }}
+    className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-zinc-100 px-6 pb-2 z-40"
+    style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.5rem)' }}
   >
     <div className="max-w-md mx-auto flex justify-between items-center">
       <div className="flex items-center gap-3">
-        <Logo />
+        <Logo className="max-w-[40px]" />
         <div>
-          <h1 className="text-lg font-black tracking-tight text-zinc-900 leading-none">{APP_NAME}</h1>
+          <h1 className="text-base font-black tracking-tight text-zinc-900 leading-none">{APP_NAME}</h1>
           <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mt-1">Earn while you play</p>
         </div>
       </div>
@@ -643,7 +643,7 @@ export default function App() {
           paddingBottom: 'env(safe-area-inset-bottom)'
         }}
       >
-        <Logo />
+        <Logo className="max-w-[120px]" />
         <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -659,7 +659,7 @@ export default function App() {
         }}
       >
         <div className="w-full max-w-sm flex flex-col items-center">
-          <Logo />
+          <Logo className="max-w-[200px]" />
           <h1 className="text-3xl font-black tracking-tight text-zinc-900 mt-8 mb-3">Welcome to RewardHub</h1>
           <p className="text-sm text-zinc-500 mb-10 max-w-[280px]">Sign in with Google to start earning points and save your progress.</p>
           
@@ -701,7 +701,7 @@ export default function App() {
       <div className="flex-1 overflow-y-auto scroll-smooth relative">
         <Header user={{ ...user, points: displayPoints }} />
 
-        <main className="max-w-md mx-auto px-6 py-6 pb-48">
+        <main className="max-w-md mx-auto px-6 py-6 pb-64">
           <AnimatePresence mode="wait">
             {activeTab === 'offers' && (
               <HomeScreen 
