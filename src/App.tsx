@@ -82,20 +82,20 @@ const Navbar = ({ activeTab, setActiveTab }: { activeTab: string, setActiveTab: 
 
 const Header = ({ user }: { user: UserProfile }) => (
   <header 
-    className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-zinc-100 px-6 pb-2 z-40"
-    style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.5rem)' }}
+    className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-zinc-100 px-4 pb-1.5 z-40"
+    style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.25rem)' }}
   >
     <div className="max-w-md mx-auto flex justify-between items-center">
       <div className="flex items-center gap-3">
-        <Logo className="max-w-[40px]" />
+        <Logo className="max-w-[32px]" />
         <div>
-          <h1 className="text-base font-black tracking-tight text-zinc-900 leading-none">{APP_NAME}</h1>
-          <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mt-1">Earn while you play</p>
+          <h1 className="text-sm font-black tracking-tight text-zinc-900 leading-none">{APP_NAME}</h1>
+          <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider mt-0.5">Earn while you play</p>
         </div>
       </div>
-      <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100 shadow-sm">
-        <Zap size={14} className="text-indigo-600 fill-indigo-600" />
-        <span className="text-sm font-bold text-indigo-700">{user.points} pts</span>
+      <div className="flex items-center gap-2 bg-indigo-50 px-2.5 py-1 rounded-full border border-indigo-100 shadow-sm">
+        <Zap size={12} className="text-indigo-600 fill-indigo-600" />
+        <span className="text-xs font-bold text-indigo-700">{user.points} pts</span>
       </div>
     </div>
   </header>
@@ -402,7 +402,7 @@ export default function App() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const categories = ['all', 'fashion', 'delivery', 'shopping', 'travel', 'food'];
+  const categories = ['all', 'Fashion', 'Delivery apps', 'Shopping', 'Travel', 'Food', 'General'];
   
   const [isAdOpen, setIsAdOpen] = useState(false);
   
@@ -429,14 +429,21 @@ export default function App() {
   const { logs, addLog, watchAd, offers, isLoading, onOffersChange } = useAds(user?.uid);
 
   useEffect(() => {
-    // Listen to offers in real-time
-    const unsubscribe = onOffersChange(selectedCategory);
+    // Version 7.4.0: Listen to ALL offers in real-time
+    const unsubscribe = onOffersChange();
     return () => unsubscribe();
-  }, [selectedCategory, onOffersChange]);
+  }, [onOffersChange]);
 
-  // Filtered Offers
+  // Filtered Offers (Client-Side Filtering)
   const filteredOffers = useMemo(() => {
     return offers.filter(offer => {
+      // 1. Category Filter
+      const selected = selectedCategory.toLowerCase();
+      const matchesCategory = selected === 'all' || 
+        offer.category?.some(cat => cat.toLowerCase() === selected);
+      if (!matchesCategory) return false;
+
+      // 2. Search Filter
       const searchLower = searchQuery.toLowerCase();
       const matchesSearch = 
         offer.brand.toLowerCase().includes(searchLower) ||
@@ -445,7 +452,7 @@ export default function App() {
       
       return matchesSearch;
     });
-  }, [offers, searchQuery]);
+  }, [offers, searchQuery, selectedCategory]);
 
   const displayPoints = useMemo(() => {
     return transactions.reduce((acc, tx) => {
@@ -548,38 +555,52 @@ export default function App() {
   const handleGuestSignIn = async () => {
     setIsAuthLoading(true);
     
-    // Get or create persistent local guest ID
-    let localUid = localStorage.getItem('persistent_guest_id');
-    if (!localUid) {
-      localUid = 'local_guest_' + Math.random().toString(36).substr(2, 9);
-      localStorage.setItem('persistent_guest_id', localUid);
-    }
-
-    const guestProfile: UserProfile = {
-      uid: localUid,
-      email: 'Guest User',
-      points: 0,
-      claimsToday: 0,
-      lastClaimDate: null,
-      totalEarned: 0,
-    };
-
-    // Set local state immediately
-    setFirebaseUser({ uid: localUid, isAnonymous: true } as any);
-    setUser(guestProfile);
-    setIsAuthLoading(false);
-
-    // Save to Firestore 'guests' collection to ensure points are persistent
+    // Version 7.4.0: Prioritize Anonymous Sign-In to ensure proper Firestore permissions
     try {
-      await firebaseService.saveUserProfile(guestProfile);
+      const fUser = await firebaseService.signInAnonymously();
+      setFirebaseUser(fUser);
+      
+      // Check if we have a profile for this anonymous user
+      const profile = await firebaseService.getUserProfile(fUser.uid);
+      if (profile) {
+        setUser(profile);
+      } else {
+        // Create new profile for anonymous user
+        const newProfile: UserProfile = {
+          uid: fUser.uid,
+          email: 'Guest User',
+          points: 0,
+          claimsToday: 0,
+          lastClaimDate: null,
+          totalEarned: 0,
+        };
+        await firebaseService.saveUserProfile(newProfile);
+        setUser(newProfile);
+      }
     } catch (err) {
-      console.warn("Failed to save guest profile to Firestore:", err);
-    }
+      console.error("Anonymous sign-in failed:", err);
+      
+      // Fallback to local guest ID if Firebase fails (offline mode)
+      let localUid = localStorage.getItem('persistent_guest_id');
+      if (!localUid) {
+        localUid = 'local_guest_' + Math.random().toString(36).substr(2, 9);
+        localStorage.setItem('persistent_guest_id', localUid);
+      }
 
-    // Try to sign in anonymously in background
-    firebaseService.signInAnonymously().catch(err => {
-      console.warn("Background anonymous sign-in failed:", err);
-    });
+      const guestProfile: UserProfile = {
+        uid: localUid,
+        email: 'Guest User',
+        points: 0,
+        claimsToday: 0,
+        lastClaimDate: null,
+        totalEarned: 0,
+      };
+
+      setFirebaseUser({ uid: localUid, isAnonymous: true } as any);
+      setUser(guestProfile);
+    } finally {
+      setIsAuthLoading(false);
+    }
   };
 
   const handleSignOut = async () => {
@@ -701,7 +722,7 @@ export default function App() {
       <div className="flex-1 overflow-y-auto scroll-smooth relative">
         <Header user={{ ...user, points: displayPoints }} />
 
-        <main className="max-w-md mx-auto px-6 py-6 pb-32">
+        <main className="max-w-md mx-auto px-6 py-6 pb-[120px]">
           <AnimatePresence mode="wait">
             {activeTab === 'offers' && (
               <HomeScreen 
@@ -899,8 +920,8 @@ export default function App() {
       />
     </AnimatePresence>
 
-    {/* Simulated Banner Ad */}
-    <div className="fixed bottom-20 left-0 right-0 px-6 pointer-events-none z-30">
+    {/* Version 7.4.0: Fixed Banner Ad with higher z-index */}
+    <div className="fixed bottom-20 left-0 right-0 px-6 pointer-events-none z-40">
       <div className="max-w-md mx-auto bg-zinc-100/90 backdrop-blur-sm border border-zinc-200 h-12 rounded-lg flex items-center justify-center text-[10px] font-bold text-zinc-400 uppercase tracking-widest pointer-events-auto shadow-sm">
         Sponsored Banner Ad
       </div>
