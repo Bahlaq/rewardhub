@@ -18,7 +18,8 @@ import {
   Copy,
   ExternalLink,
   ShieldCheck,
-  Trash2
+  Trash2,
+  Terminal
 } from 'lucide-react';
 import { Clipboard } from '@capacitor/clipboard';
 import { Toast } from '@capacitor/toast';
@@ -163,6 +164,51 @@ const AdSimulatorModal = ({ isOpen, onClose, onReward }: { isOpen: boolean, onCl
             )}
           >
             {isFinished ? 'Claim Reward' : 'Close Ad'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const DebugLogsModal = ({ isOpen, onClose, logs }: { isOpen: boolean, onClose: () => void, logs: any[] }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm">
+      <div className="w-full max-w-md bg-zinc-900 rounded-3xl overflow-hidden border border-zinc-800 shadow-2xl flex flex-col max-h-[80vh]">
+        <div className="p-4 border-b border-zinc-800 flex justify-between items-center">
+          <h3 className="text-lg font-bold text-white">System Debug Logs</h3>
+          <button onClick={onClose} className="p-2 text-zinc-400 hover:text-white">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-2 font-mono text-[10px]">
+          {logs.length === 0 ? (
+            <p className="text-zinc-500 text-center py-10 italic">No logs captured yet.</p>
+          ) : (
+            [...logs].reverse().map((log) => (
+              <div key={log.id} className={cn(
+                "p-2 rounded border",
+                log.level === 'error' ? "bg-rose-900/20 border-rose-900/50 text-rose-400" :
+                log.level === 'reward' ? "bg-emerald-900/20 border-emerald-900/50 text-emerald-400" :
+                "bg-zinc-800/50 border-zinc-700 text-zinc-400"
+              )}>
+                <div className="flex justify-between mb-1 opacity-50">
+                  <span>{log.type.toUpperCase()}</span>
+                  <span>{log.timestamp.toLocaleTimeString()}</span>
+                </div>
+                <div className="break-all">{log.message}</div>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="p-4 border-t border-zinc-800">
+          <button
+            onClick={onClose}
+            className="w-full py-3 bg-zinc-800 text-white rounded-xl font-bold"
+          >
+            Close Debugger
           </button>
         </div>
       </div>
@@ -337,6 +383,7 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [confirmConfig, setConfirmConfig] = useState({ title: '', message: '', onConfirm: () => {} });
 
@@ -544,11 +591,15 @@ export default function App() {
 
   const handleSignIn = async () => {
     try {
+      addLog('app_open', 'load', 'Starting Google Sign-In...');
       await firebaseService.signInWithGoogle();
+      addLog('app_open', 'show', 'Google Sign-In Success');
     } catch (error) {
       console.error("Sign in failed:", error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      addLog('app_open', 'error', `Sign-in Error: ${errorMessage}`);
       Toast.show({ 
-        text: "Google Sign-In failed. Please try 'Continue as Guest' if you are testing on an APK.", 
+        text: `Google Sign-In failed: ${errorMessage.slice(0, 50)}...`, 
         duration: 'long' 
       });
     }
@@ -771,6 +822,21 @@ export default function App() {
 
                 <div className="mt-6 pt-6 border-t border-zinc-100">
                   <button 
+                    onClick={() => setIsDebugModalOpen(true)}
+                    className="w-full flex items-center justify-between p-4 bg-zinc-50 rounded-2xl border border-zinc-100 hover:bg-zinc-100 transition-colors group mt-3"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border border-zinc-200 shadow-sm">
+                        <Terminal size={18} className="text-zinc-600" />
+                      </div>
+                      <div className="text-left">
+                        <h4 className="text-sm font-bold text-zinc-900">System Debugger</h4>
+                        <p className="text-[10px] text-zinc-400 font-medium">View logs and error details</p>
+                      </div>
+                    </div>
+                    <ChevronRight size={18} className="text-zinc-300 group-hover:text-zinc-500 transition-colors" />
+                  </button>
+                  <button 
                     onClick={openPrivacyPolicy}
                     className="w-full flex items-center justify-between p-4 bg-zinc-50 rounded-2xl border border-zinc-100 hover:bg-zinc-100 transition-colors group"
                   >
@@ -922,10 +988,26 @@ export default function App() {
       />
     </AnimatePresence>
 
-    {/* Version 7.4.0: Fixed Banner Ad with higher z-index */}
-    <div className="fixed bottom-20 left-0 right-0 px-6 pointer-events-none z-40">
-      <div className="max-w-md mx-auto bg-zinc-100/90 backdrop-blur-sm border border-zinc-200 h-12 rounded-lg flex items-center justify-center text-[10px] font-bold text-zinc-400 uppercase tracking-widest pointer-events-auto shadow-sm">
-        Sponsored Banner Ad
+    <AnimatePresence>
+      <DebugLogsModal 
+        isOpen={isDebugModalOpen} 
+        onClose={() => setIsDebugModalOpen(false)} 
+        logs={logs}
+      />
+    </AnimatePresence>
+
+    <AnimatePresence>
+      <DebugLogsModal 
+        isOpen={isDebugModalOpen} 
+        onClose={() => setIsDebugModalOpen(false)} 
+        logs={logs}
+      />
+    </AnimatePresence>
+
+    {/* Version 7.4.0: Fixed Banner Ad with higher z-index and better placement */}
+    <div className="fixed bottom-24 left-0 right-0 px-6 pointer-events-none z-40">
+      <div className="max-w-md mx-auto bg-zinc-900/95 backdrop-blur-md border border-zinc-800 h-14 rounded-2xl flex items-center justify-center text-[11px] font-black text-white uppercase tracking-[0.2em] pointer-events-auto shadow-2xl shadow-black/20">
+        <span className="opacity-40">Sponsored Ad Space</span>
       </div>
     </div>
   </div>
