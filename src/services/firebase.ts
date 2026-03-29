@@ -163,17 +163,26 @@ export const firebaseService = {
         console.log("[DEBUG] Native platform detected, using GoogleAuth plugin");
         const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
         
+        console.log("[DEBUG] Calling GoogleAuth.signIn()...");
         const googleUser = await GoogleAuth.signIn();
-        console.log("[DEBUG] GoogleAuth.signIn success", googleUser.email);
-        const idToken = googleUser.authentication.idToken;
+        console.log("[DEBUG] GoogleAuth.signIn success", JSON.stringify({ 
+          email: googleUser.email, 
+          id: googleUser.id,
+          hasAuth: !!googleUser.authentication 
+        }));
+        
+        const idToken = googleUser.authentication?.idToken;
+        console.log("[DEBUG] idToken status:", idToken ? "PRESENT" : "MISSING");
         
         if (!idToken) {
-          throw new Error("No ID Token received from Google Auth. Please ensure your SHA-1 is registered in Firebase.");
+          console.error("[DEBUG] Missing idToken in googleUser.authentication");
+          throw new Error("No ID Token received from Google Auth. Please ensure your SHA-1 is registered in Firebase and the Client ID is correct.");
         }
         
         // Version 7.4.0: Use GoogleAuthProvider.credential(idToken) to sign into Firebase
         // This is the ONLY way to fix 'Invalid Action' on Android.
         const credential = GoogleAuthProvider.credential(idToken);
+        console.log("[DEBUG] Created credential, signing into Firebase...");
         const result = await signInWithCredential(auth, credential);
         console.log("[DEBUG] Firebase signInWithCredential success", result.user.uid);
         return result.user;
@@ -182,9 +191,10 @@ export const firebaseService = {
       // On web, use popup
       console.log("[DEBUG] Web platform detected, using signInWithPopup");
       const result = await signInWithPopup(auth, googleProvider);
+      console.log("[DEBUG] Web signInWithPopup success", result.user.uid);
       return result.user;
     } catch (error) {
-      console.error("Google Auth failed:", error);
+      console.error("[DEBUG] Google Auth failed:", error);
       throw error;
     }
   },
@@ -389,23 +399,29 @@ export const firebaseService = {
     const historyRef = doc(collection(db, 'history'));
     const today = new Date().toDateString();
 
+    console.log(`[DEBUG] recordAdWatch started for ${uid} in ${collectionName}`);
+
     try {
       return await runTransaction(db, async (transaction) => {
         const userDoc = await transaction.get(userRef);
         
         let userData: any;
         if (!userDoc.exists()) {
+          console.log("[DEBUG] User doc does not exist, creating new one");
           userData = {
             uid,
             points: 0,
             totalEarned: 0,
             boostLevel: 1,
             adsWatchedToday: 0,
-            lastBoostDate: today
+            lastBoostDate: today,
+            email: isGuest ? 'Guest User' : (auth?.currentUser?.email || 'Unknown')
           };
+          // Use transaction.set for new documents
           transaction.set(userRef, userData);
         } else {
           userData = userDoc.data();
+          console.log("[DEBUG] User doc exists", JSON.stringify(userData));
         }
 
         let boostLevel = userData.boostLevel || 1;
@@ -416,6 +432,7 @@ export const firebaseService = {
 
         // Daily Reset Check
         if (lastBoostDate !== today) {
+          console.log("[DEBUG] Daily reset triggered");
           boostLevel = 1;
           adsWatchedToday = 0;
           lastBoostDate = today;
@@ -423,6 +440,7 @@ export const firebaseService = {
 
         adsWatchedToday += 1;
         const adsNeeded = boostLevel;
+        console.log(`[DEBUG] Progress: ${adsWatchedToday}/${adsNeeded} (Level ${boostLevel})`);
 
         let rewardClaimed = false;
 
@@ -430,6 +448,8 @@ export const firebaseService = {
           const rewardAmount = 100;
           updatedPoints += rewardAmount;
           updatedTotalEarned += rewardAmount;
+          
+          console.log(`[DEBUG] Reward earned! Points: ${updatedPoints}`);
           
           boostLevel += 1;
           adsWatchedToday = 0;
@@ -444,13 +464,17 @@ export const firebaseService = {
           });
         }
 
-        transaction.update(userRef, {
+        const updateData = {
           points: updatedPoints,
           totalEarned: updatedTotalEarned,
           boostLevel,
           adsWatchedToday,
           lastBoostDate: today
-        });
+        };
+        
+        console.log("[DEBUG] Updating user doc with", JSON.stringify(updateData));
+        // Use transaction.set with merge: true to be safe for both new and existing docs
+        transaction.set(userRef, updateData, { merge: true });
 
         return {
           rewardClaimed,
@@ -460,6 +484,7 @@ export const firebaseService = {
         };
       });
     } catch (error) {
+      console.error("[DEBUG] recordAdWatch failed:", error);
       handleFirestoreError(error, OperationType.WRITE, 'ad_watch');
       throw error;
     }
