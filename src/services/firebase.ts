@@ -37,9 +37,13 @@ if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
     try {
       GoogleAuth.initialize({
         clientId: PRODUCTION_WEB_CLIENT_ID,
+        serverClientId: PRODUCTION_WEB_CLIENT_ID,
+        androidClientId: PRODUCTION_WEB_CLIENT_ID,
         scopes: ['profile', 'email'],
         grantOfflineAccess: true,
+        redirectUri: "https://rewardhub-1ea27.firebaseapp.com/__/auth/handler"
       });
+      console.log("GoogleAuth initialized successfully");
     } catch (error) {
       console.warn("GoogleAuth.initialize failed:", error);
     }
