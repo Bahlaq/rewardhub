@@ -35,7 +35,7 @@ const PRODUCTION_WEB_CLIENT_ID = "563861371307-3moj6n7qanfg0tgn1vrv8ok59rnh8pj2.
 if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
   import('@codetrix-studio/capacitor-google-auth').then(({ GoogleAuth }) => {
     try {
-      GoogleAuth.initialize({
+      (GoogleAuth as any).initialize({
         clientId: PRODUCTION_WEB_CLIENT_ID,
         serverClientId: PRODUCTION_WEB_CLIENT_ID,
         androidClientId: PRODUCTION_WEB_CLIENT_ID,
@@ -101,6 +101,57 @@ if (webClientId) {
 
 export { auth, googleProvider };
 export type { FirebaseUser };
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth?.currentUser?.uid,
+      email: auth?.currentUser?.email,
+      emailVerified: auth?.currentUser?.emailVerified,
+      isAnonymous: auth?.currentUser?.isAnonymous,
+      tenantId: auth?.currentUser?.tenantId,
+      providerInfo: auth?.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 export const firebaseService = {
   async signInWithGoogle() {
@@ -189,7 +240,7 @@ export const firebaseService = {
         callback(null);
       }
     }, (error) => {
-      console.error("Error listening to user profile:", error);
+      handleFirestoreError(error, OperationType.GET, `${collectionName}/${uid}`);
       callback(null);
     });
   },
@@ -226,7 +277,7 @@ export const firebaseService = {
       });
       callback(offers);
     }, (error) => {
-      console.error("Error listening to offers:", error);
+      handleFirestoreError(error, OperationType.LIST, 'offers');
       callback([]);
     });
   },
@@ -257,7 +308,7 @@ export const firebaseService = {
         });
       callback(claims);
     }, (error) => {
-      console.error("Error listening to claims:", error);
+      handleFirestoreError(error, OperationType.LIST, 'claims');
       callback([]);
     });
   },
@@ -285,7 +336,7 @@ export const firebaseService = {
       });
       callback(history);
     }, (error) => {
-      console.error("Error listening to history:", error);
+      handleFirestoreError(error, OperationType.LIST, 'history');
       callback([]);
     });
   },
@@ -326,7 +377,7 @@ export const firebaseService = {
       });
       return true;
     } catch (error) {
-      console.error("Error rewarding user points:", error);
+      handleFirestoreError(error, OperationType.WRITE, 'history');
       throw error;
     }
   },
@@ -411,7 +462,7 @@ export const firebaseService = {
         };
       });
     } catch (error) {
-      console.error("Error recording ad watch:", error);
+      handleFirestoreError(error, OperationType.WRITE, 'ad_watch');
       throw error;
     }
   },
@@ -456,7 +507,7 @@ export const firebaseService = {
       });
       return true;
     } catch (error) {
-      console.error("Error claiming offer:", error);
+      handleFirestoreError(error, OperationType.WRITE, 'claim');
       throw error;
     }
   },
@@ -471,7 +522,7 @@ export const firebaseService = {
       }
       return null;
     } catch (error) {
-      console.error("Error fetching user profile:", error);
+      handleFirestoreError(error, OperationType.GET, `${collectionName}/${uid}`);
       return null;
     }
   },
@@ -482,7 +533,7 @@ export const firebaseService = {
     try {
       await setDoc(doc(db, collectionName, profile.uid), profile, { merge: true });
     } catch (error) {
-      console.error("Error saving user profile:", error);
+      handleFirestoreError(error, OperationType.WRITE, `${collectionName}/${profile.uid}`);
     }
   }
 };
