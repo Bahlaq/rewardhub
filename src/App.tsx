@@ -40,11 +40,11 @@ function cn(...inputs: ClassValue[]) {
 // --- Components ---
 
 const Logo = () => (
-  <div className="relative w-32 h-32 mx-auto group cursor-pointer">
+  <div className="relative w-full max-w-[200px] mx-auto group cursor-pointer">
     <img 
       src={icon} 
       alt={`${APP_NAME} Logo`} 
-      className="w-full h-full object-contain rounded-[2.5rem] shadow-2xl transition-transform group-hover:scale-105"
+      className="w-full h-auto object-contain rounded-[2.5rem] shadow-2xl transition-transform group-hover:scale-105"
       referrerPolicy="no-referrer"
     />
   </div>
