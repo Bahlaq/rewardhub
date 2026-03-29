@@ -235,8 +235,8 @@ export const HomeScreen = ({
           </div>
           <p className="text-indigo-100 text-xs mb-4">
             {adsWatchedToday > 0 
-              ? `Progress: ${adsWatchedToday}/${adsNeeded} ads for ${boostTitle}`
-              : `Watch ${adsNeeded} ${adsNeeded === 1 ? 'ad' : 'ads'} to get +100 points!`}
+              ? `Progress: ${adsWatchedToday}/${adsNeeded} ads for ${boostTitle} (+100 pts each!)`
+              : `Watch ads to earn 100 points each! Complete ${boostTitle} to level up.`}
           </p>
           
           <div className="flex items-center gap-3">
@@ -308,6 +308,13 @@ export const HomeScreen = ({
 
       {/* Version 7.4.0: Extra space at the bottom of the list to prevent overlap with Banner Ad and Navbar */}
       <div className="h-[150px]" />
+
+      {/* Version 7.5.0: Banner Ad ONLY on HomeScreen */}
+      <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+100px)] left-0 right-0 px-6 pointer-events-none z-[1000]">
+        <div className="max-w-md mx-auto bg-zinc-900/95 backdrop-blur-md border border-zinc-800 h-14 rounded-2xl flex items-center justify-center text-[11px] font-black text-white uppercase tracking-[0.2em] pointer-events-auto shadow-2xl shadow-black/40">
+          <span className="opacity-40">Sponsored Ad Space</span>
+        </div>
+      </div>
     </motion.div>
   );
 };
