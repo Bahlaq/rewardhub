@@ -341,50 +341,64 @@ export default function App() {
   const [confirmConfig, setConfirmConfig] = useState({ title: '', message: '', onConfirm: () => {} });
 
   useEffect(() => {
-    const unsubscribeAuth = firebaseService.onAuthChange(async (fUser) => {
+    const unsubscribeAuth = firebaseService.onAuthChange((fUser) => {
       setFirebaseUser(fUser);
-      if (fUser) {
-        // Listen to profile changes in real-time
-        const unsubscribeProfile = firebaseService.onProfileChange(fUser.uid, (profile) => {
-          if (profile) {
-            setUser(profile);
-          } else {
-            // Create profile if it doesn't exist
-            const newProfile: UserProfile = {
-              uid: fUser.uid,
-              email: fUser.email || '',
-              points: 0,
-              claimsToday: 0,
-              lastClaimDate: null,
-              totalEarned: 0,
-            };
-            firebaseService.saveUserProfile(newProfile);
-          }
-          setIsAuthLoading(false);
-        });
-
-        // Listen to claims/transactions in real-time
-        const unsubscribeClaims = firebaseService.onClaimsChange(fUser.uid, (claims) => {
-          setFirestoreClaims(claims);
-        });
-
-        const unsubscribeHistory = firebaseService.onHistoryChange(fUser.uid, (history) => {
-          setFirestoreHistory(history);
-        });
-
-        return () => {
-          unsubscribeProfile();
-          unsubscribeClaims();
-          unsubscribeHistory();
-        };
-      } else {
-        setUser(null);
+      if (!fUser) {
         setIsAuthLoading(false);
       }
     });
 
     return () => unsubscribeAuth();
   }, []);
+
+  // Real-time listeners for profile, claims, and history
+  useEffect(() => {
+    if (!firebaseUser?.uid) {
+      setUser(null);
+      setFirestoreClaims([]);
+      setFirestoreHistory([]);
+      return;
+    }
+
+    const uid = firebaseUser.uid;
+    setIsAuthLoading(true);
+
+    // Listen to profile changes in real-time
+    const unsubscribeProfile = firebaseService.onProfileChange(uid, (profile) => {
+      if (profile) {
+        setUser(profile);
+      } else {
+        // Create profile if it doesn't exist (only for real Firebase users)
+        if (!uid.startsWith('local_guest_')) {
+          const newProfile: UserProfile = {
+            uid: uid,
+            email: firebaseUser.email || '',
+            points: 0,
+            claimsToday: 0,
+            lastClaimDate: null,
+            totalEarned: 0,
+          };
+          firebaseService.saveUserProfile(newProfile);
+        }
+      }
+      setIsAuthLoading(false);
+    });
+
+    // Listen to claims/transactions in real-time
+    const unsubscribeClaims = firebaseService.onClaimsChange(uid, (claims) => {
+      setFirestoreClaims(claims);
+    });
+
+    const unsubscribeHistory = firebaseService.onHistoryChange(uid, (history) => {
+      setFirestoreHistory(history);
+    });
+
+    return () => {
+      unsubscribeProfile();
+      unsubscribeClaims();
+      unsubscribeHistory();
+    };
+  }, [firebaseUser?.uid]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -623,12 +637,13 @@ export default function App() {
   if (isAuthLoading) {
     return (
       <div 
-        className="min-h-screen bg-zinc-50 flex items-center justify-center"
+        className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center gap-6"
         style={{ 
           paddingTop: 'env(safe-area-inset-top)',
           paddingBottom: 'env(safe-area-inset-bottom)'
         }}
       >
+        <Logo />
         <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
       </div>
     );
