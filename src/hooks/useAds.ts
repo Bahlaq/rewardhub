@@ -7,11 +7,10 @@ export function useAds(uid?: string) {
   const [offers, setOffers] = useState<Offer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  const onOffersChange = useCallback((category: string) => {
+  const onOffersChange = useCallback(() => {
     setIsLoading(true);
-    // Simple where query WITHOUT any orderBy as requested for APK fix
-    // Ensure the category values are compared in lowercase to match Firestore
-    const unsubscribe = firebaseService.onOffersChange(category.toLowerCase(), (data) => {
+    // Version 7.4.0: Fetch ALL offers once for client-side filtering
+    const unsubscribe = firebaseService.onOffersChange((data) => {
       setOffers(data);
       setIsLoading(false);
     });
