@@ -51,12 +51,13 @@ if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
 }
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyAs-some-key-here", 
-  authDomain: "rewardhub-1ea27.firebaseapp.com",
-  projectId: "rewardhub-1ea27",
-  storageBucket: "rewardhub-1ea27.appspot.com",
-  messagingSenderId: "563861371307",
-  appId: "1:563861371307:android:02f4cdfdbe8b17a247aee",
+  apiKey: 'AIzaSyBL1efWEa3WHUSPD0_sDTvpCTqIIImh5X6Y',
+  authDomain: 'rewardhub-1ea27.firebaseapp.com',
+  projectId: 'rewardhub-1ea27',
+  storageBucket: 'rewardhub-1ea27.firebasestorage.app',
+  messagingSenderId: '563861371307',
+  appId: '1:563861371307:web:7db5542c5b2f2e46247aee',
+  measurementId: 'G-PCK58GKBMm'
 };
 
 // Check if config is valid
@@ -438,31 +439,32 @@ export const firebaseService = {
           lastBoostDate = today;
         }
 
+        // Version 7.5.0: Increment both points (+100) and adsWatchedToday (+1)
         adsWatchedToday += 1;
+        updatedPoints += 100;
+        updatedTotalEarned += 100;
+        
         const adsNeeded = boostLevel;
         console.log(`[DEBUG] Progress: ${adsWatchedToday}/${adsNeeded} (Level ${boostLevel})`);
 
         let rewardClaimed = false;
 
+        // Check if boost level is completed
         if (adsWatchedToday >= adsNeeded) {
-          const rewardAmount = 100;
-          updatedPoints += rewardAmount;
-          updatedTotalEarned += rewardAmount;
-          
-          console.log(`[DEBUG] Reward earned! Points: ${updatedPoints}`);
-          
+          console.log(`[DEBUG] Boost Level ${boostLevel} completed!`);
           boostLevel += 1;
-          adsWatchedToday = 0;
+          adsWatchedToday = 0; // Reset for next level
           rewardClaimed = true;
-
-          transaction.set(historyRef, {
-            userId: uid,
-            type: 'earn',
-            title: `Daily Boost (Level ${boostLevel - 1})`,
-            amount: rewardAmount,
-            timestamp: serverTimestamp()
-          });
         }
+
+        // Record the earn event in history
+        transaction.set(historyRef, {
+          userId: uid,
+          type: 'earn',
+          title: `Ad Reward (Level ${boostLevel - (rewardClaimed ? 1 : 0)})`,
+          amount: 100,
+          timestamp: serverTimestamp()
+        });
 
         const updateData = {
           points: updatedPoints,
