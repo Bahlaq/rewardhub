@@ -701,7 +701,7 @@ export default function App() {
       <div className="flex-1 overflow-y-auto scroll-smooth relative">
         <Header user={{ ...user, points: displayPoints }} />
 
-        <main className="max-w-md mx-auto px-6 py-6 pb-64">
+        <main className="max-w-md mx-auto px-6 py-6 pb-32">
           <AnimatePresence mode="wait">
             {activeTab === 'offers' && (
               <HomeScreen 
