@@ -120,10 +120,10 @@ service cloud.firestore {
     match /claims/{claimId} {
       allow read: if isAdmin() || 
                      (isAuthenticated() && resource.data.userId == request.auth.uid) || 
-                     (resource.data.userId is string && resource.data.userId.matches("^local_guest_.*"));
+                     isGuest(resource.data.userId);
       allow create: if isAdmin() ||
                        (isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidClaim(request.resource.data)) || 
-                       (request.resource.data.userId is string && request.resource.data.userId.matches("^local_guest_.*") && isValidClaim(request.resource.data));
+                       (isGuest(request.resource.data.userId) && isValidClaim(request.resource.data));
       allow update, delete: if isAdmin();
     }
 
@@ -131,10 +131,10 @@ service cloud.firestore {
     match /history/{historyId} {
       allow read: if isAdmin() || 
                      (isAuthenticated() && resource.data.userId == request.auth.uid) || 
-                     (resource.data.userId is string && resource.data.userId.matches("^local_guest_.*"));
+                     isGuest(resource.data.userId);
       allow create: if isAdmin() ||
                        (isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidHistory(request.resource.data)) || 
-                       (request.resource.data.userId is string && request.resource.data.userId.matches("^local_guest_.*") && isValidHistory(request.resource.data));
+                       (isGuest(request.resource.data.userId) && isValidHistory(request.resource.data));
       allow update, delete: if isAdmin();
     }
   }
