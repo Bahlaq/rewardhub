@@ -306,8 +306,8 @@ export const HomeScreen = ({
         )}
       </div>
 
-      {/* Extra space at the bottom of the list to prevent overlap with Banner Ad and Navbar */}
-      <div className="h-32" />
+      {/* Version 7.4.0: Extra space at the bottom of the list to prevent overlap with Banner Ad and Navbar */}
+      <div className="h-[150px]" />
     </motion.div>
   );
 };
