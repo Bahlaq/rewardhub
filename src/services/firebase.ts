@@ -390,41 +390,41 @@ export const firebaseService = {
     const today = new Date().toDateString();
 
     try {
-      // Ensure user document exists first using setDoc with merge: true
-      // This is a critical fix for Android APK to ensure points are saved
-      const initialProfile: Partial<UserProfile> = {
-        uid,
-        points: 0,
-        totalEarned: 0,
-        boostLevel: 1,
-        adsWatchedToday: 0,
-        lastBoostDate: today
-      };
-      await setDoc(userRef, initialProfile, { merge: true });
-
       return await runTransaction(db, async (transaction) => {
         const userDoc = await transaction.get(userRef);
+        
+        let userData: any;
         if (!userDoc.exists()) {
-          throw new Error("User profile not found even after creation");
+          userData = {
+            uid,
+            points: 0,
+            totalEarned: 0,
+            boostLevel: 1,
+            adsWatchedToday: 0,
+            lastBoostDate: today
+          };
+          transaction.set(userRef, userData);
+        } else {
+          userData = userDoc.data();
         }
 
-        const userData = userDoc.data() as UserProfile;
         let boostLevel = userData.boostLevel || 1;
         let adsWatchedToday = userData.adsWatchedToday || 0;
-        const lastBoostDate = userData.lastBoostDate || null;
+        let lastBoostDate = userData.lastBoostDate || null;
+        let updatedPoints = userData.points || 0;
+        let updatedTotalEarned = userData.totalEarned || 0;
 
-        // Daily Reset Check (1, 2, 3 progression)
+        // Daily Reset Check
         if (lastBoostDate !== today) {
           boostLevel = 1;
           adsWatchedToday = 0;
+          lastBoostDate = today;
         }
 
         adsWatchedToday += 1;
-        const adsNeeded = boostLevel; // Level 1 needs 1, Level 2 needs 2, Level 3 needs 3
+        const adsNeeded = boostLevel;
 
         let rewardClaimed = false;
-        let updatedPoints = userData.points || 0;
-        let updatedTotalEarned = userData.totalEarned || 0;
 
         if (adsWatchedToday >= adsNeeded) {
           const rewardAmount = 100;
