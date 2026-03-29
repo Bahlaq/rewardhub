@@ -2,6 +2,56 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: Firebase Auth UID
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (optional, email format)
+    //   - points: number (required, >= 0)
+    //   - totalEarned: number (optional, >= 0)
+    //   - claimsToday: number (optional, >= 0)
+    //   - lastClaimDate: string (optional, ISO 8601)
+    //   - boostLevel: number (optional, >= 1)
+    //   - adsWatchedToday: number (optional, >= 0)
+    //   - lastBoostDate: string (optional, date string)
+    //
+    // Collection: guests
+    // Document ID: local_guest_... ID
+    // Fields: Same as users
+    //
+    // Collection: offers
+    // Document ID: auto-generated
+    // Fields:
+    //   - brand: string (required)
+    //   - logoUrl: string (required)
+    //   - description: string (required)
+    //   - points: number (required, >= 0)
+    //   - category: string (required)
+    //   - type: string (required)
+    //
+    // Collection: claims
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required)
+    //   - offerId: string (required)
+    //   - pointsSpent: number (required, >= 0)
+    //   - timestamp: timestamp (required)
+    //
+    // Collection: history
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required)
+    //   - type: string (required)
+    //   - title: string (required)
+    //   - amount: number (required)
+    //   - timestamp: timestamp (required)
+    //
+    // ===============================================================
+
     // Helper functions
     function isAuthenticated() {
       return request.auth != null;
@@ -11,30 +61,75 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "m.bahlaq@dv8dm.com" && request.auth.token.email_verified == true));
+    }
+
+    function isGuest(userId) {
+      return userId.startsWith('local_guest_');
+    }
+
+    function isValidEmail(email) {
+      return email is string &&
+        email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // Domain Validators
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'points']) &&
+             data.uid is string &&
+             data.points is number && data.points >= 0 &&
+             (!('email' in data) || data.email == 'Guest User' || isValidEmail(data.email));
+    }
+
+    function isValidClaim(data) {
+      return data.keys().hasAll(['userId', 'offerId', 'pointsSpent']) &&
+             data.userId is string &&
+             data.offerId is string &&
+             data.pointsSpent is number && data.pointsSpent >= 0;
+    }
+
+    function isValidHistory(data) {
+      return data.keys().hasAll(['userId', 'amount']) &&
+             data.userId is string &&
+             data.amount is number;
+    }
+
     // User profiles
     match /users/{userId} {
-      allow read: if isOwner(userId);
-      allow create, update: if isOwner(userId);
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role != 'admin';
+      allow update: if (isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role) || isAdmin();
+    }
+
+    // Guest profiles
+    match /guests/{userId} {
+      allow read: if isGuest(userId) || isAdmin();
+      allow create, update: if isGuest(userId) && isValidUser(request.resource.data);
     }
 
     // Offers (read-only for users)
     match /offers/{offerId} {
-      allow read: if isAuthenticated();
-      allow write: if false; // Only admin can write (manual/console)
+      allow read: if true; // Publicly readable for browsing
+      allow write: if isAdmin();
     }
 
-    // Claims (user-owned)
+    // Claims (user-owned or guest-owned)
     match /claims/{claimId} {
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if false;
+      allow read: if (isAuthenticated() && resource.data.userId == request.auth.uid) || isGuest(resource.data.userId) || isAdmin();
+      allow create: if (isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidClaim(request.resource.data)) || 
+                      (isGuest(request.resource.data.userId) && isValidClaim(request.resource.data));
+      allow update, delete: if isAdmin();
     }
 
-    // History (user-owned)
+    // History (user-owned or guest-owned)
     match /history/{historyId} {
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if false;
+      allow read: if (isAuthenticated() && resource.data.userId == request.auth.uid) || isGuest(resource.data.userId) || isAdmin();
+      allow create: if (isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidHistory(request.resource.data)) || 
+                      (isGuest(request.resource.data.userId) && isValidHistory(request.resource.data));
+      allow update, delete: if isAdmin();
     }
   }
 }
