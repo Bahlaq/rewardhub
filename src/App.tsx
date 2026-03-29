@@ -82,20 +82,20 @@ const Navbar = ({ activeTab, setActiveTab }: { activeTab: string, setActiveTab: 
 
 const Header = ({ user }: { user: UserProfile }) => (
   <header 
-    className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-zinc-100 px-4 pb-1.5 z-40"
-    style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.25rem)' }}
+    className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-zinc-100 px-5 pb-2 z-40"
+    style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.5rem)' }}
   >
     <div className="max-w-md mx-auto flex justify-between items-center">
       <div className="flex items-center gap-3">
-        <Logo className="max-w-[32px]" />
+        <Logo className="max-w-[36px]" />
         <div>
-          <h1 className="text-sm font-black tracking-tight text-zinc-900 leading-none">{APP_NAME}</h1>
-          <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider mt-0.5">Earn while you play</p>
+          <h1 className="text-base font-black tracking-tight text-zinc-900 leading-none">{APP_NAME}</h1>
+          <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mt-1">Earn while you play</p>
         </div>
       </div>
-      <div className="flex items-center gap-2 bg-indigo-50 px-2.5 py-1 rounded-full border border-indigo-100 shadow-sm">
-        <Zap size={12} className="text-indigo-600 fill-indigo-600" />
-        <span className="text-xs font-bold text-indigo-700">{user.points} pts</span>
+      <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100 shadow-sm">
+        <Zap size={14} className="text-indigo-600 fill-indigo-600" />
+        <span className="text-sm font-bold text-indigo-700">{user.points} pts</span>
       </div>
     </div>
   </header>
@@ -440,7 +440,9 @@ export default function App() {
       // 1. Category Filter
       const selected = selectedCategory.toLowerCase();
       const matchesCategory = selected === 'all' || 
-        offer.category?.some(cat => cat.toLowerCase() === selected);
+        (Array.isArray(offer.category) 
+          ? offer.category.some(cat => cat.toLowerCase() === selected)
+          : String(offer.category || '').toLowerCase() === selected);
       if (!matchesCategory) return false;
 
       // 2. Search Filter
@@ -680,7 +682,7 @@ export default function App() {
         }}
       >
         <div className="w-full max-w-sm flex flex-col items-center">
-          <Logo className="max-w-[200px]" />
+          <Logo className="max-w-[160px]" />
           <h1 className="text-3xl font-black tracking-tight text-zinc-900 mt-8 mb-3">Welcome to RewardHub</h1>
           <p className="text-sm text-zinc-500 mb-10 max-w-[280px]">Sign in with Google to start earning points and save your progress.</p>
           
