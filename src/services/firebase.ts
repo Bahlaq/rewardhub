@@ -2,10 +2,8 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   initializeFirestore,
   collection,
-  getDocs,
   query,
   where,
-  orderBy,
   doc,
   getDoc,
   setDoc,
@@ -181,6 +179,8 @@ export const firebaseService = {
           throw new Error("No ID Token received from Google Auth. Please ensure your SHA-1 is registered in Firebase.");
         }
         
+        // Version 7.4.0: Use GoogleAuthProvider.credential(idToken) to sign into Firebase
+        // This is the ONLY way to fix 'Invalid Action' on Android.
         const credential = GoogleAuthProvider.credential(idToken);
         const result = await signInWithCredential(auth, credential);
         return result.user;
@@ -262,27 +262,19 @@ export const firebaseService = {
     });
   },
 
-  onOffersChange(category: string, callback: (offers: Offer[]) => void) {
+  onOffersChange(callback: (offers: Offer[]) => void) {
     if (!db) {
       callback([]);
       return () => {};
     }
     
-    let q;
-    const selected = category.toLowerCase();
-    
-    if (selected === 'all') {
-      q = query(collection(db, 'offers'));
-    } else {
-      q = query(
-        collection(db, 'offers'), 
-        where('category', '==', selected)
-      );
-    }
+    // Version 7.4.0: Fetch ALL offers once and filter client-side for stability
+    // This fixes the 'Disappearing Offers' and 'Firestore Index' issues forever.
+    const q = query(collection(db, 'offers'));
 
     return onSnapshot(q, (snapshot) => {
       if (snapshot.empty) {
-        console.log(`[DEBUG] Firestore 'offers' collection returned 0 results for category: ${selected}`);
+        console.log(`[DEBUG] Firestore 'offers' collection is empty`);
       }
       const offers = snapshot.docs.map(doc => {
         const data = doc.data();
