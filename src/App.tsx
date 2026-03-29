@@ -40,11 +40,11 @@ function cn(...inputs: ClassValue[]) {
 // --- Components ---
 
 const Logo = () => (
-  <div className="relative w-10 h-10 group cursor-pointer">
+  <div className="relative w-32 h-32 mx-auto group cursor-pointer">
     <img 
       src={icon} 
       alt={`${APP_NAME} Logo`} 
-      className="w-full h-full object-contain rounded-xl shadow-md transition-transform group-hover:scale-105"
+      className="w-full h-full object-contain rounded-[2.5rem] shadow-2xl transition-transform group-hover:scale-105"
       referrerPolicy="no-referrer"
     />
   </div>
@@ -637,35 +637,44 @@ export default function App() {
   if (!firebaseUser) {
     return (
       <div 
-        className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-6 text-center"
+        className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-8 text-center"
         style={{ 
-          paddingTop: 'calc(env(safe-area-inset-top) + 1.5rem)',
-          paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)'
+          paddingTop: 'env(safe-area-inset-top)',
+          paddingBottom: 'env(safe-area-inset-bottom)'
         }}
       >
-        <Logo />
-        <h1 className="text-2xl font-black tracking-tight text-zinc-900 mt-6 mb-2">Welcome to RewardHub</h1>
-        <p className="text-sm text-zinc-500 mb-8 max-w-xs">Sign in with Google to start earning points and save your progress.</p>
-        <button 
-          onClick={handleSignIn}
-          disabled={isAuthLoading}
-          className="w-full max-w-xs bg-white border border-zinc-200 py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-sm hover:shadow-md transition-all active:scale-95 mb-3 disabled:opacity-70 disabled:cursor-not-allowed"
-        >
-          {isAuthLoading ? (
-            <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-          ) : (
-            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
-          )}
-          {isAuthLoading ? 'Signing in...' : 'Continue with Google'}
-        </button>
+        <div className="w-full max-w-sm flex flex-col items-center">
+          <Logo />
+          <h1 className="text-3xl font-black tracking-tight text-zinc-900 mt-8 mb-3">Welcome to RewardHub</h1>
+          <p className="text-sm text-zinc-500 mb-10 max-w-[280px]">Sign in with Google to start earning points and save your progress.</p>
+          
+          <div className="w-full space-y-4">
+            <button 
+              onClick={handleSignIn}
+              disabled={isAuthLoading}
+              className="w-full bg-white border border-zinc-200 py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-sm hover:shadow-md transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
+            >
+              {isAuthLoading ? (
+                <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
+              )}
+              {isAuthLoading ? 'Signing in...' : 'Continue with Google'}
+            </button>
 
-        <button 
-          onClick={handleGuestSignIn}
-          className="w-full max-w-xs bg-zinc-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg shadow-zinc-200 hover:bg-zinc-800 transition-all active:scale-95"
-        >
-          <User size={20} />
-          Continue as Guest
-        </button>
+            <button 
+              onClick={handleGuestSignIn}
+              className="w-full bg-zinc-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg shadow-zinc-200 hover:bg-zinc-800 transition-all active:scale-95"
+            >
+              <User size={20} />
+              Continue as Guest
+            </button>
+          </div>
+          
+          <p className="mt-12 text-[10px] text-zinc-400 font-medium uppercase tracking-widest">
+            Version {APP_VERSION}
+          </p>
+        </div>
       </div>
     );
   }
