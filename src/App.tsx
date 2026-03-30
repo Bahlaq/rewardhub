@@ -96,13 +96,27 @@ const Header = ({ user }: { user: UserProfile }) => (
       </div>
       <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100 shadow-sm">
         <Zap size={14} className="text-indigo-600 fill-indigo-600" />
-        <span className="text-sm font-bold text-indigo-700">{user.points} pts</span>
+        <span className="text-sm font-bold text-indigo-700">{Number(user.points || 0)} pts</span>
       </div>
     </div>
   </header>
 );
 
-const AdSimulatorModal = ({ isOpen, onClose, onReward }: { isOpen: boolean, onClose: () => void, onReward: () => void }) => {
+const AdSimulatorModal = ({ 
+  isOpen, 
+  onClose, 
+  onReward, 
+  isBoost = false, 
+  user = null, 
+  onClaim = null 
+}: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  onReward: () => void,
+  isBoost?: boolean,
+  user?: UserProfile | null,
+  onClaim?: () => void
+}) => {
   const [timeLeft, setTimeLeft] = useState(5);
   const [isFinished, setIsFinished] = useState(false);
 
@@ -128,6 +142,11 @@ const AdSimulatorModal = ({ isOpen, onClose, onReward }: { isOpen: boolean, onCl
 
   if (!isOpen) return null;
 
+  // Version 7.8.0: Boost Logic
+  const adsNeeded = user?.boostLevel || 1;
+  const adsWatched = user?.adsWatchedToday || 0;
+  const canClaim = isBoost && isFinished && adsWatched >= adsNeeded;
+
   return (
     <div 
       className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/90 backdrop-blur-sm"
@@ -144,27 +163,56 @@ const AdSimulatorModal = ({ isOpen, onClose, onReward }: { isOpen: boolean, onCl
           </div>
         </div>
         <div className="p-6 text-center">
-          <h3 className="text-lg font-bold text-white mb-2">Watching Sponsored Content</h3>
-          <p className="text-sm text-zinc-400 mb-6">Complete this short video to earn 100 points and unlock rewards.</p>
+          <h3 className="text-lg font-bold text-white mb-2">
+            {isBoost ? `Daily Boost Level ${adsNeeded}` : 'Watching Sponsored Content'}
+          </h3>
+          <p className="text-sm text-zinc-400 mb-6">
+            {isBoost 
+              ? `Progress: ${adsWatched}/${adsNeeded} ads watched. Complete requirements to claim 100 points.`
+              : 'Complete this short video to earn 100 points and unlock rewards.'}
+          </p>
           
-          <button
-            onClick={() => {
-              if (isFinished) {
-                onReward();
-                onClose();
-              } else {
-                onClose();
-              }
-            }}
-            className={cn(
-              "w-full py-3 rounded-2xl font-bold transition-all",
-              isFinished 
-                ? "bg-emerald-500 text-white hover:bg-emerald-600" 
-                : "bg-zinc-800 text-zinc-500"
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={() => {
+                if (isFinished) {
+                  if (isBoost && adsWatched >= adsNeeded) {
+                    if (onClaim) onClaim();
+                    onClose();
+                  } else {
+                    onReward();
+                    // Don't close if it's a boost and more ads are needed
+                    if (!isBoost) onClose();
+                  }
+                } else {
+                  onClose();
+                }
+              }}
+              className={cn(
+                "w-full py-3 rounded-2xl font-bold transition-all",
+                isFinished 
+                  ? "bg-emerald-500 text-white hover:bg-emerald-600" 
+                  : "bg-zinc-800 text-zinc-500"
+              )}
+            >
+              {isFinished 
+                ? (canClaim ? 'Claim +100 Points' : (isBoost ? 'Watch Ad to Progress' : 'Claim Reward'))
+                : 'Close Ad'}
+            </button>
+            
+            {isBoost && isFinished && adsWatched < adsNeeded && (
+              <button 
+                onClick={() => {
+                  setTimeLeft(5);
+                  setIsFinished(false);
+                  // Re-start timer logic would be needed here, or just let user click again
+                }}
+                className="w-full py-3 rounded-2xl font-bold bg-indigo-500 text-white hover:bg-indigo-600 transition-all"
+              >
+                Watch Next Ad
+              </button>
             )}
-          >
-            {isFinished ? 'Claim Reward' : 'Close Ad'}
-          </button>
+          </div>
         </div>
       </div>
     </div>
@@ -461,6 +509,7 @@ export default function App() {
   const categories = ['all', 'Fashion', 'Delivery apps', 'Shopping', 'Travel', 'Food', 'General'];
   
   const [isAdOpen, setIsAdOpen] = useState(false);
+  const [isBoostAd, setIsBoostAd] = useState(false);
   
   const [localTransactions, setLocalTransactions] = useState<Transaction[]>(() => {
     const saved = localStorage.getItem('local_transactions');
@@ -544,7 +593,8 @@ export default function App() {
     showAppOpen();
   }, []);
 
-  const handleWatchAd = async () => {
+  const handleWatchAd = async (isBoost: boolean = false) => {
+    setIsBoostAd(isBoost);
     addLog('rewarded', 'load');
     setIsAdOpen(true);
     addLog('rewarded', 'show');
@@ -675,19 +725,6 @@ export default function App() {
       if (profile) {
         console.log("[DEBUG] Profile found for anonymous user");
         setUser(profile);
-      } else {
-        console.log("[DEBUG] Creating new profile for anonymous user");
-        // Create new profile for anonymous user
-        const newProfile: UserProfile = {
-          uid: fUser.uid,
-          email: 'Guest User',
-          points: 0,
-          claimsToday: 0,
-          lastClaimDate: null,
-          totalEarned: 0,
-        };
-        await firebaseService.saveUserProfile(newProfile);
-        setUser(newProfile);
       }
     } catch (err) {
       console.error("Anonymous sign-in failed:", err);
@@ -852,13 +889,13 @@ export default function App() {
     return (
       <div className="h-screen flex flex-col bg-zinc-50 font-sans selection:bg-indigo-100 selection:text-indigo-900 overflow-hidden">
         <div className="flex-1 overflow-y-auto scroll-smooth relative">
-          <Header user={{ ...user, points: displayPoints }} />
+          <Header user={{ ...user, points: Number(displayPoints || 0) }} />
 
           <main className="max-w-md mx-auto px-6 py-6 pb-[120px]">
             <AnimatePresence mode="wait">
               {activeTab === 'offers' && (
                 <HomeScreen 
-                  user={user}
+                  user={{ ...user, points: Number(displayPoints || 0) }}
                   offers={offers}
                   isLoading={isLoading}
                   searchQuery={searchQuery}
@@ -868,7 +905,7 @@ export default function App() {
                   categories={categories}
                   filteredOffers={filteredOffers}
                   transactions={transactions}
-                  handleWatchAd={handleWatchAd}
+                  handleWatchAd={() => handleWatchAd(true)}
                   handleClaimOffer={handleClaimOffer}
                   handleClaimBoostReward={handleClaimBoostReward}
                 />
@@ -892,7 +929,7 @@ export default function App() {
                   <div className="grid grid-cols-2 gap-4 mt-8">
                     <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100">
                       <span className="block text-[10px] uppercase font-bold text-zinc-400 tracking-wider mb-1">Total Points</span>
-                      <span className="text-lg font-bold text-zinc-900">{displayPoints}</span>
+                      <span className="text-lg font-bold text-zinc-900">{Number(displayPoints || 0)}</span>
                     </div>
                     <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100">
                       <span className="block text-[10px] uppercase font-bold text-zinc-400 tracking-wider mb-1">Claims</span>
@@ -1050,7 +1087,10 @@ export default function App() {
       <AdSimulatorModal 
         isOpen={isAdOpen} 
         onClose={() => setIsAdOpen(false)} 
-        onReward={handleAdReward} 
+        onReward={handleAdReward}
+        isBoost={isBoostAd}
+        user={user}
+        onClaim={handleClaimBoostReward}
       />
 
       <AnimatePresence>
