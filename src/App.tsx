@@ -412,26 +412,30 @@ export default function App() {
 
     // Listen to profile changes in real-time
     const unsubscribeProfile = firebaseService.onProfileChange(uid, (profile) => {
-      console.log("[DEBUG] Profile change detected:", profile?.uid, "Points:", profile?.points);
+      console.log(`[DEBUG] Profile change detected for ${uid}:`, JSON.stringify({
+        points: profile?.points,
+        boostLevel: profile?.boostLevel,
+        adsWatchedToday: profile?.adsWatchedToday,
+        lastBoostDate: profile?.lastBoostDate
+      }));
+      
       if (profile) {
         setUser(profile);
       } else {
-        // Create profile if it doesn't exist (only for real Firebase users)
-        if (!uid.startsWith('local_guest_')) {
-          console.log("[DEBUG] Creating new profile for user:", uid);
-          const newProfile: UserProfile = {
-            uid: uid,
-            email: firebaseUser.email || '',
-            points: 0,
-            claimsToday: 0,
-            lastClaimDate: null,
-            totalEarned: 0,
-            boostLevel: 1,
-            adsWatchedToday: 0,
-            lastBoostDate: null
-          };
-          firebaseService.saveUserProfile(newProfile);
-        }
+        // Create profile if it doesn't exist
+        console.log("[DEBUG] Profile not found, initializing for:", uid);
+        const newProfile: UserProfile = {
+          uid: uid,
+          email: firebaseUser.email || (uid.startsWith('local_guest_') ? 'Guest User' : 'Unknown'),
+          points: 0,
+          claimsToday: 0,
+          lastClaimDate: null,
+          totalEarned: 0,
+          boostLevel: 1,
+          adsWatchedToday: 0,
+          lastBoostDate: new Date().toDateString()
+        };
+        firebaseService.saveUserProfile(newProfile);
       }
       setIsAuthLoading(false);
     });
@@ -541,18 +545,16 @@ export default function App() {
       const result = await watchAd();
       
       if (result) {
-        if (result.isLocalGuest) {
-          addLog('rewarded', 'show', 'Local guest ad watch completed (no points saved)');
-          Toast.show({ text: "Please Sign in to save points", duration: 'long' });
-          return;
-        }
-
         if (result.rewardClaimed) {
           addLog('rewarded', 'reward', `Boost Level ${result.boostLevel - 1} completed! User earned 100 points.`);
-          Toast.show({ text: "Congratulations! Boost Level Completed! You've earned 100 points!", duration: 'long' });
+          Toast.show({ text: `Congratulations! Boost Level ${result.boostLevel - 1} Completed! +100 pts`, duration: 'long' });
         } else {
           addLog('rewarded', 'show', `Ad watched. Progress: ${result.adsWatchedToday}/${result.adsNeeded}`);
-          Toast.show({ text: "Ad watched! Keep going to complete the boost.", duration: 'short' });
+          Toast.show({ text: `Ad watched! (${result.adsWatchedToday}/${result.adsNeeded})`, duration: 'short' });
+        }
+
+        if (result.isLocalGuest) {
+          console.log("[DEBUG] Guest reward processed locally");
         }
       }
     } catch (error) {
@@ -617,13 +619,14 @@ export default function App() {
     setIsAuthLoading(true);
     try {
       addLog('app_open', 'load', 'Starting Google Sign-In...');
-      const result = await firebaseService.signInWithGoogle();
-      if (result.user) {
-        console.log("[DEBUG] Google Sign-In Success:", result.user.uid);
-        addLog('app_open', 'show', `Signed in as ${result.user.email}`);
+      const userObj = await firebaseService.signInWithGoogle();
+      if (userObj) {
+        console.log("[DEBUG] Google Sign-In Success:", userObj.uid);
+        setFirebaseUser(userObj);
+        addLog('app_open', 'show', `Signed in as ${userObj.email}`);
         Toast.show({ text: "Signed in successfully!", duration: 'short' });
       } else {
-        console.warn("[DEBUG] Google Sign-In result has no user");
+        console.warn("[DEBUG] Google Sign-In result is null");
       }
     } catch (error) {
       console.error("[DEBUG] Sign in failed:", error);
