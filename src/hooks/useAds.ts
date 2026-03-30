@@ -18,6 +18,8 @@ export function useAds(uid?: string) {
   }, []);
 
   const addLog = useCallback((type: AdLog['type'], event: AdLog['event'], message?: string) => {
+    // AdMob Unit IDs should be set in environment variables (VITE_ADMOB_*)
+    // App ID is hardcoded in AndroidManifest.xml: ca-app-pub-1560161047680443~4972275282
     const adId = 
       type === 'banner' ? import.meta.env.VITE_ADMOB_BANNER_ID :
       type === 'rewarded' ? import.meta.env.VITE_ADMOB_REWARDED_ID :
