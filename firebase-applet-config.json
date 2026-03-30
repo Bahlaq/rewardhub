@@ -1,9 +1,9 @@
 {
-  "apiKey": "AIzaSyAs-some-key-here",
+  "apiKey": "AIzaSyBL1efWEa3WHUSPD0_sDTvpCTqIIImh5X6Y",
   "authDomain": "rewardhub-1ea27.firebaseapp.com",
   "projectId": "rewardhub-1ea27",
-  "storageBucket": "rewardhub-1ea27.appspot.com",
+  "storageBucket": "rewardhub-1ea27.firebasestorage.app",
   "messagingSenderId": "563861371307",
-  "appId": "1:563861371307:android:02f4cdfdbe8b17a247aee",
+  "appId": "1:563861371307:web:7db5542c5b2f2e46247aee",
   "firestoreDatabaseId": "(default)"
 }
