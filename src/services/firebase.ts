@@ -56,8 +56,7 @@ const firebaseConfig = {
   projectId: 'rewardhub-1ea27',
   storageBucket: 'rewardhub-1ea27.firebasestorage.app',
   messagingSenderId: '563861371307',
-  appId: '1:563861371307:web:7db5542c5b2f2e46247aee',
-  measurementId: 'G-PCK58GKBMm'
+  appId: '1:563861371307:web:7db5542c5b2f2e46247aee'
 };
 
 // Check if config is valid
@@ -402,6 +401,18 @@ export const firebaseService = {
 
     console.log(`[DEBUG] recordAdWatch started for ${uid} in ${collectionName}`);
 
+    // Version 7.6.0: If local guest, do not save points to Firestore
+    if (isGuest) {
+      console.log("[DEBUG] Local guest detected, skipping Firestore point sync");
+      return {
+        isLocalGuest: true,
+        rewardClaimed: false,
+        boostLevel: 1,
+        adsWatchedToday: 0,
+        adsNeeded: 1
+      };
+    }
+
     try {
       return await runTransaction(db, async (transaction) => {
         const userDoc = await transaction.get(userRef);
@@ -416,9 +427,8 @@ export const firebaseService = {
             boostLevel: 1,
             adsWatchedToday: 0,
             lastBoostDate: today,
-            email: isGuest ? 'Guest User' : (auth?.currentUser?.email || 'Unknown')
+            email: auth?.currentUser?.email || 'Unknown'
           };
-          // Use transaction.set for new documents
           transaction.set(userRef, userData);
         } else {
           userData = userDoc.data();
@@ -439,32 +449,37 @@ export const firebaseService = {
           lastBoostDate = today;
         }
 
-        // Version 7.5.0: Increment both points (+100) and adsWatchedToday (+1)
+        // Increment adsWatchedToday
         adsWatchedToday += 1;
-        updatedPoints += 100;
-        updatedTotalEarned += 100;
         
         const adsNeeded = boostLevel;
         console.log(`[DEBUG] Progress: ${adsWatchedToday}/${adsNeeded} (Level ${boostLevel})`);
 
         let rewardClaimed = false;
+        let pointsEarned = 0;
 
-        // Check if boost level is completed
+        // Version 7.6.0: Points (+100 per boost completion)
+        // The prompt says "+100 per boost", so we award points only when the level is completed.
         if (adsWatchedToday >= adsNeeded) {
           console.log(`[DEBUG] Boost Level ${boostLevel} completed!`);
+          pointsEarned = 100;
+          updatedPoints += pointsEarned;
+          updatedTotalEarned += pointsEarned;
           boostLevel += 1;
           adsWatchedToday = 0; // Reset for next level
           rewardClaimed = true;
         }
 
-        // Record the earn event in history
-        transaction.set(historyRef, {
-          userId: uid,
-          type: 'earn',
-          title: `Ad Reward (Level ${boostLevel - (rewardClaimed ? 1 : 0)})`,
-          amount: 100,
-          timestamp: serverTimestamp()
-        });
+        // Record the earn event in history if points were earned
+        if (pointsEarned > 0) {
+          transaction.set(historyRef, {
+            userId: uid,
+            type: 'earn',
+            title: `Boost Reward (Level ${boostLevel - 1})`,
+            amount: pointsEarned,
+            timestamp: serverTimestamp()
+          });
+        }
 
         const updateData = {
           points: updatedPoints,
@@ -475,10 +490,10 @@ export const firebaseService = {
         };
         
         console.log("[DEBUG] Updating user doc with", JSON.stringify(updateData));
-        // Use transaction.set with merge: true to be safe for both new and existing docs
         transaction.set(userRef, updateData, { merge: true });
 
         return {
+          isLocalGuest: false,
           rewardClaimed,
           boostLevel,
           adsWatchedToday,
