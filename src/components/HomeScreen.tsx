@@ -235,8 +235,8 @@ export const HomeScreen = ({
           </div>
           <p className="text-indigo-100 text-xs mb-4">
             {adsWatchedToday > 0 
-              ? `Progress: ${adsWatchedToday}/${adsNeeded} ads for ${boostTitle} (+100 pts each!)`
-              : `Watch ads to earn 100 points each! Complete ${boostTitle} to level up.`}
+              ? `Progress: ${adsWatchedToday}/${adsNeeded} ads for ${boostTitle} (+100 pts on completion!)`
+              : `Complete ${boostTitle} to earn 100 points! Watch ads to level up.`}
           </p>
           
           <div className="flex items-center gap-3">
