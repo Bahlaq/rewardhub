@@ -18,7 +18,7 @@ const config: CapacitorConfig = {
     },
     GoogleAuth: {
       scopes: ["profile", "email"],
-      serverClientId: "563861371307-3moj6n7qanfg0tgn1vrv8ok59rnh8pj2.apps.googleusercontent.com",
+      serverClientId: "563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com",
       forceCodeForRefreshToken: true,
       // @ts-ignore
       redirectUri: "https://rewardhub-1ea27.firebaseapp.com/__/auth/handler"
