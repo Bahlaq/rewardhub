@@ -188,6 +188,24 @@ export const firebaseService = {
         const credential = GoogleAuthProvider.credential(idToken);
         const result = await signInWithCredential(auth, credential);
         console.log("[DEBUG] Firebase signInWithCredential success", result.user.uid);
+        
+        // Version 7.8.0: Initialize profile immediately
+        const profile = await this.getUserProfile(result.user.uid);
+        if (!profile) {
+          console.log("[DEBUG] Initializing new profile for Google user:", result.user.uid);
+          await this.saveUserProfile({
+            uid: result.user.uid,
+            email: result.user.email || 'Google User',
+            points: 0,
+            claimsToday: 0,
+            lastClaimDate: null,
+            totalEarned: 0,
+            boostLevel: 1,
+            adsWatchedToday: 0,
+            lastBoostDate: new Date().toDateString()
+          });
+        }
+        
         return result.user;
       }
       
@@ -195,6 +213,24 @@ export const firebaseService = {
       console.log("[DEBUG] Web platform detected, using signInWithPopup");
       const result = await signInWithPopup(auth, googleProvider);
       console.log("[DEBUG] Web signInWithPopup success", result.user.uid);
+      
+      // Version 7.8.0: Initialize profile immediately
+      const profile = await this.getUserProfile(result.user.uid);
+      if (!profile) {
+        console.log("[DEBUG] Initializing new profile for Google user:", result.user.uid);
+        await this.saveUserProfile({
+          uid: result.user.uid,
+          email: result.user.email || 'Google User',
+          points: 0,
+          claimsToday: 0,
+          lastClaimDate: null,
+          totalEarned: 0,
+          boostLevel: 1,
+          adsWatchedToday: 0,
+          lastBoostDate: new Date().toDateString()
+        });
+      }
+      
       return result.user;
     } catch (error: any) {
       console.error("[DEBUG] Google Auth failed:", error);
@@ -208,6 +244,24 @@ export const firebaseService = {
     if (!auth) throw new Error("Firebase Auth not initialized");
     try {
       const result = await signInAnonymously(auth);
+      
+      // Version 7.8.0: Initialize profile immediately
+      const profile = await this.getUserProfile(result.user.uid);
+      if (!profile) {
+        console.log("[DEBUG] Initializing new profile for Anonymous user:", result.user.uid);
+        await this.saveUserProfile({
+          uid: result.user.uid,
+          email: 'Guest User',
+          points: 0,
+          claimsToday: 0,
+          lastClaimDate: null,
+          totalEarned: 0,
+          boostLevel: 1,
+          adsWatchedToday: 0,
+          lastBoostDate: new Date().toDateString()
+        });
+      }
+      
       return result.user;
     } catch (error) {
       console.error("Error signing in anonymously:", error);
@@ -449,6 +503,15 @@ export const firebaseService = {
         
         transaction.set(userRef, updateData, { merge: true });
 
+        // Version 7.8.0: Update localStorage backup
+        const cached = localStorage.getItem(`profile_${uid}`);
+        if (cached) {
+          const profile = JSON.parse(cached);
+          profile.adsWatchedToday = adsWatchedToday;
+          profile.lastBoostDate = today;
+          localStorage.setItem(`profile_${uid}`, JSON.stringify(profile));
+        }
+
         return {
           isLocalGuest: isGuest,
           rewardClaimed: false, // Reward is now claimed manually via claimBoostReward
@@ -502,6 +565,18 @@ export const firebaseService = {
           adsWatchedToday,
           lastBoostDate: today
         }, { merge: true });
+
+        // Version 7.8.0: Update localStorage backup
+        const cached = localStorage.getItem(`profile_${uid}`);
+        if (cached) {
+          const profile = JSON.parse(cached);
+          profile.points = points;
+          profile.totalEarned = totalEarned;
+          profile.boostLevel = boostLevel;
+          profile.adsWatchedToday = adsWatchedToday;
+          profile.lastBoostDate = today;
+          localStorage.setItem(`profile_${uid}`, JSON.stringify(profile));
+        }
 
         // Record history
         transaction.set(historyRef, {
@@ -580,11 +655,24 @@ export const firebaseService = {
     try {
       const userDoc = await getDoc(doc(db, collectionName, uid));
       if (userDoc.exists()) {
-        return userDoc.data() as UserProfile;
+        const profile = userDoc.data() as UserProfile;
+        // Version 7.8.0: Persistence backup
+        localStorage.setItem(`profile_${uid}`, JSON.stringify(profile));
+        return profile;
+      }
+      
+      // Fallback to localStorage if offline or not found
+      const cached = localStorage.getItem(`profile_${uid}`);
+      if (cached) {
+        console.log("[DEBUG] Using cached profile from localStorage for:", uid);
+        return JSON.parse(cached);
       }
       return null;
     } catch (error) {
       handleFirestoreError(error, OperationType.GET, `${collectionName}/${uid}`);
+      // Fallback to localStorage on error
+      const cached = localStorage.getItem(`profile_${uid}`);
+      if (cached) return JSON.parse(cached);
       return null;
     }
   },
@@ -594,8 +682,12 @@ export const firebaseService = {
     const collectionName = profile.uid.startsWith('local_guest_') ? 'guests' : 'users';
     try {
       await setDoc(doc(db, collectionName, profile.uid), profile, { merge: true });
+      // Version 7.8.0: Persistence backup
+      localStorage.setItem(`profile_${profile.uid}`, JSON.stringify(profile));
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `${collectionName}/${profile.uid}`);
+      // Still save to localStorage as backup
+      localStorage.setItem(`profile_${profile.uid}`, JSON.stringify(profile));
     }
   }
 };
