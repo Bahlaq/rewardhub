@@ -33,20 +33,20 @@ const PRODUCTION_WEB_CLIENT_ID = "563861371307-3moj6n7qanfg0tgn1vrv8ok59rnh8pj2.
 if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
   import('@codetrix-studio/capacitor-google-auth').then(({ GoogleAuth }) => {
     try {
+      // Version 7.6.1: Simplified initialization for better compatibility
+      // We use the Web Client ID for both clientId and serverClientId on Android/iOS
       (GoogleAuth as any).initialize({
         clientId: PRODUCTION_WEB_CLIENT_ID,
         serverClientId: PRODUCTION_WEB_CLIENT_ID,
-        androidClientId: PRODUCTION_WEB_CLIENT_ID,
         scopes: ['profile', 'email'],
-        grantOfflineAccess: true,
-        redirectUri: "https://rewardhub-1ea27.firebaseapp.com/__/auth/handler"
+        grantOfflineAccess: true
       });
-      console.log("GoogleAuth initialized successfully");
+      console.log("[DEBUG] GoogleAuth initialized successfully with Client ID:", PRODUCTION_WEB_CLIENT_ID);
     } catch (error) {
-      console.warn("GoogleAuth.initialize failed:", error);
+      console.error("[DEBUG] GoogleAuth.initialize failed:", error);
     }
   }).catch(err => {
-    console.warn("Failed to load GoogleAuth plugin:", err);
+    console.error("[DEBUG] Failed to load GoogleAuth plugin:", err);
   });
 }
 
@@ -67,9 +67,9 @@ let app;
 try {
   if (isConfigValid) {
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+    console.log("[DEBUG] Firebase initialized successfully");
   } else {
     console.error("Firebase configuration is missing or incomplete. Please check your environment variables.");
-    // Fallback or dummy app if needed, but better to handle in components
   }
 } catch (error) {
   console.error("Failed to initialize Firebase:", error);
@@ -84,12 +84,7 @@ const db = app ? initializeFirestore(app, {
 const auth = app ? getAuth(app) : null;
 const googleProvider = new GoogleAuthProvider();
 
-// Production Credentials for Google Play
-// SHA-1 (App Signing): 56:FB:BC:58:9D:88:6D:B9:09:D4:95:8E:42:2C:D6:AC:5A:F0:A9:4E
-// SHA-1 (Upload): 30:F6:0A:82:AD:F4:9C:5F:0F:9C:01:9B:39:8D:1E:C0:66:8E:F5:A9
-
-// If a Web Client ID is provided, set it. This is often required for 
-// Google Sign-In to work correctly on Android/iOS in hybrid apps.
+// If a Web Client ID is provided, set it.
 const webClientId = import.meta.env.VITE_FIREBASE_WEB_CLIENT_ID || PRODUCTION_WEB_CLIENT_ID;
 if (webClientId) {
   googleProvider.setCustomParameters({
@@ -97,7 +92,7 @@ if (webClientId) {
   });
 }
 
-export { auth, googleProvider };
+export { auth, googleProvider, db };
 export type { FirebaseUser };
 
 enum OperationType {
@@ -164,25 +159,20 @@ export const firebaseService = {
         const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
         
         console.log("[DEBUG] Calling GoogleAuth.signIn()...");
+        // Version 7.6.1: Ensure we use the correct client IDs for native
         const googleUser = await GoogleAuth.signIn();
         console.log("[DEBUG] GoogleAuth.signIn success", JSON.stringify({ 
           email: googleUser.email, 
-          id: googleUser.id,
-          hasAuth: !!googleUser.authentication 
+          id: googleUser.id
         }));
         
         const idToken = googleUser.authentication?.idToken;
-        console.log("[DEBUG] idToken status:", idToken ? "PRESENT" : "MISSING");
-        
         if (!idToken) {
           console.error("[DEBUG] Missing idToken in googleUser.authentication");
-          throw new Error("No ID Token received from Google Auth. Please ensure your SHA-1 is registered in Firebase and the Client ID is correct.");
+          throw new Error("No ID Token received. Please check Firebase SHA-1 configuration.");
         }
         
-        // Version 7.4.0: Use GoogleAuthProvider.credential(idToken) to sign into Firebase
-        // This is the ONLY way to fix 'Invalid Action' on Android.
         const credential = GoogleAuthProvider.credential(idToken);
-        console.log("[DEBUG] Created credential, signing into Firebase...");
         const result = await signInWithCredential(auth, credential);
         console.log("[DEBUG] Firebase signInWithCredential success", result.user.uid);
         return result.user;
@@ -193,8 +183,10 @@ export const firebaseService = {
       const result = await signInWithPopup(auth, googleProvider);
       console.log("[DEBUG] Web signInWithPopup success", result.user.uid);
       return result.user;
-    } catch (error) {
+    } catch (error: any) {
       console.error("[DEBUG] Google Auth failed:", error);
+      // Handle 'Requested entity was not found' by resetting key selection if needed
+      // (Though here we use hardcoded config, so it's likely a config/SHA-1 issue)
       throw error;
     }
   },
@@ -401,18 +393,6 @@ export const firebaseService = {
 
     console.log(`[DEBUG] recordAdWatch started for ${uid} in ${collectionName}`);
 
-    // Version 7.6.0: If local guest, do not save points to Firestore
-    if (isGuest) {
-      console.log("[DEBUG] Local guest detected, skipping Firestore point sync");
-      return {
-        isLocalGuest: true,
-        rewardClaimed: false,
-        boostLevel: 1,
-        adsWatchedToday: 0,
-        adsNeeded: 1
-      };
-    }
-
     try {
       return await runTransaction(db, async (transaction) => {
         const userDoc = await transaction.get(userRef);
@@ -427,7 +407,7 @@ export const firebaseService = {
             boostLevel: 1,
             adsWatchedToday: 0,
             lastBoostDate: today,
-            email: auth?.currentUser?.email || 'Unknown'
+            email: auth?.currentUser?.email || (isGuest ? 'Guest User' : 'Unknown')
           };
           transaction.set(userRef, userData);
         } else {
@@ -435,11 +415,12 @@ export const firebaseService = {
           console.log("[DEBUG] User doc exists", JSON.stringify(userData));
         }
 
-        let boostLevel = userData.boostLevel || 1;
-        let adsWatchedToday = userData.adsWatchedToday || 0;
+        // Ensure numeric types
+        let boostLevel = Number(userData.boostLevel || 1);
+        let adsWatchedToday = Number(userData.adsWatchedToday || 0);
         let lastBoostDate = userData.lastBoostDate || null;
-        let updatedPoints = userData.points || 0;
-        let updatedTotalEarned = userData.totalEarned || 0;
+        let updatedPoints = Number(userData.points || 0);
+        let updatedTotalEarned = Number(userData.totalEarned || 0);
 
         // Daily Reset Check
         if (lastBoostDate !== today) {
@@ -458,8 +439,7 @@ export const firebaseService = {
         let rewardClaimed = false;
         let pointsEarned = 0;
 
-        // Version 7.6.0: Points (+100 per boost completion)
-        // The prompt says "+100 per boost", so we award points only when the level is completed.
+        // Version 7.6.1: Points (+100 per boost completion)
         if (adsWatchedToday >= adsNeeded) {
           console.log(`[DEBUG] Boost Level ${boostLevel} completed!`);
           pointsEarned = 100;
@@ -493,7 +473,7 @@ export const firebaseService = {
         transaction.set(userRef, updateData, { merge: true });
 
         return {
-          isLocalGuest: false,
+          isLocalGuest: isGuest,
           rewardClaimed,
           boostLevel,
           adsWatchedToday,
@@ -528,9 +508,8 @@ export const firebaseService = {
 
         // Deduct points
         transaction.update(userRef, {
-          points: userData.points - offer.points,
-          claimsToday: (userData.claimsToday || 0) + 1,
-          totalEarned: (userData.totalEarned || 0) + 1,
+          points: Number(userData.points) - Number(offer.points),
+          claimsToday: (Number(userData.claimsToday) || 0) + 1,
           lastClaimDate: new Date().toISOString()
         });
 
