@@ -28,9 +28,10 @@ export interface UserProfile {
   claimsToday: number;
   lastClaimDate: string | null;
   totalEarned: number;
-  boostLevel?: number;
-  adsWatchedToday?: number;
-  lastBoostDate?: string | null;
+  boostLevel?: number;           // Level N = N ads required for next +100pts boost
+  adsWatchedToday?: number;      // Total ads watched today across all boost levels
+  currentLevelAdCounter?: number; // Ads watched in the CURRENT boost level round
+  lastBoostDate?: string | null;  // Date string (toDateString) of last boost activity
 }
 
 export interface ClaimRecord {
