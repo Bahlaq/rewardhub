@@ -54,12 +54,13 @@ if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
 }
 
 const firebaseConfig = {
-  apiKey: 'AIzaSyBL1efWEa3WHUSPD0_sDTvpCTqIIImh5X6Y',
+  apiKey: 'AIzaSyBLlefWEa3WHUSPD0_sDTvpCTqIImh5X6Y',
   authDomain: 'rewardhub-1ea27.firebaseapp.com',
   projectId: 'rewardhub-1ea27',
   storageBucket: 'rewardhub-1ea27.firebasestorage.app',
   messagingSenderId: '563861371307',
-  appId: '1:563861371307:web:7db5542c5b2f2e46247aee'
+  appId: '1:563861371307:web:7db5542c5b2f2e46247aee',
+  measurementId: 'G-PCK58GKBKM'
 };
 
 // Check if config is valid
@@ -400,10 +401,9 @@ export const firebaseService = {
     const isGuest = uid.startsWith('local_guest_');
     const collectionName = isGuest ? 'guests' : 'users';
     const userRef = doc(db, collectionName, uid);
-    const historyRef = doc(collection(db, 'history'));
     const today = new Date().toDateString();
 
-    console.log(`[DEBUG] recordAdWatch started for ${uid} in ${collectionName}`);
+    console.log(`[DEBUG] recordAdWatch started for ${uid}`);
 
     try {
       return await runTransaction(db, async (transaction) => {
@@ -411,7 +411,6 @@ export const firebaseService = {
         
         let userData: any;
         if (!userDoc.exists()) {
-          console.log("[DEBUG] User doc does not exist, creating new one");
           userData = {
             uid,
             points: 0,
@@ -424,21 +423,15 @@ export const firebaseService = {
           transaction.set(userRef, userData);
         } else {
           userData = userDoc.data();
-          console.log("[DEBUG] User doc exists", JSON.stringify(userData));
         }
 
         // Ensure numeric types
         let boostLevel = Number(userData.boostLevel) || 1;
         let adsWatchedToday = Number(userData.adsWatchedToday) || 0;
         let lastBoostDate = userData.lastBoostDate || null;
-        let updatedPoints = Number(userData.points) || 0;
-        let updatedTotalEarned = Number(userData.totalEarned) || 0;
-
-        console.log(`[DEBUG] Current State: Level ${boostLevel}, Ads ${adsWatchedToday}, LastDate ${lastBoostDate}`);
 
         // Daily Reset Check
         if (lastBoostDate !== today) {
-          console.log("[DEBUG] Daily reset triggered: " + lastBoostDate + " !== " + today);
           boostLevel = 1;
           adsWatchedToday = 0;
           lastBoostDate = today;
@@ -448,58 +441,81 @@ export const firebaseService = {
         adsWatchedToday += 1;
         
         const adsNeeded = boostLevel;
-        console.log(`[DEBUG] New Progress: ${adsWatchedToday}/${adsNeeded} (Level ${boostLevel})`);
-
-        let rewardClaimed = false;
-        let pointsEarned = 0;
-
-        // Version 7.6.2: Points (+100 per boost completion)
-        if (adsWatchedToday >= adsNeeded) {
-          console.log(`[DEBUG] Boost Level ${boostLevel} completed! Awarding 100 points.`);
-          pointsEarned = 100;
-          updatedPoints += pointsEarned;
-          updatedTotalEarned += pointsEarned;
-          boostLevel += 1;
-          adsWatchedToday = 0; // Reset for next level
-          rewardClaimed = true;
-        }
-
-        // Record the earn event in history if points were earned
-        if (pointsEarned > 0) {
-          const historyRef = doc(collection(db, 'history'));
-          transaction.set(historyRef, {
-            uid,
-            type: 'earn',
-            points: pointsEarned,
-            message: `Boost Reward (Level ${boostLevel - 1})`,
-            timestamp: serverTimestamp()
-          });
-        }
 
         const updateData = {
-          uid,
-          points: updatedPoints,
-          totalEarned: updatedTotalEarned,
-          boostLevel,
           adsWatchedToday,
-          lastBoostDate: today,
-          email: userData.email || (isGuest ? 'Guest User' : 'Unknown')
+          lastBoostDate: today
         };
         
-        console.log("[DEBUG] Transaction updateData:", JSON.stringify(updateData));
         transaction.set(userRef, updateData, { merge: true });
 
         return {
           isLocalGuest: isGuest,
-          rewardClaimed,
+          rewardClaimed: false, // Reward is now claimed manually via claimBoostReward
           boostLevel,
           adsWatchedToday,
-          adsNeeded: boostLevel
+          adsNeeded
         };
       });
     } catch (error) {
       console.error("[DEBUG] recordAdWatch failed:", error);
       handleFirestoreError(error, OperationType.WRITE, 'ad_watch');
+      throw error;
+    }
+  },
+
+  async claimBoostReward(uid: string) {
+    if (!db) throw new Error("Firestore not initialized");
+    
+    const isGuest = uid.startsWith('local_guest_');
+    const collectionName = isGuest ? 'guests' : 'users';
+    const userRef = doc(db, collectionName, uid);
+    const historyRef = doc(collection(db, 'history'));
+    const today = new Date().toDateString();
+
+    try {
+      return await runTransaction(db, async (transaction) => {
+        const userDoc = await transaction.get(userRef);
+        if (!userDoc.exists()) throw new Error("User not found");
+        
+        const userData = userDoc.data();
+        let boostLevel = Number(userData.boostLevel) || 1;
+        let adsWatchedToday = Number(userData.adsWatchedToday) || 0;
+        let points = Number(userData.points) || 0;
+        let totalEarned = Number(userData.totalEarned) || 0;
+
+        if (adsWatchedToday < boostLevel) {
+          throw new Error("Boost requirement not met");
+        }
+
+        // Award points
+        points += 100;
+        totalEarned += 100;
+        const completedLevel = boostLevel;
+        boostLevel += 1;
+        adsWatchedToday = 0;
+
+        transaction.set(userRef, {
+          points,
+          totalEarned,
+          boostLevel,
+          adsWatchedToday,
+          lastBoostDate: today
+        }, { merge: true });
+
+        // Record history
+        transaction.set(historyRef, {
+          uid,
+          type: 'earn',
+          points: 100,
+          message: `Completed Boost Level ${completedLevel}`,
+          timestamp: serverTimestamp()
+        });
+
+        return { points, boostLevel };
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'claim_boost');
       throw error;
     }
   },
