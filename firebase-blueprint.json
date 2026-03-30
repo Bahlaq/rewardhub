@@ -33,25 +33,25 @@
       "description": "Records of users claiming offers.",
       "type": "object",
       "properties": {
-        "userId": { "type": "string" },
+        "uid": { "type": "string" },
         "offerId": { "type": "string" },
         "pointsSpent": { "type": "number" },
         "timestamp": { "type": "string" }
       },
-      "required": ["userId", "offerId", "pointsSpent"]
+      "required": ["uid", "offerId", "pointsSpent"]
     },
     "History": {
       "title": "Reward History",
       "description": "Records of users earning points from ads.",
       "type": "object",
       "properties": {
-        "userId": { "type": "string" },
+        "uid": { "type": "string" },
         "type": { "type": "string" },
         "title": { "type": "string" },
         "amount": { "type": "number" },
         "timestamp": { "type": "string" }
       },
-      "required": ["userId", "amount"]
+      "required": ["uid", "amount"]
     }
   },
   "firestore": {
