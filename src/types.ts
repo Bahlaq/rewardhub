@@ -35,7 +35,7 @@ export interface UserProfile {
 
 export interface ClaimRecord {
   id: string;
-  userId: string;
+  uid: string;
   offerId: string;
   offerTitle: string;
   rewardCode: string;
