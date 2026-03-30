@@ -536,12 +536,18 @@ export default function App() {
       const result = await watchAd();
       
       if (result) {
-        addLog('rewarded', 'reward', `User earned 100 points. Progress: ${result.adsWatchedToday}/${result.adsNeeded}`);
-        Toast.show({ text: "Congratulations! You've earned 100 points!", duration: 'long' });
-        
+        if (result.isLocalGuest) {
+          addLog('rewarded', 'show', 'Local guest ad watch completed (no points saved)');
+          Toast.show({ text: "Please Sign in to save points", duration: 'long' });
+          return;
+        }
+
         if (result.rewardClaimed) {
-          addLog('rewarded', 'reward', `Boost Level ${result.boostLevel - 1} completed!`);
-          Toast.show({ text: "Boost Level Completed! Next level started.", duration: 'short' });
+          addLog('rewarded', 'reward', `Boost Level ${result.boostLevel - 1} completed! User earned 100 points.`);
+          Toast.show({ text: "Congratulations! Boost Level Completed! You've earned 100 points!", duration: 'long' });
+        } else {
+          addLog('rewarded', 'show', `Ad watched. Progress: ${result.adsWatchedToday}/${result.adsNeeded}`);
+          Toast.show({ text: "Ad watched! Keep going to complete the boost.", duration: 'short' });
         }
       }
     } catch (error) {
