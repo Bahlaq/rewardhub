@@ -172,9 +172,11 @@ export const HomeScreen = ({
   const today = new Date().toDateString();
   const isNewDay = user.lastBoostDate !== today;
   
-  const boostLevel = isNewDay ? 1 : (user.boostLevel || 1);
-  const adsWatchedToday = isNewDay ? 0 : (user.adsWatchedToday || 0);
+  const boostLevel = isNewDay ? 1 : (Number(user.boostLevel) || 1);
+  const adsWatchedToday = isNewDay ? 0 : (Number(user.adsWatchedToday) || 0);
   const adsNeeded = boostLevel;
+
+  console.log(`[DEBUG] HomeScreen Render: Level ${boostLevel}, Progress ${adsWatchedToday}/${adsNeeded}, isNewDay: ${isNewDay}`);
 
   const boostTitle = boostLevel === 1 ? 'First Boost' : 
                      boostLevel === 2 ? 'Second Boost' : 
