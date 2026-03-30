@@ -96,7 +96,7 @@ const Header = ({ user }: { user: UserProfile }) => (
       </div>
       <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100 shadow-sm">
         <Zap size={14} className="text-indigo-600 fill-indigo-600" />
-        <span className="text-sm font-bold text-indigo-700">{Number(user.points || 0)} pts</span>
+        <span className="text-sm font-bold text-indigo-700">{Math.max(0, Number(user.points || 0))} pts</span>
       </div>
     </div>
   </header>
@@ -112,10 +112,10 @@ const AdSimulatorModal = ({
 }: { 
   isOpen: boolean, 
   onClose: () => void, 
-  onReward: () => void,
+  onReward: () => Promise<any>, 
   isBoost?: boolean,
   user?: UserProfile | null,
-  onClaim?: () => void
+  onClaim?: () => Promise<any>
 }) => {
   const [timeLeft, setTimeLeft] = useState(5);
   const [isFinished, setIsFinished] = useState(false);
@@ -142,10 +142,11 @@ const AdSimulatorModal = ({
 
   if (!isOpen) return null;
 
-  // Version 7.8.0: Boost Logic
+  // Version 8.0.0: Boost Logic
   const adsNeeded = user?.boostLevel || 1;
-  const adsWatched = user?.adsWatchedToday || 0;
-  const canClaim = isBoost && isFinished && adsWatched >= adsNeeded;
+  const adsWatched = user?.currentLevelAdCounter || 0;
+  const isLastAd = isBoost && (adsWatched + 1 >= adsNeeded);
+  const canClaim = isBoost && isFinished && isLastAd;
 
   return (
     <div 
@@ -168,21 +169,29 @@ const AdSimulatorModal = ({
           </h3>
           <p className="text-sm text-zinc-400 mb-6">
             {isBoost 
-              ? `Progress: ${adsWatched}/${adsNeeded} ads watched. Complete requirements to claim 100 points.`
+              ? `Progress: ${adsWatched}/${adsNeeded} ads watched. ${isLastAd ? 'This is the final ad!' : 'Complete requirements to claim 100 points.'}`
               : 'Complete this short video to earn 100 points and unlock rewards.'}
           </p>
           
           <div className="flex flex-col gap-3">
             <button
-              onClick={() => {
+              onClick={async () => {
                 if (isFinished) {
-                  if (isBoost && adsWatched >= adsNeeded) {
-                    if (onClaim) onClaim();
-                    onClose();
+                  if (isBoost) {
+                    if (isLastAd) {
+                      // Record last ad AND claim
+                      await onReward();
+                      if (onClaim) await onClaim();
+                      onClose();
+                    } else {
+                      // Record current ad watch and start next one
+                      await onReward();
+                      setTimeLeft(5);
+                      setIsFinished(false);
+                    }
                   } else {
-                    onReward();
-                    // Don't close if it's a boost and more ads are needed
-                    if (!isBoost) onClose();
+                    await onReward();
+                    onClose();
                   }
                 } else {
                   onClose();
@@ -196,22 +205,9 @@ const AdSimulatorModal = ({
               )}
             >
               {isFinished 
-                ? (canClaim ? 'Claim +100 Points' : (isBoost ? 'Watch Ad to Progress' : 'Claim Reward'))
+                ? (isLastAd ? 'Claim +100 Points' : (isBoost ? 'Watch Next Ad' : 'Claim Reward'))
                 : 'Close Ad'}
             </button>
-            
-            {isBoost && isFinished && adsWatched < adsNeeded && (
-              <button 
-                onClick={() => {
-                  setTimeLeft(5);
-                  setIsFinished(false);
-                  // Re-start timer logic would be needed here, or just let user click again
-                }}
-                className="w-full py-3 rounded-2xl font-bold bg-indigo-500 text-white hover:bg-indigo-600 transition-all"
-              >
-                Watch Next Ad
-              </button>
-            )}
           </div>
         </div>
       </div>
@@ -458,12 +454,19 @@ export default function App() {
     const uid = firebaseUser.uid;
     setIsAuthLoading(true);
 
+    // Check for daily reset
+    const isLocalGuest = uid.startsWith('local_guest_');
+    if (isLocalGuest || (firebaseUser && !isAuthLoading)) {
+      firebaseService.checkDailyReset(uid);
+    }
+
     // Listen to profile changes in real-time
     const unsubscribeProfile = firebaseService.onProfileChange(uid, (profile) => {
       console.log(`[DEBUG] Profile change detected for ${uid}:`, JSON.stringify({
         points: profile?.points,
         boostLevel: profile?.boostLevel,
         adsWatchedToday: profile?.adsWatchedToday,
+        currentLevelAdCounter: profile?.currentLevelAdCounter,
         lastBoostDate: profile?.lastBoostDate
       }));
       
@@ -481,6 +484,7 @@ export default function App() {
           totalEarned: 0,
           boostLevel: 1,
           adsWatchedToday: 0,
+          currentLevelAdCounter: 0,
           lastBoostDate: new Date().toDateString()
         };
         firebaseService.saveUserProfile(newProfile);
@@ -536,6 +540,7 @@ export default function App() {
       localStorage.setItem('currentBoostProgress', JSON.stringify({
         adsWatchedToday: user.adsWatchedToday,
         boostLevel: user.boostLevel,
+        currentLevelAdCounter: user.currentLevelAdCounter,
         lastBoostDate: user.lastBoostDate
       }));
     }
@@ -576,11 +581,12 @@ export default function App() {
   }, [offers, searchQuery, selectedCategory]);
 
   const displayPoints = useMemo(() => {
-    return transactions.reduce((acc, tx) => {
+    const points = transactions.reduce((acc, tx) => {
       if (tx.type === 'earn') return acc + tx.amount;
       if (tx.type === 'claim') return acc - tx.amount;
       return acc;
     }, 0);
+    return Math.max(0, Number(points || 0));
   }, [transactions]);
 
   // Simulate App Open Ad
@@ -929,7 +935,7 @@ export default function App() {
                   <div className="grid grid-cols-2 gap-4 mt-8">
                     <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100">
                       <span className="block text-[10px] uppercase font-bold text-zinc-400 tracking-wider mb-1">Total Points</span>
-                      <span className="text-lg font-bold text-zinc-900">{Number(displayPoints || 0)}</span>
+                      <span className="text-lg font-bold text-zinc-900">{Math.max(0, Number(displayPoints || 0))}</span>
                     </div>
                     <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100">
                       <span className="block text-[10px] uppercase font-bold text-zinc-400 tracking-wider mb-1">Claims</span>
