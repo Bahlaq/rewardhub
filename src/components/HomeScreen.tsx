@@ -238,32 +238,22 @@ export const HomeScreen = ({
             </span>
           </div>
           <p className="text-indigo-100 text-xs mb-4">
-            Progress: {adsWatchedToday}/{adsNeeded} ads for {boostTitle} (+100 pts on completion!)
+            Progress: {Number(adsWatchedToday || 0)}/{Number(adsNeeded || 1)} ads for {boostTitle} (+100 pts on completion!)
           </p>
           
           <div className="flex items-center gap-3">
-            {adsWatchedToday < adsNeeded ? (
-              <button 
-                onClick={handleWatchAd}
-                className="bg-white text-indigo-600 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-indigo-50 transition-colors active:scale-95"
-              >
-                <PlayCircle size={16} />
-                Watch Ad ({adsWatchedToday}/{adsNeeded})
-              </button>
-            ) : (
-              <button 
-                onClick={() => handleClaimBoostReward()}
-                className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-emerald-600 transition-colors shadow-lg shadow-emerald-900/20 active:scale-95"
-              >
-                <Zap size={16} className="fill-white" />
-                Claim 100 Points
-              </button>
-            )}
+            <button 
+              onClick={handleWatchAd}
+              className="bg-white text-indigo-600 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-indigo-50 transition-colors active:scale-95"
+            >
+              <PlayCircle size={16} />
+              Watch Ad ({Number(adsWatchedToday || 0)}/{Number(adsNeeded || 1)})
+            </button>
             
             <div className="flex-1 h-1.5 bg-white/20 rounded-full overflow-hidden">
               <motion.div 
                 initial={{ width: 0 }}
-                animate={{ width: `${(adsWatchedToday / adsNeeded) * 100}%` }}
+                animate={{ width: `${(Number(adsWatchedToday || 0) / Number(adsNeeded || 1)) * 100}%` }}
                 className="h-full bg-white"
               />
             </div>
