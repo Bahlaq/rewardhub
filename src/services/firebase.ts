@@ -302,7 +302,7 @@ export const firebaseService = {
     }
     const q = query(
       collection(db, 'claims'),
-      where('userId', '==', uid)
+      where('uid', '==', uid)
     );
     
     return onSnapshot(q, (snapshot) => {
@@ -333,7 +333,7 @@ export const firebaseService = {
     }
     const q = query(
       collection(db, 'history'), 
-      where('userId', '==', uid)
+      where('uid', '==', uid)
     );
     
     return onSnapshot(q, (snapshot) => {
