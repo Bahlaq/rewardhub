@@ -27,7 +27,7 @@ import { Capacitor } from '@capacitor/core';
 import { Offer, UserProfile, Transaction } from '../types';
 
 // Hardcoded Client ID for Native Auth
-const PRODUCTION_WEB_CLIENT_ID = "563861371307-3moj6n7qanfg0tgn1vrv8ok59rnh8pj2.apps.googleusercontent.com";
+const PRODUCTION_WEB_CLIENT_ID = "563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com";
 
 // Initialize Google Auth for Capacitor
 let GoogleAuthInstance: any = null;
@@ -189,7 +189,7 @@ export const firebaseService = {
         const result = await signInWithCredential(auth, credential);
         console.log("[DEBUG] Firebase signInWithCredential success", result.user.uid);
         
-        // Version 7.8.0: Initialize profile immediately
+        // Version 8.0.0: Initialize profile immediately
         const profile = await this.getUserProfile(result.user.uid);
         if (!profile) {
           console.log("[DEBUG] Initializing new profile for Google user:", result.user.uid);
@@ -202,6 +202,7 @@ export const firebaseService = {
             totalEarned: 0,
             boostLevel: 1,
             adsWatchedToday: 0,
+            currentLevelAdCounter: 0,
             lastBoostDate: new Date().toDateString()
           });
         }
@@ -214,7 +215,7 @@ export const firebaseService = {
       const result = await signInWithPopup(auth, googleProvider);
       console.log("[DEBUG] Web signInWithPopup success", result.user.uid);
       
-      // Version 7.8.0: Initialize profile immediately
+      // Version 8.0.0: Initialize profile immediately
       const profile = await this.getUserProfile(result.user.uid);
       if (!profile) {
         console.log("[DEBUG] Initializing new profile for Google user:", result.user.uid);
@@ -227,6 +228,7 @@ export const firebaseService = {
           totalEarned: 0,
           boostLevel: 1,
           adsWatchedToday: 0,
+          currentLevelAdCounter: 0,
           lastBoostDate: new Date().toDateString()
         });
       }
@@ -245,7 +247,7 @@ export const firebaseService = {
     try {
       const result = await signInAnonymously(auth);
       
-      // Version 7.8.0: Initialize profile immediately
+      // Version 8.0.0: Initialize profile immediately
       const profile = await this.getUserProfile(result.user.uid);
       if (!profile) {
         console.log("[DEBUG] Initializing new profile for Anonymous user:", result.user.uid);
@@ -258,6 +260,7 @@ export const firebaseService = {
           totalEarned: 0,
           boostLevel: 1,
           adsWatchedToday: 0,
+          currentLevelAdCounter: 0,
           lastBoostDate: new Date().toDateString()
         });
       }
@@ -435,7 +438,7 @@ export const firebaseService = {
 
         // Record history
         transaction.set(historyRef, {
-          userId: uid,
+          uid: uid,
           type: 'earn',
           title: title,
           amount: points,
@@ -471,6 +474,7 @@ export const firebaseService = {
             totalEarned: 0,
             boostLevel: 1,
             adsWatchedToday: 0,
+            currentLevelAdCounter: 0,
             lastBoostDate: today,
             email: auth?.currentUser?.email || (isGuest ? 'Guest User' : 'Unknown')
           };
@@ -482,41 +486,44 @@ export const firebaseService = {
         // Ensure numeric types
         let boostLevel = Number(userData.boostLevel) || 1;
         let adsWatchedToday = Number(userData.adsWatchedToday) || 0;
+        let currentLevelAdCounter = Number(userData.currentLevelAdCounter) || 0;
         let lastBoostDate = userData.lastBoostDate || null;
 
         // Daily Reset Check
         if (lastBoostDate !== today) {
           boostLevel = 1;
           adsWatchedToday = 0;
+          currentLevelAdCounter = 0;
           lastBoostDate = today;
         }
 
-        // Increment adsWatchedToday
-        adsWatchedToday += 1;
+        // Increment currentLevelAdCounter
+        currentLevelAdCounter += 1;
         
         const adsNeeded = boostLevel;
 
         const updateData = {
-          adsWatchedToday,
+          currentLevelAdCounter,
           lastBoostDate: today
         };
         
         transaction.set(userRef, updateData, { merge: true });
 
-        // Version 7.8.0: Update localStorage backup
+        // Version 8.0.0: Update localStorage backup
         const cached = localStorage.getItem(`profile_${uid}`);
         if (cached) {
           const profile = JSON.parse(cached);
-          profile.adsWatchedToday = adsWatchedToday;
+          profile.currentLevelAdCounter = currentLevelAdCounter;
           profile.lastBoostDate = today;
           localStorage.setItem(`profile_${uid}`, JSON.stringify(profile));
         }
 
         return {
           isLocalGuest: isGuest,
-          rewardClaimed: false, // Reward is now claimed manually via claimBoostReward
+          rewardClaimed: false,
           boostLevel,
           adsWatchedToday,
+          currentLevelAdCounter,
           adsNeeded
         };
       });
@@ -544,29 +551,32 @@ export const firebaseService = {
         const userData = userDoc.data();
         let boostLevel = Number(userData.boostLevel) || 1;
         let adsWatchedToday = Number(userData.adsWatchedToday) || 0;
+        let currentLevelAdCounter = Number(userData.currentLevelAdCounter) || 0;
         let points = Number(userData.points) || 0;
         let totalEarned = Number(userData.totalEarned) || 0;
 
-        if (adsWatchedToday < boostLevel) {
+        if (currentLevelAdCounter < boostLevel) {
           throw new Error("Boost requirement not met");
         }
 
-        // Award points
+        // Version 8.0.0 Logic: points += 100, boostLevel += 1, adsWatchedToday += 1, reset currentLevelAdCounter to 0
         points += 100;
         totalEarned += 100;
         const completedLevel = boostLevel;
         boostLevel += 1;
-        adsWatchedToday = 0;
+        adsWatchedToday += 1;
+        currentLevelAdCounter = 0;
 
         transaction.set(userRef, {
           points,
           totalEarned,
           boostLevel,
           adsWatchedToday,
+          currentLevelAdCounter,
           lastBoostDate: today
         }, { merge: true });
 
-        // Version 7.8.0: Update localStorage backup
+        // Version 8.0.0: Update localStorage backup
         const cached = localStorage.getItem(`profile_${uid}`);
         if (cached) {
           const profile = JSON.parse(cached);
@@ -574,6 +584,7 @@ export const firebaseService = {
           profile.totalEarned = totalEarned;
           profile.boostLevel = boostLevel;
           profile.adsWatchedToday = adsWatchedToday;
+          profile.currentLevelAdCounter = currentLevelAdCounter;
           profile.lastBoostDate = today;
           localStorage.setItem(`profile_${uid}`, JSON.stringify(profile));
         }
@@ -592,6 +603,51 @@ export const firebaseService = {
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'claim_boost');
       throw error;
+    }
+  },
+
+  async checkDailyReset(uid: string) {
+    if (!db) return;
+    const isGuest = uid.startsWith('local_guest_');
+    const collectionName = isGuest ? 'guests' : 'users';
+    const userRef = doc(db, collectionName, uid);
+    const today = new Date().toDateString();
+
+    // If it's a real user ID but we aren't authenticated, we can't check/reset anyway
+    // This prevents "Missing or insufficient permissions" errors during initial load
+    if (!isGuest && (!auth || !auth.currentUser)) {
+      console.log("[DEBUG] Skipping daily reset check for non-guest UID while unauthenticated");
+      return;
+    }
+
+    try {
+      const userDoc = await getDoc(userRef);
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        if (userData.lastBoostDate !== today) {
+          console.log("[DEBUG] Daily reset triggered for:", uid);
+          await setDoc(userRef, {
+            boostLevel: 1,
+            adsWatchedToday: 0,
+            currentLevelAdCounter: 0,
+            lastBoostDate: today
+          }, { merge: true });
+          
+          // Update localStorage
+          const cached = localStorage.getItem(`profile_${uid}`);
+          if (cached) {
+            const profile = JSON.parse(cached);
+            profile.boostLevel = 1;
+            profile.adsWatchedToday = 0;
+            profile.currentLevelAdCounter = 0;
+            profile.lastBoostDate = today;
+            localStorage.setItem(`profile_${uid}`, JSON.stringify(profile));
+          }
+        }
+      }
+    } catch (error) {
+      // Use handleFirestoreError but don't throw to avoid crashing the app on startup
+      handleFirestoreError(error, OperationType.GET, `${collectionName}/${uid}`, false);
     }
   },
 
