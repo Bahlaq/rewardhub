@@ -70,22 +70,22 @@ service cloud.firestore {
              data.points is number && data.points >= 0 &&
              (!('email' in data) || data.email == 'Guest User' || isValidEmail(data.email)) &&
              (!('boostLevel' in data) || data.boostLevel is number) &&
-             (!('adsWatchedToday' in data) || data.adsWatchedToday is number);
+             (!('adsWatchedToday' in data) || data.adsWatchedToday is number) &&
+             (!('totalEarned' in data) || data.totalEarned is number) &&
+             (!('lastBoostDate' in data) || data.lastBoostDate is string);
     }
 
     function isValidClaim(data) {
-      return data.keys().hasAll(['uid', 'offerId', 'points', 'timestamp', 'status']) &&
+      return data.keys().hasAll(['uid', 'offerId', 'timestamp']) &&
              data.uid is string &&
-             data.offerId is string &&
-             data.points is number &&
-             data.status in ['pending', 'completed', 'rejected'];
+             data.offerId is string;
     }
 
     function isValidHistory(data) {
       return data.keys().hasAll(['uid', 'points', 'timestamp', 'type', 'message']) &&
              data.uid is string &&
              data.points is number &&
-             data.type in ['boost', 'claim', 'referral'];
+             data.type in ['boost', 'claim', 'referral', 'earn'];
     }
 
     // User profiles
