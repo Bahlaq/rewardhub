@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { 
+import {
   initializeFirestore,
   collection,
   query,
@@ -10,48 +10,25 @@ import {
   deleteDoc,
   onSnapshot,
   runTransaction,
-  serverTimestamp
+  serverTimestamp,
 } from 'firebase/firestore';
-import { 
-  getAuth, 
-  GoogleAuthProvider, 
+import {
+  getAuth,
+  GoogleAuthProvider,
   signInWithPopup,
   onAuthStateChanged,
   signOut,
-  signInAnonymously,
+  signInAnonymously as fbSignInAnonymously,
   deleteUser,
   User as FirebaseUser,
-  signInWithCredential
+  signInWithCredential,
 } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
 import { Offer, UserProfile, Transaction } from '../types';
 
-// Hardcoded Client ID for Native Auth
-const PRODUCTION_WEB_CLIENT_ID = "563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com";
-
-// Initialize Google Auth for Capacitor
-let GoogleAuthInstance: any = null;
-
-if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
-  import('@codetrix-studio/capacitor-google-auth').then(({ GoogleAuth }) => {
-    GoogleAuthInstance = GoogleAuth;
-    try {
-      // Version 7.6.2: Simplified initialization for better compatibility
-      // We use the Web Client ID for both clientId and serverClientId on Android/iOS
-      (GoogleAuth as any).initialize({
-        clientId: PRODUCTION_WEB_CLIENT_ID,
-        serverClientId: PRODUCTION_WEB_CLIENT_ID,
-        scopes: ['profile', 'email'],
-        grantOfflineAccess: true
-      });
-      console.log("[DEBUG] GoogleAuth initialized successfully with Client ID:", PRODUCTION_WEB_CLIENT_ID);
-    } catch (error) {
-      console.error("[DEBUG] GoogleAuth.initialize failed:", error);
-    }
-  }).catch(err => {
-    console.error("[DEBUG] Failed to load GoogleAuth plugin:", err);
-  });
-}
+// ─── Verified Credentials ──────────────────────────────────────────────────
+const WEB_CLIENT_ID =
+  '563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyBLlefWEa3WHUSPD0_sDTvpCTqIImh5X6Y',
@@ -60,690 +37,572 @@ const firebaseConfig = {
   storageBucket: 'rewardhub-1ea27.firebasestorage.app',
   messagingSenderId: '563861371307',
   appId: '1:563861371307:web:7db5542c5b2f2e46247aee',
-  measurementId: 'G-PCK58GKBKM'
 };
 
-// Check if config is valid
-export const isConfigValid = true; // Hardcoded to true since we are providing the config
+// ─── Capacitor Google Auth lazy-load ───────────────────────────────────────
+let GoogleAuthInstance: any = null;
 
-// Initialize Firebase
-let app;
-try {
-  if (isConfigValid) {
-    app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-    console.log("[DEBUG] Firebase initialized successfully");
-  } else {
-    console.error("Firebase configuration is missing or incomplete. Please check your environment variables.");
-  }
-} catch (error) {
-  console.error("Failed to initialize Firebase:", error);
-}
-
-// Initialize Firestore with settings for better connectivity in restricted environments
-const db = app ? initializeFirestore(app, {
-  experimentalForceLongPolling: true,
-}) : null;
-
-// Initialize Auth
-const auth = app ? getAuth(app) : null;
-const googleProvider = new GoogleAuthProvider();
-
-// If a Web Client ID is provided, set it.
-const webClientId = import.meta.env.VITE_FIREBASE_WEB_CLIENT_ID || PRODUCTION_WEB_CLIENT_ID;
-if (webClientId) {
-  googleProvider.setCustomParameters({
-    client_id: webClientId
+function loadGoogleAuth(): Promise<any> {
+  if (GoogleAuthInstance) return Promise.resolve(GoogleAuthInstance);
+  return import('@codetrix-studio/capacitor-google-auth').then(({ GoogleAuth }) => {
+    GoogleAuthInstance = GoogleAuth;
+    try {
+      (GoogleAuth as any).initialize({
+        clientId: WEB_CLIENT_ID,
+        serverClientId: WEB_CLIENT_ID,
+        scopes: ['profile', 'email'],
+        grantOfflineAccess: true,
+      });
+      console.log('[GoogleAuth] Initialized — clientId:', WEB_CLIENT_ID.slice(0, 20) + '...');
+    } catch (err) {
+      console.error('[GoogleAuth] initialize() failed:', err);
+    }
+    return GoogleAuth;
   });
 }
+
+// Pre-load on native
+if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+  loadGoogleAuth().catch((err) =>
+    console.error('[GoogleAuth] Pre-load failed:', err)
+  );
+}
+
+// ─── Firebase Init ─────────────────────────────────────────────────────────
+export const isConfigValid = true;
+
+let _app: ReturnType<typeof initializeApp> | undefined;
+try {
+  _app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+} catch (err) {
+  console.error('[Firebase] Init error:', err);
+}
+
+// experimentalForceLongPolling ensures connectivity in strict environments
+const db = _app
+  ? initializeFirestore(_app, { experimentalForceLongPolling: true })
+  : null;
+
+const auth = _app ? getAuth(_app) : null;
+
+const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ client_id: WEB_CLIENT_ID });
 
 export { auth, googleProvider, db };
 export type { FirebaseUser };
 
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
+// ─── Helpers ───────────────────────────────────────────────────────────────
+function col(uid: string) {
+  return uid.startsWith('local_guest_') ? 'guests' : 'users';
 }
 
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
+function saveLocal(uid: string, data: Partial<UserProfile>) {
+  try {
+    const prev = getLocal(uid) || ({} as UserProfile);
+    localStorage.setItem(`profile_${uid}`, JSON.stringify({ ...prev, ...data }));
+  } catch (_) {}
+}
+
+function getLocal(uid: string): UserProfile | null {
+  try {
+    const raw = localStorage.getItem(`profile_${uid}`);
+    return raw ? (JSON.parse(raw) as UserProfile) : null;
+  } catch (_) {
+    return null;
   }
 }
 
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null, shouldThrow = true) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth?.currentUser?.uid,
-      email: auth?.currentUser?.email,
-      emailVerified: auth?.currentUser?.emailVerified,
-      isAnonymous: auth?.currentUser?.isAnonymous,
-      tenantId: auth?.currentUser?.tenantId,
-      providerInfo: auth?.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
+/** Safely create default profile fields without overwriting existing data */
+function defaultProfile(uid: string, email: string): UserProfile {
+  return {
+    uid,
+    email,
+    points: 0,
+    claimsToday: 0,
+    lastClaimDate: null,
+    totalEarned: 0,
+    boostLevel: 1,
+    adsWatchedToday: 0,
+    currentLevelAdCounter: 0,
+    lastBoostDate: new Date().toDateString(),
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  if (shouldThrow) {
-    throw new Error(JSON.stringify(errInfo));
-  }
 }
 
+// ─── Service ───────────────────────────────────────────────────────────────
 export const firebaseService = {
-  async signInWithGoogle() {
-    if (!auth) throw new Error("Firebase Auth not initialized");
-    try {
-      console.log("[DEBUG] signInWithGoogle started");
-      // Try Native Google Auth first if on native platform
-      if (Capacitor.isNativePlatform()) {
-        console.log("[DEBUG] Native platform detected, using GoogleAuth plugin");
-        if (!GoogleAuthInstance) {
-          console.log("[DEBUG] GoogleAuthInstance not ready, attempting dynamic import...");
-          const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
-          GoogleAuthInstance = GoogleAuth;
-          (GoogleAuthInstance as any).initialize({
-            clientId: PRODUCTION_WEB_CLIENT_ID,
-            serverClientId: PRODUCTION_WEB_CLIENT_ID,
-            scopes: ['profile', 'email'],
-            grantOfflineAccess: true
-          });
-        }
-        
-        console.log("[DEBUG] Calling GoogleAuth.signIn()...");
-        const googleUser = await GoogleAuthInstance.signIn();
-        console.log("[DEBUG] GoogleAuth.signIn success", JSON.stringify({ 
-          email: googleUser.email, 
-          id: googleUser.id
-        }));
-        
-        const idToken = googleUser.authentication?.idToken || (googleUser as any).idToken;
-        if (!idToken) {
-          console.error("[DEBUG] Missing idToken in googleUser.authentication", JSON.stringify(googleUser));
-          throw new Error("No ID Token received. Please check Firebase SHA-1 configuration.");
-        }
-        
-        const credential = GoogleAuthProvider.credential(idToken);
-        const result = await signInWithCredential(auth, credential);
-        console.log("[DEBUG] Firebase signInWithCredential success", result.user.uid);
-        
-        // Version 8.0.0: Initialize profile immediately
-        const profile = await this.getUserProfile(result.user.uid);
-        if (!profile) {
-          console.log("[DEBUG] Initializing new profile for Google user:", result.user.uid);
-          await this.saveUserProfile({
-            uid: result.user.uid,
-            email: result.user.email || 'Google User',
-            points: 0,
-            claimsToday: 0,
-            lastClaimDate: null,
-            totalEarned: 0,
-            boostLevel: 1,
-            adsWatchedToday: 0,
-            currentLevelAdCounter: 0,
-            lastBoostDate: new Date().toDateString()
-          });
-        }
-        
-        return result.user;
+  // ── Auth ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Google Sign-In.
+   * On native (Android/iOS): Capacitor Google Auth → Firebase credential.
+   * On web: Firebase popup.
+   */
+  async signInWithGoogle(): Promise<FirebaseUser> {
+    if (!auth) throw new Error('Firebase Auth not initialized');
+
+    if (Capacitor.isNativePlatform()) {
+      const GA = await loadGoogleAuth();
+
+      console.log('[GoogleAuth] Calling signIn()…');
+      const googleUser = await GA.signIn();
+      console.log('[GoogleAuth] signIn() resolved — email:', googleUser?.email);
+
+      // Extract idToken (field location varies by plugin version)
+      const idToken: string | undefined =
+        googleUser?.authentication?.idToken ??
+        (googleUser as any)?.idToken;
+
+      if (!idToken) {
+        throw new Error(
+          'No idToken received from Google. ' +
+            'Check SHA-1 fingerprint in Firebase console (Project Settings → Your Apps → Android).'
+        );
       }
-      
-      // On web, use popup
-      console.log("[DEBUG] Web platform detected, using signInWithPopup");
-      const result = await signInWithPopup(auth, googleProvider);
-      console.log("[DEBUG] Web signInWithPopup success", result.user.uid);
-      
-      // Version 8.0.0: Initialize profile immediately
-      const profile = await this.getUserProfile(result.user.uid);
-      if (!profile) {
-        console.log("[DEBUG] Initializing new profile for Google user:", result.user.uid);
-        await this.saveUserProfile({
-          uid: result.user.uid,
-          email: result.user.email || 'Google User',
-          points: 0,
-          claimsToday: 0,
-          lastClaimDate: null,
-          totalEarned: 0,
-          boostLevel: 1,
-          adsWatchedToday: 0,
-          currentLevelAdCounter: 0,
-          lastBoostDate: new Date().toDateString()
-        });
-      }
-      
+
+      const credential = GoogleAuthProvider.credential(idToken);
+      const result = await signInWithCredential(auth, credential);
+      console.log('[Firebase] signInWithCredential OK — uid:', result.user.uid);
+
+      await this._ensureProfile(result.user.uid, result.user.email ?? 'Google User');
       return result.user;
-    } catch (error: any) {
-      console.error("[DEBUG] Google Auth failed:", error);
-      // Handle 'Requested entity was not found' by resetting key selection if needed
-      // (Though here we use hardcoded config, so it's likely a config/SHA-1 issue)
-      throw error;
     }
+
+    // Web
+    const result = await signInWithPopup(auth, googleProvider);
+    await this._ensureProfile(result.user.uid, result.user.email ?? 'Google User');
+    return result.user;
   },
 
-  async signInAnonymously() {
-    if (!auth) throw new Error("Firebase Auth not initialized");
-    try {
-      const result = await signInAnonymously(auth);
-      
-      // Version 8.0.0: Initialize profile immediately
-      const profile = await this.getUserProfile(result.user.uid);
-      if (!profile) {
-        console.log("[DEBUG] Initializing new profile for Anonymous user:", result.user.uid);
-        await this.saveUserProfile({
-          uid: result.user.uid,
-          email: 'Guest User',
-          points: 0,
-          claimsToday: 0,
-          lastClaimDate: null,
-          totalEarned: 0,
-          boostLevel: 1,
-          adsWatchedToday: 0,
-          currentLevelAdCounter: 0,
-          lastBoostDate: new Date().toDateString()
-        });
-      }
-      
-      return result.user;
-    } catch (error) {
-      console.error("Error signing in anonymously:", error);
-      throw error;
-    }
+  async signInAnonymously(): Promise<FirebaseUser> {
+    if (!auth) throw new Error('Firebase Auth not initialized');
+    const result = await fbSignInAnonymously(auth);
+    await this._ensureProfile(result.user.uid, 'Guest User');
+    return result.user;
   },
 
-  async logout() {
-    if (!auth) return;
-    try {
-      await signOut(auth);
-    } catch (error) {
-      console.error("Error signing out:", error);
-    }
+  async logout(): Promise<void> {
+    if (auth) await signOut(auth);
   },
 
-  async deleteAccount() {
-    if (!auth || !auth.currentUser) return;
-    try {
-      await deleteUser(auth.currentUser);
-    } catch (error) {
-      console.error("Error deleting auth account:", error);
-      throw error;
-    }
+  async deleteAccount(): Promise<void> {
+    if (auth?.currentUser) await deleteUser(auth.currentUser);
   },
 
-  async deleteUserProfile(uid: string) {
+  async deleteUserProfile(uid: string): Promise<void> {
     if (!db) return;
-    const collectionName = uid.startsWith('local_guest_') ? 'guests' : 'users';
-    try {
-      await deleteDoc(doc(db, collectionName, uid));
-    } catch (error) {
-      console.error("Error deleting user profile:", error);
-      throw error;
-    }
+    await deleteDoc(doc(db, col(uid), uid));
   },
 
-  onAuthChange(callback: (user: FirebaseUser | null) => void) {
+  onAuthChange(cb: (user: FirebaseUser | null) => void): () => void {
     if (!auth) {
-      callback(null);
+      cb(null);
       return () => {};
     }
-    return onAuthStateChanged(auth, callback);
+    return onAuthStateChanged(auth, cb);
   },
 
-  onProfileChange(uid: string, callback: (profile: UserProfile | null) => void) {
+  // ── Internal helpers ──────────────────────────────────────────────────────
+
+  async _ensureProfile(uid: string, email: string): Promise<void> {
+    if (!db) return;
+    const ref = doc(db, col(uid), uid);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      const profile = defaultProfile(uid, email);
+      await setDoc(ref, profile);
+      saveLocal(uid, profile);
+      console.log('[Profile] Created new profile for', uid);
+    } else {
+      saveLocal(uid, snap.data() as UserProfile);
+    }
+  },
+
+  // ── Real-time listeners ───────────────────────────────────────────────────
+
+  onProfileChange(
+    uid: string,
+    cb: (profile: UserProfile | null) => void
+  ): () => void {
     if (!db) {
-      callback(null);
+      cb(null);
       return () => {};
     }
-    const collectionName = uid.startsWith('local_guest_') ? 'guests' : 'users';
-    return onSnapshot(doc(db, collectionName, uid), (doc) => {
-      if (doc.exists()) {
-        callback(doc.data() as UserProfile);
-      } else {
-        callback(null);
+    return onSnapshot(
+      doc(db, col(uid), uid),
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as UserProfile;
+          saveLocal(uid, data);
+          cb(data);
+        } else {
+          cb(null);
+        }
+      },
+      (err) => {
+        console.error('[Firestore] onProfileChange error:', err.code, err.message);
+        cb(getLocal(uid));
       }
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, `${collectionName}/${uid}`, false);
-      callback(null);
-    });
-  },
-
-  onOffersChange(callback: (offers: Offer[]) => void) {
-    if (!db) {
-      callback([]);
-      return () => {};
-    }
-    
-    const q = query(collection(db, 'offers'));
-
-    return onSnapshot(q, (snapshot) => {
-      const offers = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          points: Number(data.points || 0)
-        } as Offer;
-      });
-      callback(offers);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'offers', false);
-      callback([]);
-    });
-  },
-
-  onClaimsChange(uid: string, callback: (claims: Transaction[]) => void) {
-    if (!db) {
-      callback([]);
-      return () => {};
-    }
-    const q = query(
-      collection(db, 'claims'),
-      where('uid', '==', uid)
     );
-    
-    return onSnapshot(q, (snapshot) => {
-      const claims = snapshot.docs
-        .map(doc => {
-          const data = doc.data();
+  },
+
+  onOffersChange(cb: (offers: Offer[]) => void): () => void {
+    if (!db) {
+      cb([]);
+      return () => {};
+    }
+    return onSnapshot(
+      query(collection(db, 'offers')),
+      (snapshot) => {
+        const offers = snapshot.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+          points: Number(d.data().points ?? 0),
+        })) as Offer[];
+        cb(offers);
+      },
+      (err) => {
+        console.error('[Firestore] onOffersChange error:', err.message);
+        cb([]);
+      }
+    );
+  },
+
+  onClaimsChange(uid: string, cb: (claims: Transaction[]) => void): () => void {
+    if (!db) {
+      cb([]);
+      return () => {};
+    }
+    return onSnapshot(
+      query(collection(db, 'claims'), where('uid', '==', uid)),
+      (snapshot) => {
+        const claims = snapshot.docs.map((d) => {
+          const data = d.data();
           return {
-            id: doc.id,
-            type: 'claim',
-            title: data.offerBrand,
-            amount: -data.pointsSpent,
-            timestamp: data.timestamp?.toDate?.()?.toISOString() || new Date().toISOString(),
-            code: data.code,
-            rewardType: data.code ? 'code' : 'link'
+            id: d.id,
+            type: 'claim' as const,
+            title: data.offerBrand ?? 'Claimed Offer',
+            amount: Number(data.pointsSpent ?? 0), // positive — HistoryScreen subtracts
+            timestamp:
+              data.timestamp?.toDate?.()?.toISOString() ??
+              new Date().toISOString(),
+            code: data.code ?? undefined,
+            rewardType: data.code ? 'code' : 'link',
           } as Transaction;
         });
-      callback(claims);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'claims', false);
-      callback([]);
-    });
+        cb(claims);
+      },
+      (err) => {
+        console.error('[Firestore] onClaimsChange error:', err.message);
+        cb([]);
+      }
+    );
   },
 
-  onHistoryChange(uid: string, callback: (history: Transaction[]) => void) {
+  onHistoryChange(uid: string, cb: (history: Transaction[]) => void): () => void {
     if (!db) {
-      callback([]);
+      cb([]);
       return () => {};
     }
-    const q = query(
-      collection(db, 'history'), 
-      where('uid', '==', uid)
+    return onSnapshot(
+      query(collection(db, 'history'), where('uid', '==', uid)),
+      (snapshot) => {
+        const history = snapshot.docs.map((d) => {
+          const data = d.data();
+          // history collection only stores earn events (boosts)
+          return {
+            id: d.id,
+            type: 'earn' as const,
+            title: data.title ?? data.message ?? 'Earned Points',
+            amount: Math.abs(Number(data.amount ?? data.points ?? 0)),
+            timestamp:
+              data.timestamp?.toDate?.()?.toISOString() ??
+              new Date().toISOString(),
+          } as Transaction;
+        });
+        cb(history);
+      },
+      (err) => {
+        console.error('[Firestore] onHistoryChange error:', err.message);
+        cb([]);
+      }
     );
-    
-    return onSnapshot(q, (snapshot) => {
-      const history = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          type: 'earn',
-          title: data.title,
-          amount: data.amount,
-          timestamp: data.timestamp?.toDate?.()?.toISOString() || new Date().toISOString(),
-        } as Transaction;
-      });
-      callback(history);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'history', false);
-      callback([]);
-    });
   },
 
-  async rewardUserPoints(uid: string, points: number, title: string) {
-    if (!db) throw new Error("Firestore not initialized");
-    
-    const collectionName = uid.startsWith('local_guest_') ? 'guests' : 'users';
-    const userRef = doc(db, collectionName, uid);
-    const historyRef = doc(collection(db, 'history'));
+  // ── Daily Reset (CRITICAL: never touch `points`) ──────────────────────────
 
-    try {
-      // Ensure user document exists first using setDoc with merge: true
-      await setDoc(userRef, { uid, points: 0, totalEarned: 0 }, { merge: true });
-
-      await runTransaction(db, async (transaction) => {
-        const userDoc = await transaction.get(userRef);
-        if (!userDoc.exists()) {
-          throw new Error("User profile not found");
-        }
-
-        const userData = userDoc.data() as UserProfile;
-        
-        // Update user points
-        transaction.update(userRef, {
-          points: (userData.points || 0) + points,
-          totalEarned: (userData.totalEarned || 0) + points
-        });
-
-        // Record history
-        transaction.set(historyRef, {
-          uid: uid,
-          type: 'earn',
-          title: title,
-          amount: points,
-          timestamp: serverTimestamp()
-        });
-      });
-      return true;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'history');
-      throw error;
-    }
-  },
-
-  async recordAdWatch(uid: string) {
-    if (!db) throw new Error("Firestore not initialized");
-    
-    const isGuest = uid.startsWith('local_guest_');
-    const collectionName = isGuest ? 'guests' : 'users';
-    const userRef = doc(db, collectionName, uid);
-    const today = new Date().toDateString();
-
-    console.log(`[DEBUG] recordAdWatch started for ${uid}`);
-
-    try {
-      return await runTransaction(db, async (transaction) => {
-        const userDoc = await transaction.get(userRef);
-        
-        let userData: any;
-        if (!userDoc.exists()) {
-          userData = {
-            uid,
-            points: 0,
-            totalEarned: 0,
-            boostLevel: 1,
-            adsWatchedToday: 0,
-            currentLevelAdCounter: 0,
-            lastBoostDate: today,
-            email: auth?.currentUser?.email || (isGuest ? 'Guest User' : 'Unknown')
-          };
-          transaction.set(userRef, userData);
-        } else {
-          userData = userDoc.data();
-        }
-
-        // Ensure numeric types
-        let boostLevel = Number(userData.boostLevel) || 1;
-        let adsWatchedToday = Number(userData.adsWatchedToday) || 0;
-        let currentLevelAdCounter = Number(userData.currentLevelAdCounter) || 0;
-        let lastBoostDate = userData.lastBoostDate || null;
-
-        // Daily Reset Check
-        if (lastBoostDate !== today) {
-          boostLevel = 1;
-          adsWatchedToday = 0;
-          currentLevelAdCounter = 0;
-          lastBoostDate = today;
-        }
-
-        // Increment currentLevelAdCounter
-        currentLevelAdCounter += 1;
-        
-        const adsNeeded = boostLevel;
-
-        const updateData = {
-          currentLevelAdCounter,
-          lastBoostDate: today
-        };
-        
-        transaction.set(userRef, updateData, { merge: true });
-
-        // Version 8.0.0: Update localStorage backup
-        const cached = localStorage.getItem(`profile_${uid}`);
-        if (cached) {
-          const profile = JSON.parse(cached);
-          profile.currentLevelAdCounter = currentLevelAdCounter;
-          profile.lastBoostDate = today;
-          localStorage.setItem(`profile_${uid}`, JSON.stringify(profile));
-        }
-
-        return {
-          isLocalGuest: isGuest,
-          rewardClaimed: false,
-          boostLevel,
-          adsWatchedToday,
-          currentLevelAdCounter,
-          adsNeeded
-        };
-      });
-    } catch (error) {
-      console.error("[DEBUG] recordAdWatch failed:", error);
-      handleFirestoreError(error, OperationType.WRITE, 'ad_watch');
-      throw error;
-    }
-  },
-
-  async claimBoostReward(uid: string) {
-    if (!db) throw new Error("Firestore not initialized");
-    
-    const isGuest = uid.startsWith('local_guest_');
-    const collectionName = isGuest ? 'guests' : 'users';
-    const userRef = doc(db, collectionName, uid);
-    const historyRef = doc(collection(db, 'history'));
-    const today = new Date().toDateString();
-
-    try {
-      return await runTransaction(db, async (transaction) => {
-        const userDoc = await transaction.get(userRef);
-        if (!userDoc.exists()) throw new Error("User not found");
-        
-        const userData = userDoc.data();
-        let boostLevel = Number(userData.boostLevel) || 1;
-        let adsWatchedToday = Number(userData.adsWatchedToday) || 0;
-        let currentLevelAdCounter = Number(userData.currentLevelAdCounter) || 0;
-        let points = Number(userData.points) || 0;
-        let totalEarned = Number(userData.totalEarned) || 0;
-
-        if (currentLevelAdCounter < boostLevel) {
-          throw new Error("Boost requirement not met");
-        }
-
-        // Version 8.0.0 Logic: points += 100, boostLevel += 1, adsWatchedToday += 1, reset currentLevelAdCounter to 0
-        points += 100;
-        totalEarned += 100;
-        const completedLevel = boostLevel;
-        boostLevel += 1;
-        adsWatchedToday += 1;
-        currentLevelAdCounter = 0;
-
-        transaction.set(userRef, {
-          points,
-          totalEarned,
-          boostLevel,
-          adsWatchedToday,
-          currentLevelAdCounter,
-          lastBoostDate: today
-        }, { merge: true });
-
-        // Version 8.0.0: Update localStorage backup
-        const cached = localStorage.getItem(`profile_${uid}`);
-        if (cached) {
-          const profile = JSON.parse(cached);
-          profile.points = points;
-          profile.totalEarned = totalEarned;
-          profile.boostLevel = boostLevel;
-          profile.adsWatchedToday = adsWatchedToday;
-          profile.currentLevelAdCounter = currentLevelAdCounter;
-          profile.lastBoostDate = today;
-          localStorage.setItem(`profile_${uid}`, JSON.stringify(profile));
-        }
-
-        // Record history
-        transaction.set(historyRef, {
-          uid,
-          type: 'earn',
-          points: 100,
-          message: `Completed Boost Level ${completedLevel}`,
-          timestamp: serverTimestamp()
-        });
-
-        return { points, boostLevel };
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'claim_boost');
-      throw error;
-    }
-  },
-
-  async checkDailyReset(uid: string) {
+  /**
+   * Compares lastBoostDate to today.
+   * If they differ → reset boostLevel=1, currentLevelAdCounter=0, adsWatchedToday=0.
+   * Points are NEVER touched here.
+   */
+  async checkDailyReset(uid: string): Promise<void> {
     if (!db) return;
-    const isGuest = uid.startsWith('local_guest_');
-    const collectionName = isGuest ? 'guests' : 'users';
-    const userRef = doc(db, collectionName, uid);
-    const today = new Date().toDateString();
 
-    // If it's a real user ID but we aren't authenticated, we can't check/reset anyway
-    // This prevents "Missing or insufficient permissions" errors during initial load
+    // Skip unauthenticated non-guest calls to avoid permission errors on startup
+    const isGuest = uid.startsWith('local_guest_');
     if (!isGuest && (!auth || !auth.currentUser)) {
-      console.log("[DEBUG] Skipping daily reset check for non-guest UID while unauthenticated");
+      console.log('[DailyReset] Skipped — not yet authenticated');
       return;
     }
 
+    const ref = doc(db, col(uid), uid);
+    const today = new Date().toDateString();
+
     try {
-      const userDoc = await getDoc(userRef);
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        if (userData.lastBoostDate !== today) {
-          console.log("[DEBUG] Daily reset triggered for:", uid);
-          await setDoc(userRef, {
-            boostLevel: 1,
-            adsWatchedToday: 0,
-            currentLevelAdCounter: 0,
-            lastBoostDate: today
-          }, { merge: true });
-          
-          // Update localStorage
-          const cached = localStorage.getItem(`profile_${uid}`);
-          if (cached) {
-            const profile = JSON.parse(cached);
-            profile.boostLevel = 1;
-            profile.adsWatchedToday = 0;
-            profile.currentLevelAdCounter = 0;
-            profile.lastBoostDate = today;
-            localStorage.setItem(`profile_${uid}`, JSON.stringify(profile));
-          }
-        }
-      }
-    } catch (error) {
-      // Use handleFirestoreError but don't throw to avoid crashing the app on startup
-      handleFirestoreError(error, OperationType.GET, `${collectionName}/${uid}`, false);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return;
+
+      const data = snap.data();
+      if (data.lastBoostDate === today) return; // Nothing to reset
+
+      // Boost counters reset — POINTS intentionally excluded
+      const resetFields = {
+        boostLevel: 1,
+        currentLevelAdCounter: 0,
+        adsWatchedToday: 0,
+        lastBoostDate: today,
+      };
+
+      await setDoc(ref, resetFields, { merge: true });
+      saveLocal(uid, { ...(data as UserProfile), ...resetFields });
+      console.log('[DailyReset] Reset for', uid, '— points preserved at', data.points);
+    } catch (err: any) {
+      console.error('[DailyReset] Error:', err.code ?? err.message);
     }
   },
 
-  async claimOffer(uid: string, offer: Offer) {
-    if (!db) throw new Error("Firestore not initialized");
-    
-    const collectionName = uid.startsWith('local_guest_') ? 'guests' : 'users';
-    const userRef = doc(db, collectionName, uid);
+  // ── Progressive Boost ─────────────────────────────────────────────────────
+
+  /**
+   * Records one ad watch. Increments currentLevelAdCounter.
+   * Returns updated state so the caller can react immediately.
+   *
+   * Math: boostLevel N requires N ads.
+   */
+  async recordAdWatch(uid: string): Promise<{
+    boostLevel: number;
+    currentLevelAdCounter: number;
+    adsNeeded: number;
+    adsWatchedToday: number;
+  }> {
+    if (!db) throw new Error('Firestore not initialized');
+
+    const ref = doc(db, col(uid), uid);
+    const today = new Date().toDateString();
+
+    return runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+
+      let data: any;
+      if (!snap.exists()) {
+        // First-time user — initialise with merge
+        data = defaultProfile(uid, auth?.currentUser?.email ?? 'Guest User');
+        tx.set(ref, data);
+      } else {
+        data = snap.data();
+      }
+
+      // ── Daily reset (inside transaction for atomicity) ──
+      let boostLevel = Number(data.boostLevel) || 1;
+      let currentLevelAdCounter = Number(data.currentLevelAdCounter) || 0;
+      let adsWatchedToday = Number(data.adsWatchedToday) || 0;
+
+      if (data.lastBoostDate !== today) {
+        // New day — reset boost counters, keep points intact
+        boostLevel = 1;
+        currentLevelAdCounter = 0;
+        adsWatchedToday = 0;
+      }
+
+      // ── Increment this-round counter ──
+      currentLevelAdCounter += 1;
+
+      tx.set(
+        ref,
+        { currentLevelAdCounter, lastBoostDate: today },
+        { merge: true }
+      );
+
+      // Update cache
+      saveLocal(uid, { ...data, currentLevelAdCounter, lastBoostDate: today });
+
+      console.log(
+        `[recordAdWatch] uid=${uid} level=${boostLevel} counter=${currentLevelAdCounter}/${boostLevel}`
+      );
+
+      return {
+        boostLevel,
+        currentLevelAdCounter,
+        adsNeeded: boostLevel,
+        adsWatchedToday,
+      };
+    });
+  },
+
+  /**
+   * Claims the boost reward after watching boostLevel ads.
+   *  - points      += 100
+   *  - boostLevel  += 1   (next level needs one more ad)
+   *  - currentLevelAdCounter = 0  (fresh round)
+   *  - Writes to history collection: { title, amount: 100, type: 'earn' }
+   */
+  async claimBoostReward(uid: string): Promise<{
+    points: number;
+    boostLevel: number;
+    completedLevel: number;
+  }> {
+    if (!db) throw new Error('Firestore not initialized');
+
+    const ref = doc(db, col(uid), uid);
+    const histRef = doc(collection(db, 'history'));
+    const today = new Date().toDateString();
+
+    return runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error('User profile not found');
+
+      const data = snap.data();
+      const boostLevel = Number(data.boostLevel) || 1;
+      const currentLevelAdCounter = Number(data.currentLevelAdCounter) || 0;
+
+      if (currentLevelAdCounter < boostLevel) {
+        throw new Error(
+          `Boost not ready: watched ${currentLevelAdCounter}/${boostLevel} ads`
+        );
+      }
+
+      const oldPoints = Number(data.points) || 0;
+      const newPoints = oldPoints + 100;
+      const newTotalEarned = (Number(data.totalEarned) || 0) + 100;
+      const newBoostLevel = boostLevel + 1;
+      const completedLevel = boostLevel;
+
+      // Update user document
+      tx.set(
+        ref,
+        {
+          points: newPoints,
+          totalEarned: newTotalEarned,
+          boostLevel: newBoostLevel,
+          currentLevelAdCounter: 0,
+          adsWatchedToday: (Number(data.adsWatchedToday) || 0) + 1,
+          lastBoostDate: today,
+        },
+        { merge: true }
+      );
+
+      // Write earn event to history
+      tx.set(histRef, {
+        uid,
+        type: 'earn',
+        title: `Daily Boost Level ${completedLevel} Complete`,
+        amount: 100,
+        timestamp: serverTimestamp(),
+      });
+
+      // Update local cache
+      saveLocal(uid, {
+        ...(data as UserProfile),
+        points: newPoints,
+        totalEarned: newTotalEarned,
+        boostLevel: newBoostLevel,
+        currentLevelAdCounter: 0,
+        lastBoostDate: today,
+      });
+
+      console.log(
+        `[claimBoostReward] Level ${completedLevel} claimed — points: ${oldPoints} → ${newPoints}, next level: ${newBoostLevel}`
+      );
+
+      return { points: newPoints, boostLevel: newBoostLevel, completedLevel };
+    });
+  },
+
+  // ── Offer Claiming ────────────────────────────────────────────────────────
+
+  async claimOffer(uid: string, offer: Offer): Promise<boolean> {
+    if (!db) throw new Error('Firestore not initialized');
+
+    const ref = doc(db, col(uid), uid);
     const claimRef = doc(collection(db, 'claims'));
 
-    try {
-      await runTransaction(db, async (transaction) => {
-        const userDoc = await transaction.get(userRef);
-        if (!userDoc.exists()) {
-          throw new Error("User profile not found");
-        }
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error('User profile not found');
 
-        const userData = userDoc.data() as UserProfile;
-        if (userData.points < offer.points) {
-          throw new Error("Insufficient points");
-        }
+      const data = snap.data() as UserProfile;
+      if (data.points < offer.points) throw new Error('Insufficient points');
 
-        // Deduct points
-        transaction.update(userRef, {
-          points: Number(userData.points) - Number(offer.points),
-          claimsToday: (Number(userData.claimsToday) || 0) + 1,
-          lastClaimDate: new Date().toISOString()
-        });
-
-        // Record history
-        const historyRef = doc(collection(db, 'history'));
-        transaction.set(historyRef, {
-          uid,
-          type: 'claim',
-          points: -Number(offer.points),
-          message: `Claimed ${offer.brand}`,
-          timestamp: serverTimestamp()
-        });
-
-        // Record claim
-        transaction.set(claimRef, {
-          uid,
-          offerId: offer.id,
-          offerBrand: offer.brand,
-          code: offer.code || null,
-          url: offer.url,
-          pointsSpent: offer.points,
-          timestamp: serverTimestamp()
-        });
+      tx.update(ref, {
+        points: Number(data.points) - Number(offer.points),
+        claimsToday: (Number(data.claimsToday) || 0) + 1,
+        lastClaimDate: new Date().toISOString(),
       });
-      return true;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'claim');
-      throw error;
-    }
+
+      tx.set(claimRef, {
+        uid,
+        offerId: offer.id,
+        offerBrand: offer.brand,
+        code: offer.code ?? null,
+        url: offer.url,
+        pointsSpent: offer.points,
+        timestamp: serverTimestamp(),
+      });
+    });
+
+    return true;
   },
+
+  // ── Profile CRUD ──────────────────────────────────────────────────────────
 
   async getUserProfile(uid: string): Promise<UserProfile | null> {
-    if (!db) return null;
-    const collectionName = uid.startsWith('local_guest_') ? 'guests' : 'users';
+    if (!db) return getLocal(uid);
     try {
-      const userDoc = await getDoc(doc(db, collectionName, uid));
-      if (userDoc.exists()) {
-        const profile = userDoc.data() as UserProfile;
-        // Version 7.8.0: Persistence backup
-        localStorage.setItem(`profile_${uid}`, JSON.stringify(profile));
-        return profile;
+      const snap = await getDoc(doc(db, col(uid), uid));
+      if (snap.exists()) {
+        const p = snap.data() as UserProfile;
+        saveLocal(uid, p);
+        return p;
       }
-      
-      // Fallback to localStorage if offline or not found
-      const cached = localStorage.getItem(`profile_${uid}`);
-      if (cached) {
-        console.log("[DEBUG] Using cached profile from localStorage for:", uid);
-        return JSON.parse(cached);
-      }
-      return null;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.GET, `${collectionName}/${uid}`);
-      // Fallback to localStorage on error
-      const cached = localStorage.getItem(`profile_${uid}`);
-      if (cached) return JSON.parse(cached);
-      return null;
+      return getLocal(uid);
+    } catch (err: any) {
+      console.error('[Profile] getUserProfile error:', err.code ?? err.message);
+      return getLocal(uid);
     }
   },
 
-  async saveUserProfile(profile: UserProfile) {
+  async saveUserProfile(profile: UserProfile): Promise<void> {
+    saveLocal(profile.uid, profile);
     if (!db) return;
-    const collectionName = profile.uid.startsWith('local_guest_') ? 'guests' : 'users';
     try {
-      await setDoc(doc(db, collectionName, profile.uid), profile, { merge: true });
-      // Version 7.8.0: Persistence backup
-      localStorage.setItem(`profile_${profile.uid}`, JSON.stringify(profile));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `${collectionName}/${profile.uid}`);
-      // Still save to localStorage as backup
-      localStorage.setItem(`profile_${profile.uid}`, JSON.stringify(profile));
+      await setDoc(doc(db, col(profile.uid), profile.uid), profile, {
+        merge: true,
+      });
+    } catch (err: any) {
+      console.error('[Profile] saveUserProfile error:', err.code ?? err.message);
     }
-  }
+  },
+
+  // Legacy helper kept for compatibility
+  async rewardUserPoints(uid: string, points: number, title: string): Promise<boolean> {
+    if (!db) throw new Error('Firestore not initialized');
+
+    const ref = doc(db, col(uid), uid);
+    const histRef = doc(collection(db, 'history'));
+
+    await setDoc(ref, { uid, points: 0, totalEarned: 0 }, { merge: true });
+
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error('User profile not found');
+      const data = snap.data() as UserProfile;
+      tx.update(ref, {
+        points: (data.points || 0) + points,
+        totalEarned: (data.totalEarned || 0) + points,
+      });
+      tx.set(histRef, { uid, type: 'earn', title, amount: points, timestamp: serverTimestamp() });
+    });
+
+    return true;
+  },
 };
