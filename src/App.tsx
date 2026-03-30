@@ -482,7 +482,17 @@ export default function App() {
     localStorage.setItem('local_transactions', JSON.stringify(localTransactions.slice(0, 50)));
   }, [localTransactions]);
 
-  const { logs, addLog, watchAd, offers, isLoading, onOffersChange } = useAds(user?.uid);
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem('currentBoostProgress', JSON.stringify({
+        adsWatchedToday: user.adsWatchedToday,
+        boostLevel: user.boostLevel,
+        lastBoostDate: user.lastBoostDate
+      }));
+    }
+  }, [user]);
+
+  const { logs, addLog, watchAd, claimBoostReward, offers, isLoading, onOffersChange } = useAds(firebaseUser?.uid);
 
   useEffect(() => {
     // Version 7.4.0: Listen to ALL offers in real-time
@@ -545,13 +555,8 @@ export default function App() {
       const result = await watchAd();
       
       if (result) {
-        if (result.rewardClaimed) {
-          addLog('rewarded', 'reward', `Boost Level ${result.boostLevel - 1} completed! User earned 100 points.`);
-          Toast.show({ text: `Congratulations! Boost Level ${result.boostLevel - 1} Completed! +100 pts`, duration: 'long' });
-        } else {
-          addLog('rewarded', 'show', `Ad watched. Progress: ${result.adsWatchedToday}/${result.adsNeeded}`);
-          Toast.show({ text: `Ad watched! (${result.adsWatchedToday}/${result.adsNeeded})`, duration: 'short' });
-        }
+        addLog('rewarded', 'show', `Ad watched. Progress: ${result.adsWatchedToday}/${result.adsNeeded}`);
+        Toast.show({ text: `Ad watched! (${result.adsWatchedToday}/${result.adsNeeded})`, duration: 'short' });
 
         if (result.isLocalGuest) {
           console.log("[DEBUG] Guest reward processed locally");
@@ -560,6 +565,19 @@ export default function App() {
     } catch (error) {
       console.error("Failed to reward points:", error);
       Toast.show({ text: "Error rewarding points. Please try again.", duration: 'short' });
+    }
+  };
+
+  const handleClaimBoostReward = async () => {
+    try {
+      const result = await claimBoostReward();
+      if (result) {
+        addLog('rewarded', 'reward', `Boost Level ${result.boostLevel - 1} completed! User earned 100 points.`);
+        Toast.show({ text: `Congratulations! Boost Level ${result.boostLevel - 1} Completed! +100 pts`, duration: 'long' });
+      }
+    } catch (error) {
+      console.error("Failed to claim boost reward:", error);
+      Toast.show({ text: "Error claiming reward. Please try again.", duration: 'short' });
     }
   };
 
@@ -852,6 +870,7 @@ export default function App() {
                   transactions={transactions}
                   handleWatchAd={handleWatchAd}
                   handleClaimOffer={handleClaimOffer}
+                  handleClaimBoostReward={handleClaimBoostReward}
                 />
               )}
 
