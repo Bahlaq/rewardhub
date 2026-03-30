@@ -153,6 +153,7 @@ interface HomeScreenProps {
   transactions: Transaction[];
   handleWatchAd: () => void;
   handleClaimOffer: (offer: Offer, cost: number) => void;
+  handleClaimBoostReward: () => void;
 }
 
 export const HomeScreen = ({
@@ -167,7 +168,8 @@ export const HomeScreen = ({
   filteredOffers,
   transactions,
   handleWatchAd,
-  handleClaimOffer
+  handleClaimOffer,
+  handleClaimBoostReward
 }: HomeScreenProps) => {
   const today = new Date().toDateString();
   const isNewDay = user.lastBoostDate !== today;
@@ -236,19 +238,27 @@ export const HomeScreen = ({
             </span>
           </div>
           <p className="text-indigo-100 text-xs mb-4">
-            {adsWatchedToday > 0 
-              ? `Progress: ${adsWatchedToday}/${adsNeeded} ads for ${boostTitle} (+100 pts on completion!)`
-              : `Complete ${boostTitle} to earn 100 points! Watch ads to level up.`}
+            Progress: {adsWatchedToday}/{adsNeeded} ads for {boostTitle} (+100 pts on completion!)
           </p>
           
           <div className="flex items-center gap-3">
-            <button 
-              onClick={handleWatchAd}
-              className="bg-white text-indigo-600 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-indigo-50 transition-colors"
-            >
-              <PlayCircle size={16} />
-              Watch Now
-            </button>
+            {adsWatchedToday < adsNeeded ? (
+              <button 
+                onClick={handleWatchAd}
+                className="bg-white text-indigo-600 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-indigo-50 transition-colors active:scale-95"
+              >
+                <PlayCircle size={16} />
+                Watch Ad ({adsWatchedToday}/{adsNeeded})
+              </button>
+            ) : (
+              <button 
+                onClick={() => handleClaimBoostReward()}
+                className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-emerald-600 transition-colors shadow-lg shadow-emerald-900/20 active:scale-95"
+              >
+                <Zap size={16} className="fill-white" />
+                Claim 100 Points
+              </button>
+            )}
             
             <div className="flex-1 h-1.5 bg-white/20 rounded-full overflow-hidden">
               <motion.div 
@@ -308,10 +318,10 @@ export const HomeScreen = ({
         )}
       </div>
 
-      {/* Version 7.4.0: Extra space at the bottom of the list to prevent overlap with Banner Ad and Navbar */}
-      <div className="h-[150px]" />
+      {/* Version 7.7.0: Extra space at the bottom of the list to prevent overlap with Banner Ad and Navbar */}
+      <div className="h-[140px]" />
 
-      {/* Version 7.5.0: Banner Ad ONLY on HomeScreen */}
+      {/* Version 7.7.0: Banner Ad ONLY on HomeScreen */}
       <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+100px)] left-0 right-0 px-6 pointer-events-none z-[1000]">
         <div className="max-w-md mx-auto bg-zinc-900/95 backdrop-blur-md border border-zinc-800 h-14 rounded-2xl flex items-center justify-center text-[11px] font-black text-white uppercase tracking-[0.2em] pointer-events-auto shadow-2xl shadow-black/40">
           <span className="opacity-40">Sponsored Ad Space</span>
