@@ -68,11 +68,14 @@ service cloud.firestore {
       return data.keys().hasAll(['uid', 'points']) &&
              data.uid is string &&
              data.points is number && data.points >= 0 &&
-             (!('email' in data) || data.email == 'Guest User' || isValidEmail(data.email)) &&
+             (!('email' in data) || data.email == null || data.email == 'Guest User' || isValidEmail(data.email)) &&
              (!('boostLevel' in data) || data.boostLevel is number) &&
              (!('adsWatchedToday' in data) || data.adsWatchedToday is number) &&
+             (!('currentLevelAdCounter' in data) || data.currentLevelAdCounter is number) &&
              (!('totalEarned' in data) || data.totalEarned is number) &&
-             (!('lastBoostDate' in data) || data.lastBoostDate is string);
+             (!('lastBoostDate' in data) || data.lastBoostDate is string) &&
+             (!('claimsToday' in data) || data.claimsToday is number) &&
+             (!('lastClaimDate' in data) || data.lastClaimDate == null || data.lastClaimDate is string);
     }
 
     function isValidClaim(data) {
