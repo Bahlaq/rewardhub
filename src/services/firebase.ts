@@ -30,10 +30,13 @@ import { Offer, UserProfile, Transaction } from '../types';
 const PRODUCTION_WEB_CLIENT_ID = "563861371307-3moj6n7qanfg0tgn1vrv8ok59rnh8pj2.apps.googleusercontent.com";
 
 // Initialize Google Auth for Capacitor
+let GoogleAuthInstance: any = null;
+
 if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
   import('@codetrix-studio/capacitor-google-auth').then(({ GoogleAuth }) => {
+    GoogleAuthInstance = GoogleAuth;
     try {
-      // Version 7.6.1: Simplified initialization for better compatibility
+      // Version 7.6.2: Simplified initialization for better compatibility
       // We use the Web Client ID for both clientId and serverClientId on Android/iOS
       (GoogleAuth as any).initialize({
         clientId: PRODUCTION_WEB_CLIENT_ID,
@@ -156,19 +159,28 @@ export const firebaseService = {
       // Try Native Google Auth first if on native platform
       if (Capacitor.isNativePlatform()) {
         console.log("[DEBUG] Native platform detected, using GoogleAuth plugin");
-        const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
+        if (!GoogleAuthInstance) {
+          console.log("[DEBUG] GoogleAuthInstance not ready, attempting dynamic import...");
+          const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
+          GoogleAuthInstance = GoogleAuth;
+          (GoogleAuthInstance as any).initialize({
+            clientId: PRODUCTION_WEB_CLIENT_ID,
+            serverClientId: PRODUCTION_WEB_CLIENT_ID,
+            scopes: ['profile', 'email'],
+            grantOfflineAccess: true
+          });
+        }
         
         console.log("[DEBUG] Calling GoogleAuth.signIn()...");
-        // Version 7.6.1: Ensure we use the correct client IDs for native
-        const googleUser = await GoogleAuth.signIn();
+        const googleUser = await GoogleAuthInstance.signIn();
         console.log("[DEBUG] GoogleAuth.signIn success", JSON.stringify({ 
           email: googleUser.email, 
           id: googleUser.id
         }));
         
-        const idToken = googleUser.authentication?.idToken;
+        const idToken = googleUser.authentication?.idToken || (googleUser as any).idToken;
         if (!idToken) {
-          console.error("[DEBUG] Missing idToken in googleUser.authentication");
+          console.error("[DEBUG] Missing idToken in googleUser.authentication", JSON.stringify(googleUser));
           throw new Error("No ID Token received. Please check Firebase SHA-1 configuration.");
         }
         
@@ -416,15 +428,17 @@ export const firebaseService = {
         }
 
         // Ensure numeric types
-        let boostLevel = Number(userData.boostLevel || 1);
-        let adsWatchedToday = Number(userData.adsWatchedToday || 0);
+        let boostLevel = Number(userData.boostLevel) || 1;
+        let adsWatchedToday = Number(userData.adsWatchedToday) || 0;
         let lastBoostDate = userData.lastBoostDate || null;
-        let updatedPoints = Number(userData.points || 0);
-        let updatedTotalEarned = Number(userData.totalEarned || 0);
+        let updatedPoints = Number(userData.points) || 0;
+        let updatedTotalEarned = Number(userData.totalEarned) || 0;
+
+        console.log(`[DEBUG] Current State: Level ${boostLevel}, Ads ${adsWatchedToday}, LastDate ${lastBoostDate}`);
 
         // Daily Reset Check
         if (lastBoostDate !== today) {
-          console.log("[DEBUG] Daily reset triggered");
+          console.log("[DEBUG] Daily reset triggered: " + lastBoostDate + " !== " + today);
           boostLevel = 1;
           adsWatchedToday = 0;
           lastBoostDate = today;
@@ -434,14 +448,14 @@ export const firebaseService = {
         adsWatchedToday += 1;
         
         const adsNeeded = boostLevel;
-        console.log(`[DEBUG] Progress: ${adsWatchedToday}/${adsNeeded} (Level ${boostLevel})`);
+        console.log(`[DEBUG] New Progress: ${adsWatchedToday}/${adsNeeded} (Level ${boostLevel})`);
 
         let rewardClaimed = false;
         let pointsEarned = 0;
 
-        // Version 7.6.1: Points (+100 per boost completion)
+        // Version 7.6.2: Points (+100 per boost completion)
         if (adsWatchedToday >= adsNeeded) {
-          console.log(`[DEBUG] Boost Level ${boostLevel} completed!`);
+          console.log(`[DEBUG] Boost Level ${boostLevel} completed! Awarding 100 points.`);
           pointsEarned = 100;
           updatedPoints += pointsEarned;
           updatedTotalEarned += pointsEarned;
@@ -452,24 +466,27 @@ export const firebaseService = {
 
         // Record the earn event in history if points were earned
         if (pointsEarned > 0) {
+          const historyRef = doc(collection(db, 'history'));
           transaction.set(historyRef, {
-            userId: uid,
+            uid,
             type: 'earn',
-            title: `Boost Reward (Level ${boostLevel - 1})`,
-            amount: pointsEarned,
+            points: pointsEarned,
+            message: `Boost Reward (Level ${boostLevel - 1})`,
             timestamp: serverTimestamp()
           });
         }
 
         const updateData = {
+          uid,
           points: updatedPoints,
           totalEarned: updatedTotalEarned,
           boostLevel,
           adsWatchedToday,
-          lastBoostDate: today
+          lastBoostDate: today,
+          email: userData.email || (isGuest ? 'Guest User' : 'Unknown')
         };
         
-        console.log("[DEBUG] Updating user doc with", JSON.stringify(updateData));
+        console.log("[DEBUG] Transaction updateData:", JSON.stringify(updateData));
         transaction.set(userRef, updateData, { merge: true });
 
         return {
@@ -513,9 +530,19 @@ export const firebaseService = {
           lastClaimDate: new Date().toISOString()
         });
 
+        // Record history
+        const historyRef = doc(collection(db, 'history'));
+        transaction.set(historyRef, {
+          uid,
+          type: 'claim',
+          points: -Number(offer.points),
+          message: `Claimed ${offer.brand}`,
+          timestamp: serverTimestamp()
+        });
+
         // Record claim
         transaction.set(claimRef, {
-          userId: uid,
+          uid,
           offerId: offer.id,
           offerBrand: offer.brand,
           code: offer.code || null,
