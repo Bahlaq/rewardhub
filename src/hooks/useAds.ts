@@ -62,5 +62,16 @@ export function useAds(uid?: string) {
     return null;
   }, [simulateAd, uid]);
 
-  return { logs, addLog, simulateAd, watchAd, offers, isLoading, onOffersChange };
+  const claimBoostReward = useCallback(async () => {
+    if (!uid) return null;
+    try {
+      const result = await firebaseService.claimBoostReward(uid);
+      return result;
+    } catch (error) {
+      console.error("Error claiming boost reward:", error);
+      return null;
+    }
+  }, [uid]);
+
+  return { logs, addLog, simulateAd, watchAd, claimBoostReward, offers, isLoading, onOffersChange };
 }
