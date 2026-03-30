@@ -412,11 +412,13 @@ export default function App() {
 
     // Listen to profile changes in real-time
     const unsubscribeProfile = firebaseService.onProfileChange(uid, (profile) => {
+      console.log("[DEBUG] Profile change detected:", profile?.uid, "Points:", profile?.points);
       if (profile) {
         setUser(profile);
       } else {
         // Create profile if it doesn't exist (only for real Firebase users)
         if (!uid.startsWith('local_guest_')) {
+          console.log("[DEBUG] Creating new profile for user:", uid);
           const newProfile: UserProfile = {
             uid: uid,
             email: firebaseUser.email || '',
@@ -424,6 +426,9 @@ export default function App() {
             claimsToday: 0,
             lastClaimDate: null,
             totalEarned: 0,
+            boostLevel: 1,
+            adsWatchedToday: 0,
+            lastBoostDate: null
           };
           firebaseService.saveUserProfile(newProfile);
         }
@@ -561,10 +566,16 @@ export default function App() {
   };
 
   const handleClaimOffer = async (offer: Offer, currentCost: number) => {
-    if (!user) return;
+    if (!user) {
+      console.warn("[DEBUG] handleClaimOffer called but no user found");
+      return;
+    }
+
+    console.log(`[DEBUG] handleClaimOffer started for ${offer.brand} (Cost: ${currentCost}, User Points: ${user.points})`);
 
     // Check eligibility
     if (user.points < currentCost) {
+      console.log("[DEBUG] Insufficient points for claim");
       addLog('rewarded', 'error', 'Insufficient points for claim');
       setConfirmConfig({
         title: 'Not Enough Points',
@@ -576,7 +587,9 @@ export default function App() {
     }
 
     try {
+      console.log("[DEBUG] Calling firebaseService.claimOffer...");
       await firebaseService.claimOffer(user.uid, offer);
+      console.log("[DEBUG] claimOffer success");
       
       addLog('banner', 'reward', `Successfully claimed ${offer.brand}`);
       
@@ -594,19 +607,26 @@ export default function App() {
         setIsConfirmModalOpen(true);
       }
     } catch (error) {
-      console.error("Claim failed:", error);
+      console.error("[DEBUG] Claim failed:", error);
       Toast.show({ text: "Failed to claim offer. Please try again.", duration: 'long' });
     }
   };
 
   const handleSignIn = async () => {
+    console.log("[DEBUG] handleSignIn starting...");
     setIsAuthLoading(true);
     try {
       addLog('app_open', 'load', 'Starting Google Sign-In...');
-      await firebaseService.signInWithGoogle();
-      addLog('app_open', 'show', 'Google Sign-In Success');
+      const result = await firebaseService.signInWithGoogle();
+      if (result.user) {
+        console.log("[DEBUG] Google Sign-In Success:", result.user.uid);
+        addLog('app_open', 'show', `Signed in as ${result.user.email}`);
+        Toast.show({ text: "Signed in successfully!", duration: 'short' });
+      } else {
+        console.warn("[DEBUG] Google Sign-In result has no user");
+      }
     } catch (error) {
-      console.error("Sign in failed:", error);
+      console.error("[DEBUG] Sign in failed:", error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       addLog('app_open', 'error', `Sign-in Error: ${errorMessage}`);
       Toast.show({ 
