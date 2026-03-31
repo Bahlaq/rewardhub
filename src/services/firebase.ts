@@ -26,17 +26,43 @@ import {
 import { Capacitor } from '@capacitor/core';
 import { Offer, UserProfile, Transaction } from '../types';
 
-// ─── Verified Credentials ──────────────────────────────────────────────────
+// ─── Credentials (synced with google-services.json) ───────────────────────
+//
+//  google-services.json source of truth:
+//    project_number : 563861371307
+//    project_id     : rewardhub-1ea27
+//    mobilesdk_app_id (Android): 1:563861371307:android:30156581fa40b33c247aee
+//    oauth client_id (type 3 / web): 563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com
+//
+//  NOTE: google-services.json currently has NO client_type:1 (Android OAuth client).
+//  This means no SHA-1 fingerprint has been registered yet.
+//  Google Sign-In on Android will fail until you add the SHA-1 — see README below.
+//
+// ─── HOW TO FIX GOOGLE SIGN-IN ON ANDROID ────────────────────────────────
+//  1. Run in your project root:
+//       cd android && ./gradlew signingReport
+//     Copy the SHA-1 from the "debug" or "release" variant.
+//
+//  2. Open Firebase Console → Project Settings → Your Apps → Android App
+//     (com.rewardhub.official.app) → "Add fingerprint" → paste SHA-1 → Save.
+//
+//  3. Download the updated google-services.json and replace the one in
+//     android/app/google-services.json. It will now contain a client_type:1 entry.
+//
+//  4. Re-run: npx cap sync android && npm run build:android
+// ─────────────────────────────────────────────────────────────────────────
+
 const WEB_CLIENT_ID =
   '563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com';
 
+// Firebase config — appId matches mobilesdk_app_id in google-services.json
 const firebaseConfig = {
-  apiKey:            'AIzaSyBLlefWEa3WHUSPD0_sDTvpCTqIImh5X6Y',
+  apiKey:            'AIzaSyBLlefWEa3WHUSPD0_sDTvpCTqIImh5X6Y', // Web API key (firebase-applet-config.json)
   authDomain:        'rewardhub-1ea27.firebaseapp.com',
   projectId:         'rewardhub-1ea27',
   storageBucket:     'rewardhub-1ea27.firebasestorage.app',
   messagingSenderId: '563861371307',
-  appId:             '1:563861371307:web:7db5542c5b2f2e46247aee',
+  appId:             '1:563861371307:android:30156581fa40b33c247aee', // ← from google-services.json mobilesdk_app_id
 };
 
 // ─── Capacitor Google Auth lazy-load ───────────────────────────────────────
@@ -53,7 +79,7 @@ async function loadGoogleAuth(): Promise<any> {
       scopes:             ['profile', 'email'],
       grantOfflineAccess: true,
     });
-    console.log('[GoogleAuth] Initialized');
+    console.log('[GoogleAuth] Initialized — serverClientId:', WEB_CLIENT_ID.slice(0, 24) + '…');
   } catch (err) {
     console.error('[GoogleAuth] initialize() error:', err);
   }
@@ -71,6 +97,7 @@ export const isConfigValid = true;
 let _app: ReturnType<typeof initializeApp> | undefined;
 try {
   _app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+  console.log('[Firebase] Initialized — project:', firebaseConfig.projectId);
 } catch (e) {
   console.error('[Firebase] Init error:', e);
 }
@@ -90,7 +117,6 @@ export type { FirebaseUser };
 
 // ─── Utilities ─────────────────────────────────────────────────────────────
 
-/** Picks 'guests' for local-fallback IDs, 'users' for real Firebase UIDs */
 function col(uid: string): 'guests' | 'users' {
   return uid.startsWith('local_guest_') ? 'guests' : 'users';
 }
@@ -115,22 +141,17 @@ function defaultProfile(uid: string, email: string): UserProfile {
   return {
     uid,
     email,
-    points:               0,
-    claimsToday:          0,
-    lastClaimDate:        null,
-    totalEarned:          0,
-    boostLevel:           1,
-    adsWatchedToday:      0,
+    points:                0,
+    claimsToday:           0,
+    lastClaimDate:         null,
+    totalEarned:           0,
+    boostLevel:            1,
+    adsWatchedToday:       0,
     currentLevelAdCounter: 0,
-    lastBoostDate:        new Date().toDateString(),
+    lastBoostDate:         new Date().toDateString(),
   };
 }
 
-/**
- * Race a promise against a timeout.
- * If the promise doesn't resolve within `ms` milliseconds the timeout
- * rejects with a human-readable error message.
- */
 function withTimeout<T>(promise: Promise<T>, ms: number, msg: string): Promise<T> {
   return Promise.race([
     promise,
@@ -145,21 +166,10 @@ export const firebaseService = {
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
-  /**
-   * Google Sign-In.
-   *
-   * Native (Android/iOS):
-   *   1. Load Capacitor Google Auth plugin (10 s timeout).
-   *   2. Call GA.signIn() (30 s timeout — prevents infinite spinner).
-   *   3. Extract idToken and sign in to Firebase with the credential.
-   *
-   * Web: standard Firebase popup.
-   */
   async signInWithGoogle(): Promise<FirebaseUser> {
     if (!auth) throw new Error('Firebase Auth not initialized');
 
     if (Capacitor.isNativePlatform()) {
-      // Load plugin with a timeout so we never hang silently
       const GA = await withTimeout(
         loadGoogleAuth(),
         10_000,
@@ -168,27 +178,47 @@ export const firebaseService = {
 
       console.log('[GoogleAuth] Calling signIn()…');
 
-      // 30-second hard timeout — if the OS sheet never appears/resolves
-      const googleUser = await withTimeout(
-        GA.signIn(),
-        30_000,
-        'Google Sign-In timed out. Check your internet connection and try again.'
-      );
+      let googleUser: any;
+      try {
+        googleUser = await withTimeout(
+          GA.signIn(),
+          30_000,
+          'Google Sign-In timed out after 30 s. Check your internet connection.'
+        );
+      } catch (err: any) {
+        // Provide actionable error for the most common native failure
+        const msg: string = err?.message ?? String(err);
+        if (
+          msg.includes('10:') ||          // Google Sign-In error code 10 = SHA-1 missing
+          msg.includes('DEVELOPER_ERROR') ||
+          msg.includes('sign_in_failed')
+        ) {
+          throw new Error(
+            'Google Sign-In Error 10 — DEVELOPER_ERROR.\n\n' +
+            'Your SHA-1 fingerprint is not registered in Firebase.\n\n' +
+            'Fix:\n' +
+            '1. Run: cd android && ./gradlew signingReport\n' +
+            '2. Copy the SHA-1 shown under "debug" or "release".\n' +
+            '3. Firebase Console → Project Settings → Android App\n' +
+            '   (com.rewardhub.official.app) → Add fingerprint → Save.\n' +
+            '4. Download new google-services.json → replace android/app/google-services.json.\n' +
+            '5. Run: npx cap sync android'
+          );
+        }
+        throw err;
+      }
 
       console.log('[GoogleAuth] signIn() resolved — email:', googleUser?.email);
 
-      // The idToken field location differs between plugin versions
       const idToken: string | undefined =
         googleUser?.authentication?.idToken ??
         (googleUser as any)?.idToken;
 
       if (!idToken) {
         throw new Error(
-          'Google Sign-In did not return an ID Token.\n\n' +
-          'Common fixes:\n' +
-          '• Add the correct SHA-1 fingerprint in Firebase Console → Project Settings → Your Android App.\n' +
-          '• Make sure google-services.json is re-downloaded after adding the SHA-1.\n' +
-          '• Confirm the OAuth 2.0 Web Client exists in Google Cloud Console.'
+          'Google Sign-In did not return an ID Token.\n' +
+          'This usually means the SHA-1 fingerprint is missing from Firebase.\n' +
+          'See the fix instructions in firebase.ts comments.'
         );
       }
 
@@ -233,10 +263,6 @@ export const firebaseService = {
 
   // ── Internal helpers ──────────────────────────────────────────────────────
 
-  /**
-   * Writes a default profile document only when one doesn't exist yet.
-   * Safe to call on every sign-in — uses { merge: true } to never overwrite data.
-   */
   async _ensureProfile(uid: string, email: string): Promise<void> {
     if (!db) return;
     const ref = doc(db, col(uid), uid);
@@ -335,9 +361,9 @@ export const firebaseService = {
           return {
             id:        d.id,
             type:      'earn' as const,
-            // Support both 'message' (rules-required field) and legacy 'title'
+            // 'message' is the rules-required field; fall back to 'title' for legacy docs
             title:     data.message ?? data.title ?? 'Earned Points',
-            // Support both 'points' (rules-required field) and legacy 'amount'
+            // 'points' is the rules-required field; fall back to 'amount' for legacy docs
             amount:    Math.abs(Number(data.points ?? data.amount ?? 0)),
             timestamp: data.timestamp?.toDate?.()?.toISOString() ?? new Date().toISOString(),
           } as Transaction;
@@ -353,17 +379,10 @@ export const firebaseService = {
 
   // ── Daily Reset ───────────────────────────────────────────────────────────
 
-  /**
-   * Compares lastBoostDate to today.
-   * If different → resets boostLevel=1, currentLevelAdCounter=0, adsWatchedToday=0.
-   *
-   * CRITICAL: `points` and `totalEarned` are intentionally NEVER modified here.
-   */
   async checkDailyReset(uid: string): Promise<void> {
     if (!db) return;
 
     const isGuest = uid.startsWith('local_guest_');
-    // Avoid permission errors during cold-start when auth hasn't resolved yet
     if (!isGuest && (!auth || !auth.currentUser)) {
       console.log('[DailyReset] Skipped — auth not yet resolved');
       return;
@@ -377,14 +396,14 @@ export const firebaseService = {
       if (!snap.exists()) return;
 
       const data = snap.data();
-      if (data.lastBoostDate === today) return; // Already up-to-date
+      if (data.lastBoostDate === today) return;
 
+      // Points are intentionally NOT included — they are cumulative and permanent
       const resetFields = {
         boostLevel:            1,
         currentLevelAdCounter: 0,
         adsWatchedToday:       0,
         lastBoostDate:         today,
-        // points and totalEarned intentionally omitted — they are cumulative
       };
 
       await setDoc(ref, resetFields, { merge: true });
@@ -397,12 +416,6 @@ export const firebaseService = {
 
   // ── Progressive Boost ─────────────────────────────────────────────────────
 
-  /**
-   * Records one completed ad watch. Increments `currentLevelAdCounter`.
-   * Does NOT award points — that happens in `claimBoostReward`.
-   *
-   * Rule: Level N requires watching exactly N ads before claiming.
-   */
   async recordAdWatch(uid: string): Promise<{
     boostLevel:            number;
     currentLevelAdCounter: number;
@@ -425,7 +438,6 @@ export const firebaseService = {
         data = snap.data();
       }
 
-      // Apply daily reset inside the transaction (atomic)
       let boostLevel            = Number(data.boostLevel)            || 1;
       let currentLevelAdCounter = Number(data.currentLevelAdCounter) || 0;
       let adsWatchedToday       = Number(data.adsWatchedToday)       || 0;
@@ -441,31 +453,12 @@ export const firebaseService = {
       tx.set(ref, { currentLevelAdCounter, lastBoostDate: today }, { merge: true });
       saveLocal(uid, { ...data, currentLevelAdCounter, lastBoostDate: today });
 
-      console.log(
-        `[recordAdWatch] level=${boostLevel} counter=${currentLevelAdCounter}/${boostLevel}`
-      );
+      console.log(`[recordAdWatch] level=${boostLevel} counter=${currentLevelAdCounter}/${boostLevel}`);
 
       return { boostLevel, currentLevelAdCounter, adsNeeded: boostLevel, adsWatchedToday };
     });
   },
 
-  /**
-   * Claims the boost reward after the user has watched `boostLevel` ads.
-   *
-   * Atomically in one Firestore transaction:
-   *   • points             += 100
-   *   • totalEarned        += 100
-   *   • boostLevel         += 1   (next round requires one more ad)
-   *   • currentLevelAdCounter = 0
-   *   • adsWatchedToday    += 1
-   *
-   * History document field names MUST match isValidHistory() in firestore.rules:
-   *   required keys: ['uid', 'points', 'timestamp', 'type', 'message']
-   *   valid types:   ['boost', 'claim', 'referral', 'earn']
-   *
-   * Previous bug: code was writing { amount, title } → Firestore rules rejected
-   * it → "Missing or insufficient permissions" error. Fixed by using { points, message }.
-   */
   async claimBoostReward(uid: string): Promise<{
     points:         number;
     boostLevel:     number;
@@ -486,9 +479,7 @@ export const firebaseService = {
       const currentLevelAdCounter = Number(data.currentLevelAdCounter) || 0;
 
       if (currentLevelAdCounter < boostLevel) {
-        throw new Error(
-          `Boost not ready: watched ${currentLevelAdCounter}/${boostLevel} ads`
-        );
+        throw new Error(`Boost not ready: watched ${currentLevelAdCounter}/${boostLevel} ads`);
       }
 
       const oldPoints      = Number(data.points)       || 0;
@@ -497,7 +488,6 @@ export const firebaseService = {
       const newBoostLevel  = boostLevel + 1;
       const completedLevel = boostLevel;
 
-      // ── Update user document ─────────────────────────────────────────────
       tx.set(ref, {
         points:                newPoints,
         totalEarned:           newTotalEarned,
@@ -507,18 +497,17 @@ export const firebaseService = {
         lastBoostDate:         today,
       }, { merge: true });
 
-      // ── Write history entry ──────────────────────────────────────────────
-      // Field names match firestore.rules isValidHistory() exactly:
-      //   ['uid', 'points', 'timestamp', 'type', 'message']
+      // CRITICAL: field names must satisfy firestore.rules isValidHistory():
+      //   data.keys().hasAll(['uid', 'points', 'timestamp', 'type', 'message'])
+      //   data.type in ['boost', 'claim', 'referral', 'earn']
       tx.set(histRef, {
         uid,
         type:      'earn',
-        points:    100,                                            // ← 'points' (NOT 'amount')
-        message:   `Daily Boost Level ${completedLevel} Complete`, // ← 'message' (NOT 'title')
+        points:    100,                                             // ← 'points' NOT 'amount'
+        message:   `Daily Boost Level ${completedLevel} Complete`, // ← 'message' NOT 'title'
         timestamp: serverTimestamp(),
       });
 
-      // Update localStorage cache so UI reflects changes immediately
       saveLocal(uid, {
         ...(data as UserProfile),
         points:                newPoints,
@@ -600,7 +589,6 @@ export const firebaseService = {
     }
   },
 
-  // Legacy helper kept for any callers using this path directly
   async rewardUserPoints(uid: string, points: number, title: string): Promise<boolean> {
     if (!db) throw new Error('Firestore not initialized');
 
@@ -617,7 +605,6 @@ export const firebaseService = {
         points:      (data.points      || 0) + points,
         totalEarned: (data.totalEarned || 0) + points,
       });
-      // Use correct field names for firestore.rules isValidHistory()
       tx.set(histRef, {
         uid,
         type:      'earn',
