@@ -1,1 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RewardHub</string>
+    <string name="title_activity_main">RewardHub</string>
+    <string name="package_name">com.rewardhub.official.app</string>
+    <string name="custom_url_scheme">com.rewardhub.official.app</string>
 
+    <!--
+        server_client_id must match the client_type:3 (web) OAuth client in
+        google-services.json. The Capacitor Google Auth plugin reads this resource
+        on Android to configure the GoogleSignInOptions request.
+
+        Value: 563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com
+    -->
+    <string name="server_client_id">563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com</string>
+</resources>
