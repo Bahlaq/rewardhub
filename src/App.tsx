@@ -8,6 +8,9 @@ import {
   Trash2,
   Terminal,
   Zap,
+  LayoutDashboard,
+  User,
+  History,
 } from 'lucide-react';
 import { Clipboard } from '@capacitor/clipboard';
 import { Toast } from '@capacitor/toast';
@@ -15,7 +18,7 @@ import { Browser } from '@capacitor/browser';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { Offer, UserProfile, Transaction } from './types';
-import { useAds } from './hooks/useAds';
+import { useAds, WatchAdResult } from './hooks/useAds';
 import { firebaseService, FirebaseUser, isConfigValid } from './services/firebase';
 import { APP_NAME, APP_VERSION } from './constants';
 import { HomeScreen } from './components/HomeScreen';
@@ -43,12 +46,6 @@ const Logo = ({ className }: { className?: string }) => (
 
 // ─── Navbar ────────────────────────────────────────────────────────────────
 
-import {
-  LayoutDashboard,
-  User,
-  History,
-} from 'lucide-react';
-
 const Navbar = ({
   activeTab,
   setActiveTab,
@@ -57,9 +54,9 @@ const Navbar = ({
   setActiveTab: (tab: string) => void;
 }) => {
   const tabs = [
-    { id: 'offers',   icon: LayoutDashboard, label: 'Rewards'  },
-    { id: 'history',  icon: History,          label: 'History'  },
-    { id: 'profile',  icon: User,             label: 'Profile'  },
+    { id: 'offers',  icon: LayoutDashboard, label: 'Rewards' },
+    { id: 'history', icon: History,          label: 'History' },
+    { id: 'profile', icon: User,             label: 'Profile' },
   ];
 
   return (
@@ -79,10 +76,7 @@ const Navbar = ({
                 : 'text-zinc-400 hover:text-zinc-600'
             )}
           >
-            <tab.icon
-              size={20}
-              strokeWidth={activeTab === tab.id ? 2.5 : 2}
-            />
+            <tab.icon size={20} strokeWidth={activeTab === tab.id ? 2.5 : 2} />
             <span className="text-[10px] font-medium uppercase tracking-wider">
               {tab.label}
             </span>
@@ -126,23 +120,30 @@ const Header = ({ user }: { user: UserProfile }) => {
 };
 
 // ─── Ad Simulator Modal ────────────────────────────────────────────────────
-/**
- * Boost ad modal.
- *
- * Shows a countdown per ad. After the timer finishes the user taps
- * "Next Ad" (counter < boostLevel) or "Claim +100 Points" (counter == boostLevel).
- *
- * onAdWatched  — called once per completed ad (increments counter in Firestore)
- * onClaim      — called when all ads are done (awards +100 pts, advances level)
- */
+//
+// BUG FIX (desync):
+//   The previous implementation maintained a `localCounter` that was added to
+//   `user.currentLevelAdCounter` (the live Firestore value). Because the Firestore
+//   real-time listener fires AFTER the local state update, both incremented in the
+//   same render cycle → double-counting → claim gate triggered 1–2 ads too early.
+//
+// FIX:
+//   - Removed ALL local counters.
+//   - `firestoreCounter` is the ONLY progress variable; it is set EXCLUSIVELY
+//     from the return value of `onAdWatched()` (the Firestore transaction response).
+//   - The claim gate checks `firestoreCounter !== null && firestoreCounter >= boostLevel`.
+//     `firestoreCounter` is null until the first API response arrives, preventing
+//     any premature unlock.
+//   - Removed all dot indicators. Only plain text counters are shown.
+
 interface AdSimulatorModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  /** Called once per completed ad */
-  onAdWatched: () => Promise<void>;
-  /** Called when the final ad is done and user taps Claim */
-  onClaim: () => Promise<void>;
-  user: UserProfile | null;
+  isOpen:       boolean;
+  onClose:      () => void;
+  /** Called once per completed ad; returns Firestore-confirmed state or null on error */
+  onAdWatched:  () => Promise<WatchAdResult | null>;
+  /** Called after Firestore confirms all ads are done */
+  onClaim:      () => Promise<void>;
+  user:         UserProfile | null;
 }
 
 const AdSimulatorModal = ({
@@ -152,29 +153,47 @@ const AdSimulatorModal = ({
   onClaim,
   user,
 }: AdSimulatorModalProps) => {
-  const [timeLeft, setTimeLeft]       = useState(5);
-  const [adFinished, setAdFinished]   = useState(false);
-  const [localCounter, setLocalCounter] = useState(0); // ads watched inside this modal session
-  const [busy, setBusy]               = useState(false);
+  const [timeLeft,        setTimeLeft]        = useState(5);
+  const [adFinished,      setAdFinished]      = useState(false);
+  const [busy,            setBusy]            = useState(false);
+  const [error,           setError]           = useState<string | null>(null);
 
-  // boostLevel from Firestore (may update after each claim)
+  /**
+   * Firestore-confirmed counter.
+   * - Starts as `null` (no ad watched in this session yet).
+   * - Set ONLY from the return value of `onAdWatched()`.
+   * - Never incremented locally.
+   */
+  const [firestoreCounter, setFirestoreCounter] = useState<number | null>(null);
+
   const boostLevel = Math.max(1, Number(user?.boostLevel ?? 1));
-  // How many ads were already done before this modal opened
-  const baseCounter = Math.max(0, Number(user?.currentLevelAdCounter ?? 0));
-  // Total watched = what was already recorded + what we've done in this session
-  const totalWatched = baseCounter + localCounter;
-  // All done when total equals boostLevel
-  const allDone = totalWatched >= boostLevel;
 
-  // Reset when modal opens
+  /**
+   * What to display as the current progress.
+   * Before any ad is watched in this session, fall back to the Firestore prop value.
+   * Once we get a confirmed response, use that exclusively.
+   */
+  const displayCounter = firestoreCounter ?? Math.max(0, Number(user?.currentLevelAdCounter ?? 0));
+
+  /**
+   * STRICT CLAIM GATE.
+   * True ONLY when Firestore has confirmed the counter meets or exceeds the level.
+   * `firestoreCounter !== null` ensures we never allow a claim before the first
+   * API response has been received.
+   */
+  const claimReady = firestoreCounter !== null && firestoreCounter >= boostLevel;
+
+  // Reset all session state when the modal opens
   useEffect(() => {
     if (!isOpen) return;
-    setLocalCounter(0);
+    setFirestoreCounter(null);
     setTimeLeft(5);
     setAdFinished(false);
+    setBusy(false);
+    setError(null);
   }, [isOpen]);
 
-  // Countdown
+  // Countdown timer
   useEffect(() => {
     if (!isOpen || adFinished) return;
     if (timeLeft <= 0) {
@@ -187,34 +206,77 @@ const AdSimulatorModal = ({
 
   if (!isOpen) return null;
 
+  // Which ad number are we currently on?
+  // During countdown: displayCounter + 1 (the one currently playing)
+  // After confirmation: firestoreCounter (the one just completed)
+  const currentAdNumber = adFinished && firestoreCounter !== null
+    ? firestoreCounter
+    : Math.min(displayCounter + 1, boostLevel);
+
   const handleAction = async () => {
     if (!adFinished || busy) return;
+
     setBusy(true);
+    setError(null);
 
     try {
-      // Always record this ad watch
-      await onAdWatched();
-      const newLocal = localCounter + 1;
-      setLocalCounter(newLocal);
-
-      const newTotal = baseCounter + newLocal;
-
-      if (newTotal >= boostLevel) {
-        // All ads done — claim reward then close
+      if (claimReady) {
+        // ── CLAIM PATH ─────────────────────────────────────────────────────
+        // `claimReady` is only true when Firestore has confirmed the counter.
+        // Server-side Firestore transaction will also validate — double protection.
         await onClaim();
         onClose();
       } else {
-        // More ads needed — start the next one
-        setTimeLeft(5);
-        setAdFinished(false);
+        // ── RECORD AD PATH ─────────────────────────────────────────────────
+        // Await Firestore confirmation before updating any UI.
+        const result = await onAdWatched();
+
+        if (!result) {
+          // onAdWatched returned null — an error occurred, already logged
+          setError('Failed to record ad. Please try again.');
+          setBusy(false);
+          return;
+        }
+
+        // ── Set counter from Firestore response — this is the ONLY source of truth ──
+        setFirestoreCounter(result.currentLevelAdCounter);
+
+        if (result.currentLevelAdCounter >= result.adsNeeded) {
+          // All ads confirmed — stay on screen, button changes to Claim
+          // adFinished stays true so the claim button renders
+        } else {
+          // More ads needed — start next countdown
+          setTimeLeft(5);
+          setAdFinished(false);
+        }
       }
+    } catch (err: any) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg.slice(0, 120));
     } finally {
       setBusy(false);
     }
   };
 
-  const displayCurrent = totalWatched + (adFinished ? 0 : 0); // what we show during countdown
-  const adLabel = `Ad ${Math.min(totalWatched + 1, boostLevel)} of ${boostLevel}`;
+  // ── Button label / style ───────────────────────────────────────────────────
+  const buttonLabel = (() => {
+    if (busy)        return 'Processing…';
+    if (!adFinished) return `Watching… (${timeLeft}s)`;
+    if (claimReady)  return '🎉 Claim +100 Points';
+    // Ad finished but not all done — show next ad info
+    const nextCount = (firestoreCounter ?? displayCounter) + 1;
+    return `Confirm Ad & Continue  (${firestoreCounter ?? displayCounter}/${boostLevel} done)`;
+  })();
+
+  const buttonActive = adFinished && !busy;
+  const buttonClass  = cn(
+    'w-full py-3.5 rounded-2xl font-bold text-sm transition-all',
+    buttonActive
+      ? claimReady
+        ? 'bg-emerald-500 text-white hover:bg-emerald-600 active:scale-95 shadow-lg shadow-emerald-200'
+        : 'bg-indigo-500 text-white hover:bg-indigo-600 active:scale-95'
+      : 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
+  );
 
   return (
     <div
@@ -225,79 +287,65 @@ const AdSimulatorModal = ({
       }}
     >
       <div className="w-full max-w-sm bg-zinc-900 rounded-3xl overflow-hidden border border-zinc-800 shadow-2xl">
-        {/* Video placeholder */}
+
+        {/* ── Video placeholder ──────────────────────────────────────────── */}
         <div className="relative aspect-video bg-zinc-800 flex items-center justify-center">
-          <PlayCircle size={48} className="text-zinc-600 animate-pulse" />
-          <div className="absolute top-4 right-4 bg-black/50 px-3 py-1 rounded-full text-white text-xs font-bold">
-            {adFinished ? 'Ad Complete!' : `Ad ends in ${timeLeft}s`}
+          <PlayCircle size={52} className="text-zinc-600 animate-pulse" />
+
+          {/* Ad position label — top-left */}
+          <div className="absolute top-3 left-3 bg-black/60 px-3 py-1 rounded-full text-white text-xs font-bold">
+            Ad {currentAdNumber} of {boostLevel}
           </div>
-          <div className="absolute top-4 left-4 bg-black/50 px-3 py-1 rounded-full text-white text-xs font-bold">
-            {adLabel}
+
+          {/* Timer / status label — top-right */}
+          <div className="absolute top-3 right-3 bg-black/60 px-3 py-1 rounded-full text-white text-xs font-bold">
+            {adFinished ? 'Ad complete' : `Ends in ${timeLeft}s`}
           </div>
         </div>
 
-        <div className="p-6 text-center">
-          <h3 className="text-lg font-bold text-white mb-2">Daily Boost — Level {boostLevel}</h3>
-          <p className="text-sm text-zinc-400 mb-1">
-            Watched: {totalWatched + (adFinished ? 1 : 0)}/{boostLevel} ads
+        {/* ── Info panel ─────────────────────────────────────────────────── */}
+        <div className="p-6">
+          <h3 className="text-lg font-bold text-white mb-1 text-center">
+            Daily Boost — Level {boostLevel}
+          </h3>
+
+          {/* TEXT-ONLY progress counter (no dots per requirement) */}
+          <p className="text-center text-sm text-zinc-300 font-semibold mb-1">
+            {claimReady
+              ? `All ${boostLevel} ads watched — ready to claim!`
+              : `Ads watched: ${displayCounter} / ${boostLevel}`}
           </p>
-          <p className="text-xs text-zinc-500 mb-6">
-            {allDone || (adFinished && totalWatched + 1 >= boostLevel)
-              ? 'All done! Claim your +100 points.'
-              : `Watch ${boostLevel - totalWatched - (adFinished ? 1 : 0)} more ad${boostLevel - totalWatched - (adFinished ? 1 : 0) !== 1 ? 's' : ''} to earn +100 pts.`}
+          <p className="text-center text-xs text-zinc-500 mb-5">
+            {claimReady
+              ? 'Tap the button below to receive your +100 pts.'
+              : `Watch ${boostLevel - displayCounter} more ad${boostLevel - displayCounter !== 1 ? 's' : ''} to earn +100 pts`}
           </p>
 
-          {/* Progress dots */}
-          <div className="flex justify-center gap-2 mb-6">
-            {Array.from({ length: boostLevel }).map((_, i) => {
-              const watched = totalWatched + (adFinished ? 1 : 0);
-              return (
-                <div
-                  key={i}
-                  className={cn(
-                    'w-2 h-2 rounded-full transition-colors',
-                    i < watched
-                      ? 'bg-emerald-400'
-                      : i === watched
-                      ? 'bg-indigo-400 animate-pulse'
-                      : 'bg-zinc-600'
-                  )}
-                />
-              );
-            })}
-          </div>
+          {/* Error display */}
+          {error && (
+            <div className="mb-4 bg-rose-900/30 border border-rose-800 rounded-xl px-4 py-3">
+              <p className="text-xs text-rose-300 font-medium">{error}</p>
+            </div>
+          )}
 
-          <div className="flex flex-col gap-3">
+          {/* Main action button */}
+          <button
+            onClick={handleAction}
+            disabled={!buttonActive}
+            className={buttonClass}
+          >
+            {buttonLabel}
+          </button>
+
+          {/* Close link — always available unless busy */}
+          {!busy && (
             <button
-              onClick={handleAction}
-              disabled={!adFinished || busy}
-              className={cn(
-                'w-full py-3 rounded-2xl font-bold transition-all',
-                adFinished && !busy
-                  ? totalWatched + 1 >= boostLevel
-                    ? 'bg-emerald-500 text-white hover:bg-emerald-600 active:scale-95'
-                    : 'bg-indigo-500 text-white hover:bg-indigo-600 active:scale-95'
-                  : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
-              )}
+              onClick={onClose}
+              className="w-full mt-3 py-2 text-zinc-500 text-sm hover:text-zinc-300 transition-colors"
             >
-              {busy
-                ? 'Processing…'
-                : !adFinished
-                ? `Watching… (${timeLeft}s)`
-                : totalWatched + 1 >= boostLevel
-                ? '🎉 Claim +100 Points'
-                : `Watch Next Ad (${totalWatched + 1}/${boostLevel})`}
+              Close
             </button>
-
-            {!busy && (
-              <button
-                onClick={onClose}
-                className="w-full py-2 text-zinc-500 text-sm hover:text-zinc-300 transition-colors"
-              >
-                Close
-              </button>
-            )}
-          </div>
+          )}
         </div>
       </div>
     </div>
@@ -307,13 +355,9 @@ const AdSimulatorModal = ({
 // ─── Debug Logs Modal ──────────────────────────────────────────────────────
 
 const DebugLogsModal = ({
-  isOpen,
-  onClose,
-  logs,
+  isOpen, onClose, logs,
 }: {
-  isOpen: boolean;
-  onClose: () => void;
-  logs: any[];
+  isOpen: boolean; onClose: () => void; logs: any[];
 }) => {
   if (!isOpen) return null;
   return (
@@ -351,10 +395,7 @@ const DebugLogsModal = ({
           )}
         </div>
         <div className="p-4 border-t border-zinc-800">
-          <button
-            onClick={onClose}
-            className="w-full py-3 bg-zinc-800 text-white rounded-xl font-bold"
-          >
+          <button onClick={onClose} className="w-full py-3 bg-zinc-800 text-white rounded-xl font-bold">
             Close Debugger
           </button>
         </div>
@@ -365,13 +406,7 @@ const DebugLogsModal = ({
 
 // ─── Privacy Modal ─────────────────────────────────────────────────────────
 
-const PrivacyModal = ({
-  isOpen,
-  onClose,
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-}) => {
+const PrivacyModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
   if (!isOpen) return null;
   return (
     <div
@@ -381,16 +416,9 @@ const PrivacyModal = ({
         paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)',
       }}
     >
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
-        className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
-      />
-      <motion.div
-        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose} className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" />
+      <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
         className="relative w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl overflow-hidden"
       >
@@ -403,12 +431,11 @@ const PrivacyModal = ({
             <p className="font-bold text-zinc-900">Data Collection:</p>
             <p>We only collect your login information (email) to securely store and sync your earned points across devices.</p>
             <p className="font-bold text-zinc-900">Data Deletion & User Rights:</p>
-            <p>You can delete your account and all associated data at any time directly through the "Delete Account" option in the app settings. Once confirmed, all personal information will be permanently removed.</p>
+            <p>You can delete your account and all associated data at any time through "Delete Account" in settings. Once confirmed, all data is permanently removed.</p>
             <p className="font-bold text-zinc-900">Third Parties & Ads:</p>
-            <p>We do not sell your data. Our app uses Google AdMob for advertisements, which may collect device identifiers for ad personalization and analytics.</p>
+            <p>We do not sell your data. Our app uses Google AdMob for advertisements, which may collect device identifiers for ad personalization.</p>
           </div>
-          <button
-            onClick={onClose}
+          <button onClick={onClose}
             className="w-full mt-8 bg-indigo-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all active:scale-95"
           >
             Got it
@@ -422,14 +449,8 @@ const PrivacyModal = ({
 // ─── Delete Account Modal ──────────────────────────────────────────────────
 
 const DeleteAccountModal = ({
-  isOpen,
-  onClose,
-  onConfirm,
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-}) => {
+  isOpen, onClose, onConfirm,
+}: { isOpen: boolean; onClose: () => void; onConfirm: () => void }) => {
   if (!isOpen) return null;
   return (
     <div
@@ -439,16 +460,9 @@ const DeleteAccountModal = ({
         paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)',
       }}
     >
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
-        className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
-      />
-      <motion.div
-        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose} className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" />
+      <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
         className="relative w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl overflow-hidden"
       >
@@ -461,14 +475,12 @@ const DeleteAccountModal = ({
             This action is permanent. All your points and history will be deleted forever.
           </p>
           <div className="flex flex-col gap-3">
-            <button
-              onClick={onConfirm}
+            <button onClick={onConfirm}
               className="w-full bg-rose-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-rose-200 hover:bg-rose-700 transition-all active:scale-95"
             >
               Yes, Delete Everything
             </button>
-            <button
-              onClick={onClose}
+            <button onClick={onClose}
               className="w-full bg-zinc-100 text-zinc-600 py-4 rounded-2xl font-bold hover:bg-zinc-200 transition-all active:scale-95"
             >
               Cancel
@@ -483,35 +495,17 @@ const DeleteAccountModal = ({
 // ─── Confirm Modal ─────────────────────────────────────────────────────────
 
 const ConfirmModal = ({
-  isOpen,
-  onClose,
-  onConfirm,
-  title,
-  message,
-  confirmText = 'Confirm',
-  cancelText  = 'Cancel',
+  isOpen, onClose, onConfirm, title, message, confirmText = 'Confirm', cancelText = 'Cancel',
 }: {
-  isOpen: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-  title: string;
-  message: string;
-  confirmText?: string;
-  cancelText?: string;
+  isOpen: boolean; onClose: () => void; onConfirm: () => void;
+  title: string; message: string; confirmText?: string; cancelText?: string;
 }) => {
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
-        className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
-      />
-      <motion.div
-        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose} className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" />
+      <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
         className="relative w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl overflow-hidden"
       >
@@ -522,14 +516,12 @@ const ConfirmModal = ({
           <h3 className="text-xl font-black text-zinc-900 mb-2">{title}</h3>
           <p className="text-sm text-zinc-500 mb-8">{message}</p>
           <div className="flex flex-col gap-3">
-            <button
-              onClick={() => { onConfirm(); onClose(); }}
+            <button onClick={() => { onConfirm(); onClose(); }}
               className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all active:scale-95"
             >
               {confirmText}
             </button>
-            <button
-              onClick={onClose}
+            <button onClick={onClose}
               className="w-full bg-zinc-100 text-zinc-600 py-4 rounded-2xl font-bold hover:bg-zinc-200 transition-all active:scale-95"
             >
               {cancelText}
@@ -544,27 +536,20 @@ const ConfirmModal = ({
 // ─── Main App ──────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [activeTab, setActiveTab]             = useState('offers');
-  const [firebaseUser, setFirebaseUser]       = useState<FirebaseUser | null>(null);
-  const [user, setUser]                       = useState<UserProfile | null>(null);
-  const [isAuthLoading, setIsAuthLoading]     = useState(true);
-
-  // Modal states
-  const [isPrivacyModalOpen,  setIsPrivacyModalOpen]  = useState(false);
-  const [isDeleteModalOpen,   setIsDeleteModalOpen]   = useState(false);
-  const [isDebugModalOpen,    setIsDebugModalOpen]    = useState(false);
-  const [isConfirmModalOpen,  setIsConfirmModalOpen]  = useState(false);
-  const [confirmConfig, setConfirmConfig]             = useState({
-    title: '',
-    message: '',
-    confirmText: 'Confirm',
-    onConfirm: () => {},
+  const [activeTab,        setActiveTab]        = useState('offers');
+  const [firebaseUser,     setFirebaseUser]     = useState<FirebaseUser | null>(null);
+  const [user,             setUser]             = useState<UserProfile | null>(null);
+  const [isAuthLoading,    setIsAuthLoading]    = useState(true);
+  const [isPrivacyOpen,    setIsPrivacyOpen]    = useState(false);
+  const [isDeleteOpen,     setIsDeleteOpen]     = useState(false);
+  const [isDebugOpen,      setIsDebugOpen]      = useState(false);
+  const [isConfirmOpen,    setIsConfirmOpen]    = useState(false);
+  const [isAdOpen,         setIsAdOpen]         = useState(false);
+  const [confirmConfig, setConfirmConfig] = useState({
+    title: '', message: '', confirmText: 'Confirm', onConfirm: () => {},
   });
 
-  // Ad modal state
-  const [isAdOpen, setIsAdOpen] = useState(false);
-
-  // ── Auth listener ────────────────────────────────────────────────────────
+  // ── Auth listener ──────────────────────────────────────────────────────────
   useEffect(() => {
     const unsub = firebaseService.onAuthChange((fUser) => {
       setFirebaseUser(fUser);
@@ -573,7 +558,7 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // ── Firestore real-time listeners ────────────────────────────────────────
+  // ── Firestore real-time listeners ──────────────────────────────────────────
   const [firestoreClaims,  setFirestoreClaims]  = useState<Transaction[]>([]);
   const [firestoreHistory, setFirestoreHistory] = useState<Transaction[]>([]);
 
@@ -588,25 +573,18 @@ export default function App() {
     const uid = firebaseUser.uid;
     setIsAuthLoading(true);
 
-    // Daily reset (never touches points)
+    // Daily reset — never touches points
     firebaseService.checkDailyReset(uid);
 
     const unsubProfile = firebaseService.onProfileChange(uid, (profile) => {
       if (profile) {
         setUser(profile);
       } else {
-        // First-time: _ensureProfile in firebase.ts should have created the doc,
-        // but guard here just in case.
         const fresh: UserProfile = {
           uid,
           email: firebaseUser.email ?? (uid.startsWith('local_guest_') ? 'Guest User' : 'Unknown'),
-          points: 0,
-          claimsToday: 0,
-          lastClaimDate: null,
-          totalEarned: 0,
-          boostLevel: 1,
-          adsWatchedToday: 0,
-          currentLevelAdCounter: 0,
+          points: 0, claimsToday: 0, lastClaimDate: null, totalEarned: 0,
+          boostLevel: 1, adsWatchedToday: 0, currentLevelAdCounter: 0,
           lastBoostDate: new Date().toDateString(),
         };
         firebaseService.saveUserProfile(fresh);
@@ -614,22 +592,18 @@ export default function App() {
       setIsAuthLoading(false);
     });
 
-    const unsubClaims = firebaseService.onClaimsChange(uid, setFirestoreClaims);
-    const unsubHistory = firebaseService.onHistoryChange(uid, setFirestoreHistory);
+    const unsubClaims   = firebaseService.onClaimsChange(uid, setFirestoreClaims);
+    const unsubHistory  = firebaseService.onHistoryChange(uid, setFirestoreHistory);
 
-    return () => {
-      unsubProfile();
-      unsubClaims();
-      unsubHistory();
-    };
+    return () => { unsubProfile(); unsubClaims(); unsubHistory(); };
   }, [firebaseUser?.uid]);
 
-  // ── Search / category state ──────────────────────────────────────────────
+  // ── Search / filter state ──────────────────────────────────────────────────
   const [searchQuery,      setSearchQuery]      = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const categories = ['all', 'Fashion', 'Delivery apps', 'Shopping', 'Travel', 'Food', 'General'];
 
-  // ── useAds hook ──────────────────────────────────────────────────────────
+  // ── useAds hook ────────────────────────────────────────────────────────────
   const {
     logs,
     addLog,
@@ -645,12 +619,11 @@ export default function App() {
     return () => unsub();
   }, [onOffersChange]);
 
-  // ── Merged transactions ──────────────────────────────────────────────────
-  // Local transactions kept for immediate UI feedback before Firestore syncs
+  // ── Transactions ───────────────────────────────────────────────────────────
   const [localTransactions, setLocalTransactions] = useState<Transaction[]>(() => {
     try {
-      const saved = localStorage.getItem('local_transactions');
-      return saved ? JSON.parse(saved) : [];
+      const s = localStorage.getItem('local_transactions');
+      return s ? JSON.parse(s) : [];
     } catch { return []; }
   });
 
@@ -662,13 +635,13 @@ export default function App() {
 
   const transactions = useMemo<Transaction[]>(() => {
     const all = [...localTransactions, ...firestoreClaims, ...firestoreHistory];
-    const unique = Array.from(new Map(all.map((tx) => [tx.id, tx])).values());
+    const unique = Array.from(new Map(all.map((t) => [t.id, t])).values());
     return unique.sort(
       (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     );
   }, [localTransactions, firestoreClaims, firestoreHistory]);
 
-  // ── Filtered offers ──────────────────────────────────────────────────────
+  // ── Filtered offers ────────────────────────────────────────────────────────
   const filteredOffers = useMemo(() => {
     return offers.filter((offer) => {
       const sel = selectedCategory.toLowerCase();
@@ -678,7 +651,6 @@ export default function App() {
           ? offer.category.some((c) => String(c).toLowerCase() === sel)
           : String(offer.category ?? '').toLowerCase() === sel);
       if (!matchesCat) return false;
-
       const q = searchQuery.toLowerCase();
       return (
         offer.brand.toLowerCase().includes(q) ||
@@ -688,28 +660,33 @@ export default function App() {
     });
   }, [offers, searchQuery, selectedCategory]);
 
-  // ── Boost handlers ───────────────────────────────────────────────────────
+  // ── Boost handlers ─────────────────────────────────────────────────────────
 
-  /** Called once per completed ad inside the modal */
-  const handleAdWatched = async (): Promise<void> => {
+  /**
+   * Records one ad watch.
+   * Returns the Firestore-confirmed result so the modal can use it as ground truth.
+   * Does NOT increment any external state — that happens inside Firestore.
+   */
+  const handleAdWatched = async (): Promise<WatchAdResult | null> => {
     const result = await watchAd();
     if (result) {
       addLog(
         'rewarded',
         'show',
-        `Ad recorded — ${result.currentLevelAdCounter}/${result.adsNeeded} (Level ${result.boostLevel})`
+        `Ad confirmed by Firestore — counter: ${result.currentLevelAdCounter}/${result.adsNeeded} (Level ${result.boostLevel})`
       );
     }
+    return result; // returned to modal — it becomes the ONLY source of truth
   };
 
-  /** Called when the last ad is done and the user taps Claim */
+  /** Claims the boost reward after Firestore confirms all ads are watched. */
   const handleClaimBoostReward = async (): Promise<void> => {
     const result = await claimBoostReward();
     if (result) {
       addLog(
         'rewarded',
         'reward',
-        `Level ${result.completedLevel} claimed! +100 pts. Total: ${result.points}. Next: Level ${result.boostLevel}`
+        `Level ${result.completedLevel} claimed — +100 pts → total: ${result.points}. Next: Level ${result.boostLevel}`
       );
       await Toast.show({
         text: `🎉 Boost Level ${result.completedLevel} Complete! +100 pts`,
@@ -720,11 +697,11 @@ export default function App() {
     }
   };
 
-  // ── Offer claim ──────────────────────────────────────────────────────────
+  // ── Offer claim ────────────────────────────────────────────────────────────
   const handleClaimOffer = async (offer: Offer, currentCost: number) => {
     if (!user) return;
-
     const safePoints = Math.max(0, Number(user.points ?? 0));
+
     if (safePoints < currentCost) {
       setConfirmConfig({
         title: 'Not Enough Points',
@@ -732,14 +709,13 @@ export default function App() {
         confirmText: 'Watch Ad',
         onConfirm: () => setIsAdOpen(true),
       });
-      setIsConfirmModalOpen(true);
+      setIsConfirmOpen(true);
       return;
     }
 
     try {
       await firebaseService.claimOffer(user.uid, offer);
       addLog('banner', 'reward', `Claimed ${offer.brand}`);
-
       if (!offer.code) {
         await Browser.open({ url: offer.url });
       } else {
@@ -752,7 +728,7 @@ export default function App() {
             await Toast.show({ text: 'Code copied!', duration: 'short' });
           },
         });
-        setIsConfirmModalOpen(true);
+        setIsConfirmOpen(true);
       }
     } catch (err) {
       console.error('Claim failed:', err);
@@ -760,7 +736,7 @@ export default function App() {
     }
   };
 
-  // ── Auth actions ─────────────────────────────────────────────────────────
+  // ── Auth actions ───────────────────────────────────────────────────────────
   const handleSignIn = async () => {
     setIsAuthLoading(true);
     try {
@@ -770,7 +746,10 @@ export default function App() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       addLog('app_open', 'error', `Sign-in error: ${msg}`);
-      await Toast.show({ text: `Sign-in failed: ${msg.slice(0, 60)}`, duration: 'long' });
+      await Toast.show({
+        text: `Sign-in failed. Open debugger for details.`,
+        duration: 'long',
+      });
     } finally {
       setIsAuthLoading(false);
     }
@@ -783,7 +762,6 @@ export default function App() {
       setFirebaseUser(fUser);
     } catch (err) {
       console.error('Anonymous sign-in failed:', err);
-      // Local fallback
       let localUid = localStorage.getItem('persistent_guest_id');
       if (!localUid) {
         localUid = 'local_guest_' + Math.random().toString(36).slice(2, 11);
@@ -820,11 +798,11 @@ export default function App() {
       setFirebaseUser(null);
       setUser(null);
       setIsAuthLoading(false);
-      setIsDeleteModalOpen(false);
+      setIsDeleteOpen(false);
     }
   };
 
-  // ── Config guard ─────────────────────────────────────────────────────────
+  // ── Config guard ───────────────────────────────────────────────────────────
   if (!isConfigValid) {
     return (
       <div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-6 text-center">
@@ -837,18 +815,15 @@ export default function App() {
     );
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   const renderContent = () => {
-    // Loading spinner
+
     if (isAuthLoading) {
       return (
         <div
           className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center gap-6"
-          style={{
-            paddingTop:    'env(safe-area-inset-top)',
-            paddingBottom: 'env(safe-area-inset-bottom)',
-          }}
+          style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
         >
           <Logo className="max-w-[120px]" />
           <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
@@ -856,15 +831,11 @@ export default function App() {
       );
     }
 
-    // Sign-in screen
     if (!firebaseUser) {
       return (
         <div
           className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-8 text-center"
-          style={{
-            paddingTop:    'env(safe-area-inset-top)',
-            paddingBottom: 'env(safe-area-inset-bottom)',
-          }}
+          style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
         >
           <div className="w-full max-w-sm flex flex-col items-center">
             <Logo className="max-w-[160px]" />
@@ -874,25 +845,18 @@ export default function App() {
             <p className="text-sm text-zinc-500 mb-10 max-w-[280px]">
               Sign in with Google to start earning points and save your progress.
             </p>
-
             <div className="w-full space-y-4">
               <button
                 onClick={handleSignIn}
                 disabled={isAuthLoading}
                 className="w-full bg-white border border-zinc-200 py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-sm hover:shadow-md transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
               >
-                {isAuthLoading ? (
-                  <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <img
-                    src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
-                    alt="Google"
-                    className="w-5 h-5"
-                  />
-                )}
+                {isAuthLoading
+                  ? <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                  : <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
+                }
                 {isAuthLoading ? 'Signing in…' : 'Continue with Google'}
               </button>
-
               <button
                 onClick={handleGuestSignIn}
                 className="w-full bg-zinc-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg shadow-zinc-200 hover:bg-zinc-800 transition-all active:scale-95"
@@ -901,12 +865,11 @@ export default function App() {
                 Continue as Guest
               </button>
             </div>
-
             <p className="mt-12 text-[10px] text-zinc-400 font-medium uppercase tracking-widest">
               Version {APP_VERSION}
             </p>
             <button
-              onClick={() => setIsDebugModalOpen(true)}
+              onClick={() => setIsDebugOpen(true)}
               className="mt-4 flex items-center gap-2 text-[10px] font-bold text-zinc-300 uppercase tracking-wider hover:text-zinc-500 transition-colors"
             >
               <Terminal size={12} />
@@ -917,21 +880,16 @@ export default function App() {
       );
     }
 
-    // Profile loading
     if (!user) {
       return (
         <div className="h-screen flex flex-col items-center justify-center bg-zinc-50 p-6">
           <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4" />
-          <p className="text-sm font-bold text-zinc-400 uppercase tracking-widest">
-            Loading Profile…
-          </p>
+          <p className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Loading Profile…</p>
         </div>
       );
     }
 
-    // ── Main app shell ──────────────────────────────────────────────────────
-    // Points always come from Firestore-backed user object
-    const safePoints = Math.max(0, Number(user.points ?? 0));
+    const safePoints        = Math.max(0, Number(user.points ?? 0));
     const userWithSafePoints: UserProfile = { ...user, points: safePoints };
 
     return (
@@ -942,7 +900,6 @@ export default function App() {
           <main className="max-w-md mx-auto px-6 py-6 pb-[120px]">
             <AnimatePresence mode="wait">
 
-              {/* ── Rewards tab ──────────────────────────────────────────── */}
               {activeTab === 'offers' && (
                 <HomeScreen
                   user={userWithSafePoints}
@@ -961,20 +918,18 @@ export default function App() {
                 />
               )}
 
-              {/* ── History tab ───────────────────────────────────────────── */}
               {activeTab === 'history' && (
                 <HistoryScreen transactions={transactions} />
               )}
 
-              {/* ── Profile tab ───────────────────────────────────────────── */}
               {activeTab === 'profile' && (
                 <ProfileScreen
                   user={userWithSafePoints}
                   claimsCount={transactions.filter((t) => t.type === 'claim').length}
                   onSignOut={handleSignOut}
-                  onDeleteAccount={() => setIsDeleteModalOpen(true)}
-                  onOpenPrivacy={() => setIsPrivacyModalOpen(true)}
-                  onOpenDebug={() => setIsDebugModalOpen(true)}
+                  onDeleteAccount={() => setIsDeleteOpen(true)}
+                  onOpenPrivacy={() => setIsPrivacyOpen(true)}
+                  onOpenDebug={() => setIsDebugOpen(true)}
                 />
               )}
 
@@ -984,7 +939,7 @@ export default function App() {
 
         <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
 
-        {/* ── Boost Ad Modal ─────────────────────────────────────────────── */}
+        {/* ── Boost Ad Modal ──────────────────────────────────────────────── */}
         <AdSimulatorModal
           isOpen={isAdOpen}
           onClose={() => setIsAdOpen(false)}
@@ -993,31 +948,25 @@ export default function App() {
           user={userWithSafePoints}
         />
 
-        {/* ── Other modals ───────────────────────────────────────────────── */}
         <AnimatePresence>
-          {isPrivacyModalOpen && (
-            <PrivacyModal
-              isOpen={isPrivacyModalOpen}
-              onClose={() => setIsPrivacyModalOpen(false)}
-            />
+          {isPrivacyOpen && (
+            <PrivacyModal isOpen={isPrivacyOpen} onClose={() => setIsPrivacyOpen(false)} />
           )}
         </AnimatePresence>
-
         <AnimatePresence>
-          {isDeleteModalOpen && (
+          {isDeleteOpen && (
             <DeleteAccountModal
-              isOpen={isDeleteModalOpen}
-              onClose={() => setIsDeleteModalOpen(false)}
+              isOpen={isDeleteOpen}
+              onClose={() => setIsDeleteOpen(false)}
               onConfirm={handleDeleteAccount}
             />
           )}
         </AnimatePresence>
-
         <AnimatePresence>
-          {isConfirmModalOpen && (
+          {isConfirmOpen && (
             <ConfirmModal
-              isOpen={isConfirmModalOpen}
-              onClose={() => setIsConfirmModalOpen(false)}
+              isOpen={isConfirmOpen}
+              onClose={() => setIsConfirmOpen(false)}
               onConfirm={confirmConfig.onConfirm}
               title={confirmConfig.title}
               message={confirmConfig.message}
@@ -1033,10 +982,10 @@ export default function App() {
     <>
       {renderContent()}
       <AnimatePresence>
-        {isDebugModalOpen && (
+        {isDebugOpen && (
           <DebugLogsModal
-            isOpen={isDebugModalOpen}
-            onClose={() => setIsDebugModalOpen(false)}
+            isOpen={isDebugOpen}
+            onClose={() => setIsDebugOpen(false)}
             logs={logs}
           />
         )}
