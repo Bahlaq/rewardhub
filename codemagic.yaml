@@ -23,6 +23,15 @@ workflows:
           # 🏗️ Build Web Assets
           npm run build
           
+          # 🔄 Sync with Android
+          npx cap sync android
+          
+          # 🛠️ Fix: Remove duplicate google-services plugin
+          sed -i '/try {/,/} catch(Exception e) {.*}/d' android/app/build.gradle || true
+          
+          # 🛠️ Fix: Fix espresso variable name typo
+          sed -i 's/indigoEspressoCoreVersion/androidEspressoCoreVersion/g' android/app/build.gradle || true
+          
           # 🔍 Verify dist exists
           if [ ! -d "dist" ]; then
             echo "❌ Error: dist directory was not created by npm run build"
@@ -154,7 +163,7 @@ workflows:
     publishing:
       email:
         recipients:
-          - m.bahlaq@dv8dm.com # User email from context
+          - m.bahlaq94@gmail.com # User email from context
         notify:
           success: true
           failure: true
