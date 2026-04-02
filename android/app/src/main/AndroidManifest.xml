@@ -2,6 +2,19 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.rewardhub.official.app">
 
+    <!--
+    ═══════════════════════════════════════════════════════════════════════════
+    PERMISSIONS
+    ═══════════════════════════════════════════════════════════════════════════
+    INTERNET          — required for Firebase, Google Auth, AdMob, Firestore
+    AD_ID             — required by AdMob on Android 13+ (API 33+)
+                        Without this AdMob cannot target ads and will show
+                        blank/house ads or nothing at all.
+    ═══════════════════════════════════════════════════════════════════════════
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -10,15 +23,37 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
+        <!--
+        ═══════════════════════════════════════════════════════════════════════
+        ADMOB APP ID
+        ═══════════════════════════════════════════════════════════════════════
+        Source: AdMob Console → Apps → RewardHub → App settings → App ID
+        Value : ca-app-pub-1560161047680443~4972275282
+
+        WHY THIS MATTERS FOR THE BLACK SCREEN:
+          If this meta-data tag is missing or has the wrong value, the AdMob
+          SDK crashes silently at startup. The app may appear to work but all
+          ad requests will fail with "The Google Mobile Ads SDK was initialized
+          incorrectly" and return blank/black ad surfaces.
+
+        DO NOT use the test App ID (ca-app-pub-3940256099942544~3347511713)
+        in production builds — that causes blank ads for real users.
+        ═══════════════════════════════════════════════════════════════════════
+        -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-1560161047680443~4972275282"/>
+            android:value="ca-app-pub-1560161047680443~4972275282" />
 
+        <!--
+        ═══════════════════════════════════════════════════════════════════════
+        MAIN ACTIVITY
+        ═══════════════════════════════════════════════════════════════════════
+        -->
         <activity
-            android:name="com.rewardhub.official.app.MainActivity"
+            android:name=".MainActivity"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
             android:label="@string/title_activity_main"
-            android:launchMode="singleCommunity"
+            android:launchMode="singleTask"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:exported="true">
 
@@ -29,6 +64,12 @@
 
         </activity>
 
+        <!--
+        ═══════════════════════════════════════════════════════════════════════
+        FILE PROVIDER
+        Required by Capacitor for file sharing between app components.
+        ═══════════════════════════════════════════════════════════════════════
+        -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -36,12 +77,9 @@
             android:grantUriPermissions="true">
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths"></meta-data>
+                android:resource="@xml/file_paths" />
         </provider>
-    </application>
 
-    <!-- Permissions -->
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
+    </application>
 
 </manifest>
