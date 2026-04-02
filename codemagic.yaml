@@ -20,6 +20,9 @@ workflows:
         script: npm install --legacy-peer-deps
       - name: Build and Sync Capacitor
         script: |
+        # Decode Google Services JSON and place it in the app folder
+          echo $GOOGLE_SERVICES_JSON | base64 --decode > android/app/google-services.json
+          
           # 🏗️ Build Web Assets
           npm run build
           
