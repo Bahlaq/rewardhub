@@ -18,15 +18,15 @@ workflows:
           node -v # To verify installation
       - name: Install dependencies
         script: npm install --legacy-peer-deps
-      - name: Build and Sync Capacitor
+     - name: Build and Sync Capacitor
         script: |
-        # Decode Google Services JSON and place it in the app folder
+          # 1. Decode Google Services JSON
           echo $GOOGLE_SERVICES_JSON | base64 --decode > android/app/google-services.json
           
-          # 🏗️ Build Web Assets
+          # 2. Build Web Assets
           npm run build
           
-          # 🔄 Sync with Android
+          # 3. Sync with Android
           npx cap sync android
           
           # 🛠️ Fix: Remove duplicate google-services plugin
