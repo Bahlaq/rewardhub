@@ -1,7 +1,7 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "8.0.2",
+  "version": "9.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
@@ -14,6 +14,7 @@
     "build:android": "npm run build && npx cap sync android"
   },
   "dependencies": {
+    "@capacitor-community/admob": "^6.0.0",
     "@capacitor/android": "^6.0.0",
     "@capacitor/assets": "^3.0.5",
     "@capacitor/browser": "^6.0.6",
