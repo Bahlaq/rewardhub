@@ -1,9 +1,21 @@
+/**
+ * src/App.tsx
+ *
+ * Key changes from previous version:
+ *  1. AdSimulatorModal completely removed — AdMob SDK handles ad UI natively.
+ *  2. isAdOpen / isBoostAd states removed.
+ *  3. isAdLoading state added — disables Watch Ad button while ad is loading.
+ *  4. admobService.initialize() called once after user authenticates.
+ *  5. admobService.showBanner() called once after user authenticates (native only).
+ *  6. handleWatchAd() triggers the real AdMob rewarded ad via watchAd() hook.
+ *  7. handleAdWatched is removed — reward is handled inside watchAd() callback.
+ */
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   AlertCircle,
   X,
-  PlayCircle,
   ShieldCheck,
   Trash2,
   Terminal,
@@ -20,6 +32,7 @@ import { twMerge } from 'tailwind-merge';
 import { Offer, UserProfile, Transaction } from './types';
 import { useAds, WatchAdResult } from './hooks/useAds';
 import { firebaseService, FirebaseUser, isConfigValid } from './services/firebase';
+import { admobService } from './services/admob';
 import { APP_NAME, APP_VERSION } from './constants';
 import { HomeScreen } from './components/HomeScreen';
 import { ProfileScreen } from './components/ProfileScreen';
@@ -58,7 +71,6 @@ const Navbar = ({
     { id: 'history', icon: History,          label: 'History' },
     { id: 'profile', icon: User,             label: 'Profile' },
   ];
-
   return (
     <nav
       className="fixed bottom-0 left-0 right-0 bg-white border-t border-zinc-200 px-6 pt-3 z-50"
@@ -119,246 +131,11 @@ const Header = ({ user }: { user: UserProfile }) => {
   );
 };
 
-// ─── Ad Simulator Modal ────────────────────────────────────────────────────
-//
-// BUG FIX (desync):
-//   The previous implementation maintained a `localCounter` that was added to
-//   `user.currentLevelAdCounter` (the live Firestore value). Because the Firestore
-//   real-time listener fires AFTER the local state update, both incremented in the
-//   same render cycle → double-counting → claim gate triggered 1–2 ads too early.
-//
-// FIX:
-//   - Removed ALL local counters.
-//   - `firestoreCounter` is the ONLY progress variable; it is set EXCLUSIVELY
-//     from the return value of `onAdWatched()` (the Firestore transaction response).
-//   - The claim gate checks `firestoreCounter !== null && firestoreCounter >= boostLevel`.
-//     `firestoreCounter` is null until the first API response arrives, preventing
-//     any premature unlock.
-//   - Removed all dot indicators. Only plain text counters are shown.
-
-interface AdSimulatorModalProps {
-  isOpen:       boolean;
-  onClose:      () => void;
-  /** Called once per completed ad; returns Firestore-confirmed state or null on error */
-  onAdWatched:  () => Promise<WatchAdResult | null>;
-  /** Called after Firestore confirms all ads are done */
-  onClaim:      () => Promise<void>;
-  user:         UserProfile | null;
-}
-
-const AdSimulatorModal = ({
-  isOpen,
-  onClose,
-  onAdWatched,
-  onClaim,
-  user,
-}: AdSimulatorModalProps) => {
-  const [timeLeft,        setTimeLeft]        = useState(5);
-  const [adFinished,      setAdFinished]      = useState(false);
-  const [busy,            setBusy]            = useState(false);
-  const [error,           setError]           = useState<string | null>(null);
-
-  /**
-   * Firestore-confirmed counter.
-   * - Starts as `null` (no ad watched in this session yet).
-   * - Set ONLY from the return value of `onAdWatched()`.
-   * - Never incremented locally.
-   */
-  const [firestoreCounter, setFirestoreCounter] = useState<number | null>(null);
-
-  const boostLevel = Math.max(1, Number(user?.boostLevel ?? 1));
-
-  /**
-   * What to display as the current progress.
-   * Before any ad is watched in this session, fall back to the Firestore prop value.
-   * Once we get a confirmed response, use that exclusively.
-   */
-  const displayCounter = firestoreCounter ?? Math.max(0, Number(user?.currentLevelAdCounter ?? 0));
-
-  /**
-   * STRICT CLAIM GATE.
-   * True ONLY when Firestore has confirmed the counter meets or exceeds the level.
-   * `firestoreCounter !== null` ensures we never allow a claim before the first
-   * API response has been received.
-   */
-  const claimReady = firestoreCounter !== null && firestoreCounter >= boostLevel;
-
-  // Reset all session state when the modal opens
-  useEffect(() => {
-    if (!isOpen) return;
-    setFirestoreCounter(null);
-    setTimeLeft(5);
-    setAdFinished(false);
-    setBusy(false);
-    setError(null);
-  }, [isOpen]);
-
-  // Countdown timer
-  useEffect(() => {
-    if (!isOpen || adFinished) return;
-    if (timeLeft <= 0) {
-      setAdFinished(true);
-      return;
-    }
-    const t = setTimeout(() => setTimeLeft((p) => p - 1), 1000);
-    return () => clearTimeout(t);
-  }, [isOpen, adFinished, timeLeft]);
-
-  if (!isOpen) return null;
-
-  // Which ad number are we currently on?
-  // During countdown: displayCounter + 1 (the one currently playing)
-  // After confirmation: firestoreCounter (the one just completed)
-  const currentAdNumber = adFinished && firestoreCounter !== null
-    ? firestoreCounter
-    : Math.min(displayCounter + 1, boostLevel);
-
-  const handleAction = async () => {
-    if (!adFinished || busy) return;
-
-    setBusy(true);
-    setError(null);
-
-    try {
-      if (claimReady) {
-        // ── CLAIM PATH ─────────────────────────────────────────────────────
-        // `claimReady` is only true when Firestore has confirmed the counter.
-        // Server-side Firestore transaction will also validate — double protection.
-        await onClaim();
-        onClose();
-      } else {
-        // ── RECORD AD PATH ─────────────────────────────────────────────────
-        // Await Firestore confirmation before updating any UI.
-        const result = await onAdWatched();
-
-        if (!result) {
-          // onAdWatched returned null — an error occurred, already logged
-          setError('Failed to record ad. Please try again.');
-          setBusy(false);
-          return;
-        }
-
-        // ── Set counter from Firestore response — this is the ONLY source of truth ──
-        setFirestoreCounter(result.currentLevelAdCounter);
-
-        if (result.currentLevelAdCounter >= result.adsNeeded) {
-          // All ads confirmed — stay on screen, button changes to Claim
-          // adFinished stays true so the claim button renders
-        } else {
-          // More ads needed — start next countdown
-          setTimeLeft(5);
-          setAdFinished(false);
-        }
-      }
-    } catch (err: any) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg.slice(0, 120));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // ── Button label / style ───────────────────────────────────────────────────
-  const buttonLabel = (() => {
-    if (busy)        return 'Processing…';
-    if (!adFinished) return `Watching… (${timeLeft}s)`;
-    if (claimReady)  return '🎉 Claim +100 Points';
-    // Ad finished but not all done — show next ad info
-    const nextCount = (firestoreCounter ?? displayCounter) + 1;
-    return `Confirm Ad & Continue  (${firestoreCounter ?? displayCounter}/${boostLevel} done)`;
-  })();
-
-  const buttonActive = adFinished && !busy;
-  const buttonClass  = cn(
-    'w-full py-3.5 rounded-2xl font-bold text-sm transition-all',
-    buttonActive
-      ? claimReady
-        ? 'bg-emerald-500 text-white hover:bg-emerald-600 active:scale-95 shadow-lg shadow-emerald-200'
-        : 'bg-indigo-500 text-white hover:bg-indigo-600 active:scale-95'
-      : 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
-  );
-
-  return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/90 backdrop-blur-sm"
-      style={{
-        paddingTop:    'calc(env(safe-area-inset-top) + 1.5rem)',
-        paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)',
-      }}
-    >
-      <div className="w-full max-w-sm bg-zinc-900 rounded-3xl overflow-hidden border border-zinc-800 shadow-2xl">
-
-        {/* ── Video placeholder ──────────────────────────────────────────── */}
-        <div className="relative aspect-video bg-zinc-800 flex items-center justify-center">
-          <PlayCircle size={52} className="text-zinc-600 animate-pulse" />
-
-          {/* Ad position label — top-left */}
-          <div className="absolute top-3 left-3 bg-black/60 px-3 py-1 rounded-full text-white text-xs font-bold">
-            Ad {currentAdNumber} of {boostLevel}
-          </div>
-
-          {/* Timer / status label — top-right */}
-          <div className="absolute top-3 right-3 bg-black/60 px-3 py-1 rounded-full text-white text-xs font-bold">
-            {adFinished ? 'Ad complete' : `Ends in ${timeLeft}s`}
-          </div>
-        </div>
-
-        {/* ── Info panel ─────────────────────────────────────────────────── */}
-        <div className="p-6">
-          <h3 className="text-lg font-bold text-white mb-1 text-center">
-            Daily Boost — Level {boostLevel}
-          </h3>
-
-          {/* TEXT-ONLY progress counter (no dots per requirement) */}
-          <p className="text-center text-sm text-zinc-300 font-semibold mb-1">
-            {claimReady
-              ? `All ${boostLevel} ads watched — ready to claim!`
-              : `Ads watched: ${displayCounter} / ${boostLevel}`}
-          </p>
-          <p className="text-center text-xs text-zinc-500 mb-5">
-            {claimReady
-              ? 'Tap the button below to receive your +100 pts.'
-              : `Watch ${boostLevel - displayCounter} more ad${boostLevel - displayCounter !== 1 ? 's' : ''} to earn +100 pts`}
-          </p>
-
-          {/* Error display */}
-          {error && (
-            <div className="mb-4 bg-rose-900/30 border border-rose-800 rounded-xl px-4 py-3">
-              <p className="text-xs text-rose-300 font-medium">{error}</p>
-            </div>
-          )}
-
-          {/* Main action button */}
-          <button
-            onClick={handleAction}
-            disabled={!buttonActive}
-            className={buttonClass}
-          >
-            {buttonLabel}
-          </button>
-
-          {/* Close link — always available unless busy */}
-          {!busy && (
-            <button
-              onClick={onClose}
-              className="w-full mt-3 py-2 text-zinc-500 text-sm hover:text-zinc-300 transition-colors"
-            >
-              Close
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
 // ─── Debug Logs Modal ──────────────────────────────────────────────────────
 
 const DebugLogsModal = ({
   isOpen, onClose, logs,
-}: {
-  isOpen: boolean; onClose: () => void; logs: any[];
-}) => {
+}: { isOpen: boolean; onClose: () => void; logs: any[] }) => {
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm">
@@ -370,29 +147,22 @@ const DebugLogsModal = ({
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-2 font-mono text-[10px]">
-          {logs.length === 0 ? (
-            <p className="text-zinc-500 text-center py-10 italic">No logs yet.</p>
-          ) : (
-            [...logs].reverse().map((log) => (
-              <div
-                key={log.id}
-                className={cn(
-                  'p-2 rounded border',
-                  log.event === 'error'
-                    ? 'bg-rose-900/20 border-rose-900/50 text-rose-400'
-                    : log.event === 'reward'
-                    ? 'bg-emerald-900/20 border-emerald-900/50 text-emerald-400'
-                    : 'bg-zinc-800/50 border-zinc-700 text-zinc-400'
-                )}
-              >
+          {logs.length === 0
+            ? <p className="text-zinc-500 text-center py-10 italic">No logs yet.</p>
+            : [...logs].reverse().map((log) => (
+              <div key={log.id} className={cn(
+                'p-2 rounded border',
+                log.event === 'error'  ? 'bg-rose-900/20 border-rose-900/50 text-rose-400'
+                : log.event === 'reward' ? 'bg-emerald-900/20 border-emerald-900/50 text-emerald-400'
+                : 'bg-zinc-800/50 border-zinc-700 text-zinc-400'
+              )}>
                 <div className="flex justify-between mb-1 opacity-50">
                   <span>{log.type?.toUpperCase()}</span>
                   <span>{new Date(log.timestamp).toLocaleTimeString()}</span>
                 </div>
                 <div className="break-all">{log.message}</div>
               </div>
-            ))
-          )}
+            ))}
         </div>
         <div className="p-4 border-t border-zinc-800">
           <button onClick={onClose} className="w-full py-3 bg-zinc-800 text-white rounded-xl font-bold">
@@ -411,10 +181,7 @@ const PrivacyModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => voi
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center p-6"
-      style={{
-        paddingTop:    'calc(env(safe-area-inset-top) + 1.5rem)',
-        paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)',
-      }}
+      style={{ paddingTop: 'calc(env(safe-area-inset-top) + 1.5rem)', paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)' }}
     >
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         onClick={onClose} className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" />
@@ -431,7 +198,7 @@ const PrivacyModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => voi
             <p className="font-bold text-zinc-900">Data Collection:</p>
             <p>We only collect your login information (email) to securely store and sync your earned points across devices.</p>
             <p className="font-bold text-zinc-900">Data Deletion & User Rights:</p>
-            <p>You can delete your account and all associated data at any time through "Delete Account" in settings. Once confirmed, all data is permanently removed.</p>
+            <p>You can delete your account and all associated data at any time through "Delete Account" in settings.</p>
             <p className="font-bold text-zinc-900">Third Parties & Ads:</p>
             <p>We do not sell your data. Our app uses Google AdMob for advertisements, which may collect device identifiers for ad personalization.</p>
           </div>
@@ -455,10 +222,7 @@ const DeleteAccountModal = ({
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center p-6"
-      style={{
-        paddingTop:    'calc(env(safe-area-inset-top) + 1.5rem)',
-        paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)',
-      }}
+      style={{ paddingTop: 'calc(env(safe-area-inset-top) + 1.5rem)', paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)' }}
     >
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         onClick={onClose} className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" />
@@ -536,20 +300,22 @@ const ConfirmModal = ({
 // ─── Main App ──────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [activeTab,        setActiveTab]        = useState('offers');
-  const [firebaseUser,     setFirebaseUser]     = useState<FirebaseUser | null>(null);
-  const [user,             setUser]             = useState<UserProfile | null>(null);
-  const [isAuthLoading,    setIsAuthLoading]    = useState(true);
-  const [isPrivacyOpen,    setIsPrivacyOpen]    = useState(false);
-  const [isDeleteOpen,     setIsDeleteOpen]     = useState(false);
-  const [isDebugOpen,      setIsDebugOpen]      = useState(false);
-  const [isConfirmOpen,    setIsConfirmOpen]    = useState(false);
-  const [isAdOpen,         setIsAdOpen]         = useState(false);
+  const [activeTab,     setActiveTab]     = useState('offers');
+  const [firebaseUser,  setFirebaseUser]  = useState<FirebaseUser | null>(null);
+  const [user,          setUser]          = useState<UserProfile | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isAdLoading,   setIsAdLoading]   = useState(false); // true while AdMob ad is showing
+
+  // ── Modal states ────────────────────────────────────────────────────────────
+  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
+  const [isDeleteOpen,  setIsDeleteOpen]  = useState(false);
+  const [isDebugOpen,   setIsDebugOpen]   = useState(false);
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [confirmConfig, setConfirmConfig] = useState({
     title: '', message: '', confirmText: 'Confirm', onConfirm: () => {},
   });
 
-  // ── Auth listener ──────────────────────────────────────────────────────────
+  // ── Auth listener ────────────────────────────────────────────────────────────
   useEffect(() => {
     const unsub = firebaseService.onAuthChange((fUser) => {
       setFirebaseUser(fUser);
@@ -558,7 +324,7 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // ── Firestore real-time listeners ──────────────────────────────────────────
+  // ── Firestore listeners + AdMob init ─────────────────────────────────────────
   const [firestoreClaims,  setFirestoreClaims]  = useState<Transaction[]>([]);
   const [firestoreHistory, setFirestoreHistory] = useState<Transaction[]>([]);
 
@@ -576,6 +342,11 @@ export default function App() {
     // Daily reset — never touches points
     firebaseService.checkDailyReset(uid);
 
+    // Initialize real AdMob + show banner (native only, no-op on web)
+    admobService.initialize().then(() => {
+      admobService.showBanner();
+    });
+
     const unsubProfile = firebaseService.onProfileChange(uid, (profile) => {
       if (profile) {
         setUser(profile);
@@ -592,26 +363,25 @@ export default function App() {
       setIsAuthLoading(false);
     });
 
-    const unsubClaims   = firebaseService.onClaimsChange(uid, setFirestoreClaims);
-    const unsubHistory  = firebaseService.onHistoryChange(uid, setFirestoreHistory);
+    const unsubClaims  = firebaseService.onClaimsChange(uid, setFirestoreClaims);
+    const unsubHistory = firebaseService.onHistoryChange(uid, setFirestoreHistory);
 
-    return () => { unsubProfile(); unsubClaims(); unsubHistory(); };
+    return () => {
+      unsubProfile();
+      unsubClaims();
+      unsubHistory();
+      admobService.removeBanner();
+    };
   }, [firebaseUser?.uid]);
 
-  // ── Search / filter state ──────────────────────────────────────────────────
+  // ── Search / filter ─────────────────────────────────────────────────────────
   const [searchQuery,      setSearchQuery]      = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const categories = ['all', 'Fashion', 'Delivery apps', 'Shopping', 'Travel', 'Food', 'General'];
 
-  // ── useAds hook ────────────────────────────────────────────────────────────
+  // ── useAds hook ─────────────────────────────────────────────────────────────
   const {
-    logs,
-    addLog,
-    watchAd,
-    claimBoostReward,
-    offers,
-    isLoading,
-    onOffersChange,
+    logs, addLog, watchAd, claimBoostReward, offers, isLoading, onOffersChange,
   } = useAds(firebaseUser?.uid);
 
   useEffect(() => {
@@ -619,7 +389,7 @@ export default function App() {
     return () => unsub();
   }, [onOffersChange]);
 
-  // ── Transactions ───────────────────────────────────────────────────────────
+  // ── Transactions ────────────────────────────────────────────────────────────
   const [localTransactions, setLocalTransactions] = useState<Transaction[]>(() => {
     try {
       const s = localStorage.getItem('local_transactions');
@@ -634,14 +404,14 @@ export default function App() {
   }, [localTransactions]);
 
   const transactions = useMemo<Transaction[]>(() => {
-    const all = [...localTransactions, ...firestoreClaims, ...firestoreHistory];
+    const all    = [...localTransactions, ...firestoreClaims, ...firestoreHistory];
     const unique = Array.from(new Map(all.map((t) => [t.id, t])).values());
     return unique.sort(
       (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     );
   }, [localTransactions, firestoreClaims, firestoreHistory]);
 
-  // ── Filtered offers ────────────────────────────────────────────────────────
+  // ── Filtered offers ─────────────────────────────────────────────────────────
   const filteredOffers = useMemo(() => {
     return offers.filter((offer) => {
       const sel = selectedCategory.toLowerCase();
@@ -660,34 +430,49 @@ export default function App() {
     });
   }, [offers, searchQuery, selectedCategory]);
 
-  // ── Boost handlers ─────────────────────────────────────────────────────────
+  // ── Ad handlers ─────────────────────────────────────────────────────────────
 
   /**
-   * Records one ad watch.
-   * Returns the Firestore-confirmed result so the modal can use it as ground truth.
-   * Does NOT increment any external state — that happens inside Firestore.
+   * Called when user taps "Watch Ad" on HomeScreen.
+   *
+   * Flow:
+   *   1. setIsAdLoading(true) → Watch Ad button shows spinner
+   *   2. watchAd() calls admobService.showRewardedAd()
+   *      → Native AdMob SDK shows the full-screen ad
+   *      → When user earns reward, Firestore.recordAdWatch() is called inside the callback
+   *      → Returns Firestore-confirmed WatchAdResult
+   *   3. setIsAdLoading(false) → button returns to normal
+   *   4. Firestore real-time listener updates user.currentLevelAdCounter
+   *   5. HomeScreen re-renders with correct counter
+   *   6. If counter >= boostLevel, HomeScreen shows the Claim button automatically
    */
-  const handleAdWatched = async (): Promise<WatchAdResult | null> => {
-    const result = await watchAd();
-    if (result) {
-      addLog(
-        'rewarded',
-        'show',
-        `Ad confirmed by Firestore — counter: ${result.currentLevelAdCounter}/${result.adsNeeded} (Level ${result.boostLevel})`
-      );
+  const handleWatchAd = async () => {
+    setIsAdLoading(true);
+    try {
+      const result: WatchAdResult | null = await watchAd();
+      if (result) {
+        addLog(
+          'rewarded',
+          'reward',
+          `Counter confirmed: ${result.currentLevelAdCounter}/${result.adsNeeded} (Level ${result.boostLevel})`
+        );
+      } else {
+        // Ad was not watched (dismissed, network error, etc.)
+        // Error already logged in useAds
+      }
+    } finally {
+      setIsAdLoading(false);
     }
-    return result; // returned to modal — it becomes the ONLY source of truth
   };
 
-  /** Claims the boost reward after Firestore confirms all ads are watched. */
+  /**
+   * Called when user taps "Claim +100 Points" on HomeScreen.
+   * The button only appears when Firestore confirms currentLevelAdCounter >= boostLevel.
+   * The Firestore transaction validates this server-side as a second safety check.
+   */
   const handleClaimBoostReward = async (): Promise<void> => {
     const result = await claimBoostReward();
     if (result) {
-      addLog(
-        'rewarded',
-        'reward',
-        `Level ${result.completedLevel} claimed — +100 pts → total: ${result.points}. Next: Level ${result.boostLevel}`
-      );
       await Toast.show({
         text: `🎉 Boost Level ${result.completedLevel} Complete! +100 pts`,
         duration: 'long',
@@ -697,17 +482,17 @@ export default function App() {
     }
   };
 
-  // ── Offer claim ────────────────────────────────────────────────────────────
+  // ── Offer claim ──────────────────────────────────────────────────────────────
   const handleClaimOffer = async (offer: Offer, currentCost: number) => {
     if (!user) return;
     const safePoints = Math.max(0, Number(user.points ?? 0));
 
     if (safePoints < currentCost) {
       setConfirmConfig({
-        title: 'Not Enough Points',
-        message: `You need ${currentCost - safePoints} more points. Watch an ad to earn 100 pts?`,
+        title:       'Not Enough Points',
+        message:     `You need ${currentCost - safePoints} more points. Watch an ad to earn 100 pts?`,
         confirmText: 'Watch Ad',
-        onConfirm: () => setIsAdOpen(true),
+        onConfirm:   handleWatchAd,
       });
       setIsConfirmOpen(true);
       return;
@@ -720,10 +505,10 @@ export default function App() {
         await Browser.open({ url: offer.url });
       } else {
         setConfirmConfig({
-          title: 'Offer Unlocked!',
-          message: `Your code for ${offer.brand}: ${offer.code}`,
+          title:       'Offer Unlocked!',
+          message:     `Your code for ${offer.brand}: ${offer.code}`,
           confirmText: 'Copy Code',
-          onConfirm: async () => {
+          onConfirm:   async () => {
             await Clipboard.write({ string: offer.code! });
             await Toast.show({ text: 'Code copied!', duration: 'short' });
           },
@@ -736,7 +521,7 @@ export default function App() {
     }
   };
 
-  // ── Auth actions ───────────────────────────────────────────────────────────
+  // ── Auth actions ─────────────────────────────────────────────────────────────
   const handleSignIn = async () => {
     setIsAuthLoading(true);
     try {
@@ -746,10 +531,7 @@ export default function App() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       addLog('app_open', 'error', `Sign-in error: ${msg}`);
-      await Toast.show({
-        text: `Sign-in failed. Open debugger for details.`,
-        duration: 'long',
-      });
+      await Toast.show({ text: 'Sign-in failed. Open debugger for details.', duration: 'long' });
     } finally {
       setIsAuthLoading(false);
     }
@@ -774,6 +556,7 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
+    await admobService.removeBanner();
     try { await firebaseService.logout(); } catch {}
     setFirebaseUser(null);
     setUser(null);
@@ -795,6 +578,7 @@ export default function App() {
         await Toast.show({ text: 'Failed to delete account. Try again later.', duration: 'long' });
       }
     } finally {
+      await admobService.removeBanner();
       setFirebaseUser(null);
       setUser(null);
       setIsAuthLoading(false);
@@ -802,20 +586,20 @@ export default function App() {
     }
   };
 
-  // ── Config guard ───────────────────────────────────────────────────────────
+  // ── Config guard ─────────────────────────────────────────────────────────────
   if (!isConfigValid) {
     return (
       <div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-6 text-center">
         <AlertCircle size={48} className="text-rose-500 mb-4" />
         <h1 className="text-xl font-bold text-zinc-900 mb-2">Configuration Error</h1>
         <p className="text-sm text-zinc-500 max-w-xs">
-          Firebase configuration is missing. Check your environment variables and restart.
+          Firebase configuration is missing. Check your environment variables.
         </p>
       </div>
     );
   }
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   const renderContent = () => {
 
@@ -889,7 +673,7 @@ export default function App() {
       );
     }
 
-    const safePoints        = Math.max(0, Number(user.points ?? 0));
+    const safePoints = Math.max(0, Number(user.points ?? 0));
     const userWithSafePoints: UserProfile = { ...user, points: safePoints };
 
     return (
@@ -905,6 +689,7 @@ export default function App() {
                   user={userWithSafePoints}
                   offers={offers}
                   isLoading={isLoading}
+                  isAdLoading={isAdLoading}
                   searchQuery={searchQuery}
                   setSearchQuery={setSearchQuery}
                   selectedCategory={selectedCategory}
@@ -912,7 +697,7 @@ export default function App() {
                   categories={categories}
                   filteredOffers={filteredOffers}
                   transactions={transactions}
-                  handleWatchAd={() => setIsAdOpen(true)}
+                  handleWatchAd={handleWatchAd}
                   handleClaimOffer={handleClaimOffer}
                   handleClaimBoostReward={handleClaimBoostReward}
                 />
@@ -939,33 +724,19 @@ export default function App() {
 
         <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
 
-        {/* ── Boost Ad Modal ──────────────────────────────────────────────── */}
-        <AdSimulatorModal
-          isOpen={isAdOpen}
-          onClose={() => setIsAdOpen(false)}
-          onAdWatched={handleAdWatched}
-          onClaim={handleClaimBoostReward}
-          user={userWithSafePoints}
-        />
-
+        {/* Modals */}
         <AnimatePresence>
-          {isPrivacyOpen && (
-            <PrivacyModal isOpen={isPrivacyOpen} onClose={() => setIsPrivacyOpen(false)} />
-          )}
+          {isPrivacyOpen && <PrivacyModal isOpen onClose={() => setIsPrivacyOpen(false)} />}
         </AnimatePresence>
         <AnimatePresence>
           {isDeleteOpen && (
-            <DeleteAccountModal
-              isOpen={isDeleteOpen}
-              onClose={() => setIsDeleteOpen(false)}
-              onConfirm={handleDeleteAccount}
-            />
+            <DeleteAccountModal isOpen onClose={() => setIsDeleteOpen(false)} onConfirm={handleDeleteAccount} />
           )}
         </AnimatePresence>
         <AnimatePresence>
           {isConfirmOpen && (
             <ConfirmModal
-              isOpen={isConfirmOpen}
+              isOpen
               onClose={() => setIsConfirmOpen(false)}
               onConfirm={confirmConfig.onConfirm}
               title={confirmConfig.title}
@@ -983,11 +754,7 @@ export default function App() {
       {renderContent()}
       <AnimatePresence>
         {isDebugOpen && (
-          <DebugLogsModal
-            isOpen={isDebugOpen}
-            onClose={() => setIsDebugOpen(false)}
-            logs={logs}
-          />
+          <DebugLogsModal isOpen onClose={() => setIsDebugOpen(false)} logs={logs} />
         )}
       </AnimatePresence>
     </>
