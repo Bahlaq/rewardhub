@@ -1,27 +1,55 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// android/app/build.gradle
+//
+// IDENTITY CROSS-CHECK:
+//   applicationId  → com.rewardhub.official.app
+//   Must match:
+//     AndroidManifest.xml  → package attribute              ✓
+//     google-services.json → android_client_info.package_name ✓
+//     capacitor.config.ts  → appId                         ✓
+//     Firebase Console     → Android App package name      ✓
+//     Google Play Console  → Application ID (if published) ✓
+// ═══════════════════════════════════════════════════════════════════════════
+
 apply plugin: 'com.android.application'
-apply plugin: 'com.google.gms.google-services'
+apply plugin: 'com.google.gms.google-services'  // MUST be last among apply plugins
 
 android {
     namespace "com.rewardhub.official.app"
     compileSdkVersion rootProject.ext.compileSdkVersion
+
     defaultConfig {
+        // ─── Package identity ───────────────────────────────────────────────
         applicationId "com.rewardhub.official.app"
-        minSdkVersion rootProject.ext.minSdkVersion
+
+        // ─── SDK versions ───────────────────────────────────────────────────
+        minSdkVersion    rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 8
-        versionName "8.0.2"
+
+        // ─── Version ────────────────────────────────────────────────────────
+        // versionCode must be incremented for every Play Store / Codemagic build.
+        // versionName is the human-readable string shown in the store.
+        versionCode 9
+        versionName "9.2.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        aaptOptions {
-             // Allows to pass through binary files without compression, or add your own extensions
-             // noCompress 'foo', 'bar'
-        }
     }
+
     buildTypes {
         release {
+            // Disable minification for now — enable only after testing ProGuard rules
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+        debug {
+            // Debug builds keep the same applicationId so Google Sign-In SHA-1 works
+            applicationIdSuffix ""
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 }
 
@@ -40,14 +68,5 @@ dependencies {
     implementation project(':capacitor-cordova-android-plugins')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidTestJunitVersion"
-    androidTestImplementation "androidx.test.espresso:espresso-core:$indigoEspressoCoreVersion"
-}
-
-try {
-    def servicesJSON = file('google-services.json')
-    if (servicesJSON.text) {
-        apply plugin: 'com.google.gms.google-services'
-    }
-} catch(Exception e) {
-    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidEspressoCoreVersion"
 }
