@@ -18,12 +18,16 @@
     ],
     "headers": [
       {
+        "source": "/app-ads.txt",
+        "headers": [
+          { "key": "Content-Type",  "value": "text/plain" },
+          { "key": "Cache-Control", "value": "public, max-age=86400" }
+        ]
+      },
+      {
         "source": "/privacy.html",
         "headers": [
-          {
-            "key": "Cache-Control",
-            "value": "public, max-age=86400"
-          }
+          { "key": "Cache-Control", "value": "public, max-age=86400" }
         ]
       }
     ]
