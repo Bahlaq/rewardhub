@@ -6,267 +6,232 @@ workflows:
 
     environment:
       groups:
-        - android_signing   # APP_VERSION_CODE, CM_KEYSTORE, CM_KEY_PASSWORD, CM_KEYSTORE_PASSWORD, CM_KEY_ALIAS
-        - admob_secrets     # NODE_VERSION, VITE_ADMOB_APP_ID, VITE_ADMOB_BANNER_ID, VITE_ADMOB_REWARDED_ID, VITE_ADMOB_APP_OPEN_ID
-        - firebase_secrets  # GOOGLE_SERVICES_JSON (base64-encoded), TEMP_KEY
+        - android_signing
+        - admob_secrets
+        - firebase_secrets
       node: 22
       java: 21
 
     scripts:
 
-      # ─── Step 1: Install Node 22 ───────────────────────────────────────────
+      # ─────────────────────────────────────────────────────────────────────
+      # STEP 1 — Install Node 22
+      # ─────────────────────────────────────────────────────────────────────
       - name: Install Node 22
         script: |
           brew install node@22 || true
           brew link --overwrite node@22 || true
-          node -v
+          echo "Node: $(node -v)"
+          echo "NPM:  $(npm -v)"
 
-      # ─── Step 2: Install dependencies ────────────────────────────────────
-      - name: Install dependencies
+      # ─────────────────────────────────────────────────────────────────────
+      # STEP 2 — Install npm dependencies
+      # ─────────────────────────────────────────────────────────────────────
+      - name: Install npm dependencies
         script: |
           npm install --legacy-peer-deps
 
-      # ─── Step 3: Build web assets + sync Capacitor ───────────────────────
-      - name: Build and Sync Capacitor
+      # ─────────────────────────────────────────────────────────────────────
+      # STEP 3 — Build web assets with Vite
+      # Produces the dist/ folder that Firebase Hosting will serve.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: Build web assets
         script: |
-          set -e  # Stop immediately on any error
-
-          # ── 3a: Build Vite web assets ──────────────────────────────────────
-          echo "🏗️  Building web assets..."
           npm run build
-
           if [ ! -d "dist" ]; then
-            echo "❌ ERROR: dist/ was not created. npm run build failed."
+            echo "ERROR: dist/ not found after build"
             exit 1
           fi
-          echo "✅ dist/ created successfully."
+          echo "dist/ contents:"
+          ls dist/
 
-          # ── 3b: Add Android platform ──────────────────────────────────────
-          echo "📱 Adding Android platform..."
+      # ─────────────────────────────────────────────────────────────────────
+      # STEP 4 — Deploy to Firebase Hosting
+      # Uses FIREBASE_TOKEN from firebase_secrets group.
+      # Serves dist/ to https://rewardhub-1ea27.web.app
+      # This must run AFTER the build step so dist/ exists.
+      # Privacy policy will be live at: /privacy.html
+      # app-ads.txt will be live at:    /app-ads.txt
+      # ─────────────────────────────────────────────────────────────────────
+      - name: Deploy to Firebase Hosting
+        script: |
+          npx firebase-tools deploy \
+            --only hosting \
+            --token "$FIREBASE_TOKEN" \
+            --non-interactive \
+            --project rewardhub-1ea27
+          echo "Live URLs:"
+          echo "  https://rewardhub-1ea27.web.app/privacy.html"
+          echo "  https://rewardhub-1ea27.web.app/app-ads.txt"
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STEP 5 — Add Capacitor Android platform
+      # android/ is in .gitignore so it must be regenerated every build.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: Add Android platform
+        script: |
           rm -rf android
           npx cap add android
+          echo "Android platform added."
 
-          # ── 3c: Generate app icons and splash screens ─────────────────────
-          echo "🎨 Generating assets..."
+      # ─────────────────────────────────────────────────────────────────────
+      # STEP 6 — Generate app icons and splash screen
+      # ─────────────────────────────────────────────────────────────────────
+      - name: Generate app assets
+        script: |
           mkdir -p assets
-
           if [ -f "assets/icon.png" ]; then
-            echo "✅ Using icon.png from assets/"
+            echo "Using icon.png from repo"
             cp assets/icon.png assets/icon-only.png
             cp assets/icon.png assets/icon-foreground.png
             cp assets/icon.png assets/splash.png
-            if [ ! -f "assets/icon-background.png" ]; then
+            [ ! -f "assets/icon-background.png" ] && \
               curl -sL -o assets/icon-background.png \
-                "https://placehold.co/1024x1024/7c3aed/7c3aed/png" || true
-            fi
+                "https://placehold.co/1024x1024/4f46e5/4f46e5/png" || true
           else
-            echo "⚠️  No icon.png found — using placeholder icons."
-            curl -sL -o assets/icon-only.png \
-              "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=7c3aed&fontSize=50&fontWeight=900&radius=20" || true
-            cp assets/icon-only.png assets/icon.png || true
-            curl -sL -o assets/icon-foreground.png \
-              "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=transparent&fontSize=50&fontWeight=900" || true
+            echo "No icon.png — using placeholder"
+            curl -sL -o assets/icon.png \
+              "https://api.dicebear.com/7.x/initials/png?seed=RH&backgroundColor=4f46e5&fontSize=50&fontWeight=900&radius=20" || true
+            cp assets/icon.png assets/icon-only.png
+            cp assets/icon.png assets/icon-foreground.png
             curl -sL -o assets/icon-background.png \
-              "https://placehold.co/1024x1024/7c3aed/7c3aed/png" || true
+              "https://placehold.co/1024x1024/4f46e5/4f46e5/png" || true
             curl -sL -o assets/splash.png \
-              "https://api.dicebear.com/7.x/initials/png?seed=RewardHub&backgroundColor=7c3aed&fontSize=30&fontWeight=900" || true
+              "https://api.dicebear.com/7.x/initials/png?seed=RH&backgroundColor=4f46e5&fontSize=30&fontWeight=900" || true
           fi
-
           npx @capacitor/assets generate --android --assetPath assets || true
 
-          # ── 3d: Sync Capacitor plugins ────────────────────────────────────
-          echo "🔄 Running cap sync..."
+      # ─────────────────────────────────────────────────────────────────────
+      # STEP 7 — Sync Capacitor plugins to Android
+      # ─────────────────────────────────────────────────────────────────────
+      - name: Sync Capacitor
+        script: |
           npx cap sync android
+          echo "Capacitor sync done."
 
-          # ── 3e: Inject google-services.json ──────────────────────────────
-          # Priority 1: Codemagic Secret (GOOGLE_SERVICES_JSON = base64 of the file)
-          # Priority 2: google-services.json committed to root of the repo
-          echo "🔑 Injecting google-services.json..."
-          if [ ! -z "$GOOGLE_SERVICES_JSON" ]; then
-            echo "  → Using GOOGLE_SERVICES_JSON secret from Codemagic"
-            echo "$GOOGLE_SERVICES_JSON" | base64 --decode > android/app/google-services.json
-            echo "  ✅ google-services.json injected from secret."
+      # ─────────────────────────────────────────────────────────────────────
+      # STEP 8 — Inject google-services.json
+      # GOOGLE_SERVICES_JSON is the base64-encoded content of your file.
+      # Set it in Codemagic → Settings → Environment variables
+      # Group: firebase_secrets  |  Mark as Secret: YES
+      #
+      # Base64 value (copy the entire line below as the variable value):
+      # ewogICJwcm9qZWN0X2luZm8iOiB7CiAgICAicHJvamVjdF9udW1iZXIiOiAiNTYzODYxMzcxMzA3IiwKICAgICJwcm9qZWN0X2lkIjogInJld2FyZGh1Yi0xZWEyNyIsCiAgICAic3RvcmFnZV9idWNrZXQiOiAicmV3YXJkaHViLTFlYTI3LmZpcmViYXNlc3RvcmFnZS5hcHAiCiAgfSwKICAiY2xpZW50IjogWwogICAgewogICAgICAiY2xpZW50X2luZm8iOiB7CiAgICAgICAgIm1vYmlsZXNka19hcHBfaWQiOiAiMTo1NjM4NjEzNzEzMDc6YW5kcm9pZDozMDE1NjU4MWZhNDBiMzNjMjQ3YWVlIiwKICAgICAgICAiYW5kcm9pZF9jbGllbnRfaW5mbyI6IHsKICAgICAgICAgICJwYWNrYWdlX25hbWUiOiAiY29tLnJld2FyZGh1Yi5vZmZpY2lhbC5hcHAiCiAgICAgICAgfQogICAgICB9LAogICAgICAib2F1dGhfY2xpZW50IjogWwogICAgICAgIHsKICAgICAgICAgICJjbGllbnRfaWQiOiAiNTYzODYxMzcxMzA3LWg3NWdmdG1iY3JjODhlNmloYmE3ZHMyNXRxY2oydmtvLmFwcHMuZ29vZ2xldXNlcmNvbnRlbnQuY29tIiwKICAgICAgICAgICJjbGllbnRfdHlwZSI6IDEsCiAgICAgICAgICAiYW5kcm9pZF9pbmZvIjogewogICAgICAgICAgICAicGFja2FnZV9uYW1lIjogImNvbS5yZXdhcmRodWIub2ZmaWNpYWwuYXBwIiwKICAgICAgICAgICAgImNlcnRpZmljYXRlX2hhc2giOiAiNTZmYmJjNTg5ZDg4NmRiOTA5ZDQ5NThlNDIyY2Q2YWM1YWYwYTk0ZSIKICAgICAgICAgIH0KICAgICAgICB9LAogICAgICAgIHsKICAgICAgICAgICJjbGllbnRfaWQiOiAiNTYzODYxMzcxMzA3LXJnam44ZXRocjVwanA4ZDltdWkyNDNrYnBndWVzM3RjLmFwcHMuZ29vZ2xldXNlcmNvbnRlbnQuY29tIiwKICAgICAgICAgICJjbGllbnRfdHlwZSI6IDEsCiAgICAgICAgICAiYW5kcm9pZF9pbmZvIjogewogICAgICAgICAgICAicGFja2FnZV9uYW1lIjogImNvbS5yZXdhcmRodWIub2ZmaWNpYWwuYXBwIiwKICAgICAgICAgICAgImNlcnRpZmljYXRlX2hhc2giOiAiMzBmNjBhODJhZGY0OWM1ZjBmOWMwMTliMzk4ZDFlYzA2NjhlZjVhOSIKICAgICAgICAgIH0KICAgICAgICB9LAogICAgICAgIHsKICAgICAgICAgICJjbGllbnRfaWQiOiAiNTYzODYxMzcxMzA3LWNnM2JubHQ2ajM0cjg4b2RndG41dDU4MTZvNmRsY2hjLmFwcHMuZ29vZ2xldXNlcmNvbnRlbnQuY29tIiwKICAgICAgICAgICJjbGllbnRfdHlwZSI6IDMKICAgICAgICB9CiAgICAgIF0sCiAgICAgICJhcGlfa2V5IjogWwogICAgICAgIHsKICAgICAgICAgICJjdXJyZW50X2tleSI6ICJBSXphU3lBbmhMWERrT1d2Q3hDaU5zbUQyYURlR0lNbWR3LWhfcG8iCiAgICAgICAgfQogICAgICBdLAogICAgICAic2VydmljZXMiOiB7CiAgICAgICAgImFwcGludml0ZV9zZXJ2aWNlIjogewogICAgICAgICAgIm90aGVyX3BsYXRmb3JtX29hdXRoX2NsaWVudCI6IFsKICAgICAgICAgICAgewogICAgICAgICAgICAgICJjbGllbnRfaWQiOiAiNTYzODYxMzcxMzA3LWNnM2JubHQ2ajM0cjg4b2RndG41dDU4MTZvNmRsY2hjLmFwcHMuZ29vZ2xldXNlcmNvbnRlbnQuY29tIiwKICAgICAgICAgICAgICAiY2xpZW50X3R5cGUiOiAzCiAgICAgICAgICAgIH0KICAgICAgICAgIF0KICAgICAgICB9CiAgICAgIH0KICAgIH0KICBdLAogICJjb25maWd1cmF0aW9uX3ZlcnNpb24iOiAiMSIKfQ==
+      # ─────────────────────────────────────────────────────────────────────
+      - name: Inject google-services.json
+        script: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            echo "$GOOGLE_SERVICES_JSON" | base64 --decode \
+              > android/app/google-services.json
+            echo "Injected from Codemagic secret."
           elif [ -f "google-services.json" ]; then
-            echo "  → Copying google-services.json from repo root"
             cp google-services.json android/app/google-services.json
-            echo "  ✅ google-services.json copied from repo."
+            echo "Copied from repo root."
           else
-            echo "  ❌ WARNING: google-services.json not found!"
-            echo "     Google Sign-In will NOT work without this file."
-            echo "     Add GOOGLE_SERVICES_JSON as a Codemagic secret (base64 encoded)."
+            echo "ERROR: GOOGLE_SERVICES_JSON secret is not set."
+            echo "Google Sign-In will fail without this file."
+            exit 1
           fi
+          # Quick sanity check
+          python3 -c "
+          import json
+          with open('android/app/google-services.json') as f:
+              d = json.load(f)
+          pkg = d['client'][0]['client_info']['android_client_info']['package_name']
+          assert pkg == 'com.rewardhub.official.app', f'Wrong package: {pkg}'
+          print(f'Verified: {pkg}')
+          "
 
-          # ── 3f: Set version code and name ─────────────────────────────────
-          echo "🔢 Setting version..."
-          VERSION_CODE=${APP_VERSION_CODE:-9}
-          VERSION_NAME="9.2.0"
-          sed -i '' "s/versionCode [0-9]*/versionCode ${VERSION_CODE}/g" \
-            android/app/build.gradle || \
-          sed -i "s/versionCode [0-9]*/versionCode ${VERSION_CODE}/g" \
-            android/app/build.gradle
-          sed -i '' "s/versionName \"[0-9.]*\"/versionName \"${VERSION_NAME}\"/g" \
-            android/app/build.gradle || \
-          sed -i "s/versionName \"[0-9.]*\"/versionName \"${VERSION_NAME}\"/g" \
-            android/app/build.gradle
-
-          # ── 3g: Fix Gradle wrapper to 8.7 (Java 21 compatibility) ─────────
-          echo "🛠️  Patching Gradle wrapper..."
-          cat > android/gradle/wrapper/gradle-wrapper.properties << 'GRADLE'
+      # ─────────────────────────────────────────────────────────────────────
+      # STEP 9 — Patch all Gradle files
+      # Fixes every known issue with the generated android/ folder.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: Patch Gradle files
+        script: |
+          # ── 9a: Pin Gradle to 8.7 (required for Java 21) ──────────────────
+          cat > android/gradle/wrapper/gradle-wrapper.properties << 'EOF'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
           distributionUrl=https\://services.gradle.org/distributions/gradle-8.7-all.zip
           zipStoreBase=GRADLE_USER_HOME
           zipStorePath=wrapper/dists
-          GRADLE
+          EOF
+          echo "Gradle wrapper → 8.7"
 
-          # ── 3h: Fix root build.gradle — AGP version + no duplicate plugin ──
-          echo "🛠️  Patching root build.gradle..."
-          # Upgrade Android Gradle Plugin to 8.2.1 (compatible with Gradle 8.7)
-          sed -i '' \
-            "s/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:8.2.1/g" \
-            android/build.gradle 2>/dev/null || \
-          sed -i \
-            "s/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:8.2.1/g" \
+          # ── 9b: Pin Android Gradle Plugin to 8.2.1 ────────────────────────
+          sed -i "s|com.android.tools.build:gradle:[0-9.]*|com.android.tools.build:gradle:8.2.1|g" \
             android/build.gradle
+          echo "AGP → 8.2.1"
 
-          # Add Google Services classpath if not already present
+          # ── 9c: Add google-services classpath to ROOT build.gradle ─────────
           if ! grep -q "com.google.gms:google-services" android/build.gradle; then
-            sed -i '' '/dependencies {/a \
-              classpath "com.google.gms:google-services:4.4.1"' \
-              android/build.gradle 2>/dev/null || \
-            sed -i '/dependencies {/a \        classpath "com.google.gms:google-services:4.4.1"' \
+            sed -i '/dependencies {/a\        classpath "com.google.gms:google-services:4.4.1"' \
               android/build.gradle
+            echo "google-services classpath added to root build.gradle"
           fi
 
-          # ── 3i: Fix app/build.gradle ──────────────────────────────────────
-          echo "🛠️  Patching app/build.gradle..."
-
-          # FIX 1: Remove the duplicate try/catch google-services block
-          # The plugin is already applied at the top by Capacitor — the try/catch
-          # at the bottom is a duplicate that causes a Gradle error.
-          python3 - << 'PYFIX'
-          import re, sys
-          with open('android/app/build.gradle', 'r') as f:
+          # ── 9d: FIX 1 — Remove DUPLICATE google-services plugin block ──────
+          # Capacitor adds `apply plugin` at the top of app/build.gradle AND
+          # has a try/catch block at the bottom that applies it a second time.
+          # The duplicate causes: "Plugin ... was already applied"
+          python3 << 'PYFIX'
+          import re
+          path = 'android/app/build.gradle'
+          with open(path) as f:
               content = f.read()
-          # Remove the duplicate try { apply plugin: 'com.google.gms.google-services' } block
-          pattern = r"\ntry \{[\s\S]*?apply plugin: 'com\.google\.gms\.google-services'[\s\S]*?\} catch\(Exception e\) \{[\s\S]*?\}"
-          cleaned = re.sub(pattern, '', content)
-          with open('android/app/build.gradle', 'w') as f:
-              f.write(cleaned)
-          print("  ✅ Duplicate google-services plugin block removed.")
+          # Remove the duplicate try { apply plugin: 'com.google.gms...' } catch block
+          cleaned = re.sub(
+              r'\ntry\s*\{[^{}]*apply\s+plugin\s*:\s*[\'"]com\.google\.gms\.google-services[\'"][^{}]*\}\s*catch\s*\([^)]*\)\s*\{[^{}]*\}',
+              '',
+              content
+          )
+          if cleaned != content:
+              with open(path, 'w') as f:
+                  f.write(cleaned)
+              print("FIXED: Duplicate google-services try/catch block removed.")
+          else:
+              print("OK: No duplicate block found.")
           PYFIX
 
-          # FIX 2: Fix the espresso variable name typo
-          # indigoEspressoCoreVersion → androidEspressoCoreVersion
-          sed -i '' \
-            "s/indigoEspressoCoreVersion/androidEspressoCoreVersion/g" \
-            android/app/build.gradle 2>/dev/null || \
-          sed -i \
-            "s/indigoEspressoCoreVersion/androidEspressoCoreVersion/g" \
+          # ── 9e: FIX 2 — Fix Espresso variable name typo ────────────────────
+          # $indigoEspressoCoreVersion does not exist in variables.gradle
+          # Correct name is $androidEspressoCoreVersion
+          sed -i "s/indigoEspressoCoreVersion/androidEspressoCoreVersion/g" \
             android/app/build.gradle
-          echo "  ✅ Espresso variable name fixed."
+          echo "FIXED: Espresso variable name corrected."
 
-          # Ensure google-services plugin is applied in app/build.gradle
-          if ! grep -q "com.google.gms.google-services" android/app/build.gradle; then
+          # ── 9f: Ensure google-services plugin IS applied in app/build.gradle
+          if ! grep -q "apply plugin: 'com.google.gms.google-services'" \
+              android/app/build.gradle; then
             echo "" >> android/app/build.gradle
-            echo "apply plugin: 'com.google.gms.google-services'" >> android/app/build.gradle
-            echo "  ✅ google-services plugin applied to app/build.gradle."
+            echo "apply plugin: 'com.google.gms.google-services'" >> \
+              android/app/build.gradle
+            echo "google-services plugin applied to app/build.gradle"
           fi
 
-          # ── 3j: Set SDK versions ──────────────────────────────────────────
-          echo "🛠️  Setting SDK versions..."
+          # ── 9g: Set compileSdk and targetSdk to 35 ────────────────────────
           if [ -f "android/variables.gradle" ]; then
-            sed -i '' "s/compileSdkVersion = [0-9]*/compileSdkVersion = 35/g" \
-              android/variables.gradle 2>/dev/null || \
-            sed -i "s/compileSdkVersion = [0-9]*/compileSdkVersion = 35/g" \
+            sed -i "s/compileSdkVersion = [0-9]*/compileSdkVersion = 35/" \
               android/variables.gradle
-            sed -i '' "s/targetSdkVersion = [0-9]*/targetSdkVersion = 35/g" \
-              android/variables.gradle 2>/dev/null || \
-            sed -i "s/targetSdkVersion = [0-9]*/targetSdkVersion = 35/g" \
+            sed -i "s/targetSdkVersion = [0-9]*/targetSdkVersion = 35/" \
               android/variables.gradle
+            echo "SDK versions → 35"
           fi
 
-          # ── 3k: Patch AndroidManifest.xml ────────────────────────────────
-          echo "🛠️  Patching AndroidManifest.xml..."
+          # ── 9h: Add AD_ID permission to AndroidManifest if missing ─────────
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-
-          # Add AD_ID permission if not present
           if ! grep -q "AD_ID" "$MANIFEST"; then
-            sed -i '' \
-              's|<uses-permission android:name="android.permission.INTERNET" />|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />|' \
-              "$MANIFEST" 2>/dev/null || \
             sed -i \
               's|<uses-permission android:name="android.permission.INTERNET" />|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />|' \
               "$MANIFEST"
-            echo "  ✅ AD_ID permission added."
+            echo "AD_ID permission added."
           fi
 
-          # ── 3l: Add signing config to app/build.gradle ───────────────────
-          echo "🛠️  Adding signing config..."
-          if ! grep -q "signingConfigs" android/app/build.gradle; then
-            sed -i '' '/buildTypes {/i \
-            signingConfigs {\
-                release {\
-                    storeFile file(System.getenv("CM_KEYSTORE_PATH") ?: "rewardhub-key.jks")\
-                    storePassword System.getenv("CM_KEYSTORE_PASSWORD") ?: ""\
-                    keyAlias System.getenv("CM_KEY_ALIAS") ?: ""\
-                    keyPassword System.getenv("CM_KEY_PASSWORD") ?: ""\
-                }\
-            }' android/app/build.gradle 2>/dev/null || \
-            python3 - << 'PYSIGN'
-          with open('android/app/build.gradle', 'r') as f:
-              content = f.read()
-          signing_block = """
-              signingConfigs {
-                  release {
-                      storeFile file(System.getenv("CM_KEYSTORE_PATH") ?: "rewardhub-key.jks")
-                      storePassword System.getenv("CM_KEYSTORE_PASSWORD") ?: ""
-                      keyAlias System.getenv("CM_KEY_ALIAS") ?: ""
-                      keyPassword System.getenv("CM_KEY_PASSWORD") ?: ""
-                  }
-              }
-          """
-          content = content.replace('    buildTypes {', signing_block + '    buildTypes {', 1)
-          with open('android/app/build.gradle', 'w') as f:
-              f.write(content)
-          print("  ✅ Signing config added via Python.")
-          PYSIGN
-          fi
+          echo "All patches complete."
 
-          echo "✅ All patches applied."
-
-      # ─── Step 4: Build signed APK + AAB ──────────────────────────────────
-      - name: Build Signed Android (APK and AAB)
+      # ─────────────────────────────────────────────────────────────────────
+      # STEP 10 — Set version code and name
+      # ─────────────────────────────────────────────────────────────────────
+      - name: Set version
         script: |
-          set -e
-
-          # Decode keystore from Codemagic secret
-          echo "🔑 Decoding keystore..."
-          echo "$CM_KEYSTORE" | base64 --decode > "$FCI_BUILD_DIR/android/app/rewardhub-key.jks"
-          echo "✅ Keystore decoded."
-
-          cd android
-          chmod +x gradlew
-
-          echo "🏗️  Building release APK and AAB..."
-          ./gradlew assembleRelease bundleRelease \
-            -Pandroid.injected.signing.store.file="$FCI_BUILD_DIR/android/app/rewardhub-key.jks" \
-            -Pandroid.injected.signing.store.password="$CM_KEYSTORE_PASSWORD" \
-            -Pandroid.injected.signing.key.alias="$CM_KEY_ALIAS" \
-            -Pandroid.injected.signing.key.password="$CM_KEY_PASSWORD" \
-            --no-daemon \
-            --stacktrace
-          echo "✅ Build complete."
-
-    artifacts:
-      - android/app/build/outputs/bundle/release/*.aab
-      - android/app/build/outputs/apk/release/*.apk
-      - android/app/build/outputs/mapping/release/mapping.txt
-
-    publishing:
-      email:
-        recipients:
-          - m.bahlaq94@gmail.com
-        notify:
-          success: true
-          failure: true
+          VC="${APP_VERSION_CODE:-
