@@ -5,16 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
     <!--
-      google-signin-client_id MUST match WEB_CLIENT_ID in firebase.ts and
-      serverClientId in capacitor.config.ts.
-      Previous value was WRONG (3moj6n...) — corrected to cg3bnlt6j...
+      This client_id must match ALL FOUR locations:
+        1. Here  (index.html)
+        2. firebase.ts          → PRODUCTION_WEB_CLIENT_ID
+        3. capacitor.config.ts  → GoogleAuth.serverClientId
+        4. strings.xml          → server_client_id
     -->
     <meta
       name="google-signin-client_id"
       content="563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com"
     />
 
-    <title>RewardHub</title>
+    <title>RewardHub — Earn While You Play</title>
   </head>
   <body>
     <div id="root"></div>
