@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { AdLog, Offer } from '../types';
 import { firebaseService } from '../services/firebase';
 import { Capacitor } from '@capacitor/core';
@@ -29,9 +29,6 @@ async function initAdMob(): Promise<boolean> {
       AdMobPlugin = mod.AdMob;
       
       await AdMobPlugin.initialize({
-        // Version 9.3.0: Initialize with test device IDs removed for production
-        // Add your test device IDs here during development:
-        // testingDevices: ['YOUR_DEVICE_ID'],
         initializeForTesting: false,
       });
 
@@ -56,7 +53,7 @@ export function useAds(uid?: string) {
   const bannerShownRef = useRef(false);
   const isNative = Capacitor.isNativePlatform();
 
-  // ─── Offer Listener (unchanged) ──────────────────────────────────
+  // ─── Offer Listener ──────────────────────────────────────────────
   const onOffersChange = useCallback(() => {
     setIsLoading(true);
     const unsubscribe = firebaseService.onOffersChange((data) => {
@@ -84,9 +81,6 @@ export function useAds(uid?: string) {
   }, []);
 
   // ─── Banner Ad Control ───────────────────────────────────────────
-  // Version 9.3.0: Show/hide real AdMob banner. On web, this is a no-op
-  // and the placeholder banner in HomeScreen handles it visually.
-
   const showBanner = useCallback(async () => {
     if (!isNative) {
       setIsBannerVisible(true);
@@ -106,8 +100,8 @@ export function useAds(uid?: string) {
           adId: AD_IDS.banner,
           adSize: 'ADAPTIVE_BANNER',
           position: 'BOTTOM_CENTER',
-          margin: 100, // px above bottom to sit above navbar
-          isTesting: !import.meta.env.VITE_ADMOB_BANNER_ID, // test mode if no real ID
+          margin: 100,
+          isTesting: !import.meta.env.VITE_ADMOB_BANNER_ID,
         });
         bannerShownRef.current = true;
         addLog('banner', 'show', 'Banner displayed');
@@ -134,9 +128,6 @@ export function useAds(uid?: string) {
   }, [isNative]);
 
   // ─── Rewarded Ad ─────────────────────────────────────────────────
-  // Version 9.3.0: On native → real AdMob rewarded ad
-  //                On web    → simulated countdown (AdMob has no web SDK)
-
   const showNativeRewarded = useCallback(async (): Promise<boolean> => {
     const ready = await initAdMob();
     if (!ready || !AdMobPlugin) return false;
@@ -144,15 +135,12 @@ export function useAds(uid?: string) {
     try {
       addLog('rewarded', 'load', 'Preparing rewarded ad');
       
-      // Prepare (preload) the rewarded ad
-      const prepOpts = {
+      await AdMobPlugin.prepareRewardVideoAd({
         adId: AD_IDS.rewarded,
         isTesting: !import.meta.env.VITE_ADMOB_REWARDED_ID,
-      };
-      await AdMobPlugin.prepareRewardVideoAd(prepOpts);
+      });
       addLog('rewarded', 'show', 'Showing rewarded ad');
 
-      // Show it — this returns a promise that resolves with reward info
       const rewardResult = await AdMobPlugin.showRewardVideoAd();
       console.log('[AdMob] Rewarded ad result:', rewardResult);
       addLog('rewarded', 'reward', 'User completed rewarded ad');
@@ -165,7 +153,6 @@ export function useAds(uid?: string) {
   }, [addLog]);
 
   const simulateAd = useCallback(async (type: AdLog['type']): Promise<boolean> => {
-    // Web-only simulated countdown (used by AdSimulatorModal)
     addLog(type, 'load');
     await new Promise(resolve => setTimeout(resolve, 1000));
     addLog(type, 'show');
@@ -183,14 +170,12 @@ export function useAds(uid?: string) {
     let success = false;
 
     if (isNative) {
-      // Try real AdMob first; fall back to simulated if it fails
       success = await showNativeRewarded();
       if (!success) {
         console.warn('[AdMob] Native rewarded failed, falling back to simulated');
         success = await simulateAd('rewarded');
       }
     } else {
-      // Web always uses simulated ads
       success = await simulateAd('rewarded');
     }
 
@@ -207,9 +192,6 @@ export function useAds(uid?: string) {
   }, [isNative, showNativeRewarded, simulateAd, uid]);
 
   // ─── App Open Ad ─────────────────────────────────────────────────
-  // Version 9.3.0: Actually loads and shows an App Open ad on native.
-  // On web this is a no-op (AdMob doesn't support web).
-
   const showAppOpenAd = useCallback(async () => {
     if (!isNative) {
       addLog('app_open', 'load', 'Skipped — web platform (AdMob is mobile-only)');
@@ -234,14 +216,12 @@ export function useAds(uid?: string) {
       await AdMobPlugin.showAppOpenAd();
       addLog('app_open', 'reward', 'App open ad completed');
     } catch (err: any) {
-      // App Open ads frequently fail (no fill, etc.) — don't crash the app
       console.warn('[AdMob] App Open ad error:', err);
       addLog('app_open', 'error', err.message || String(err));
     }
   }, [isNative, addLog]);
 
-  // ─── Boost Claim (unchanged) ─────────────────────────────────────
-
+  // ─── Boost Claim ─────────────────────────────────────────────────
   const claimBoostReward = useCallback(async () => {
     if (!uid) return null;
     try {
@@ -262,7 +242,6 @@ export function useAds(uid?: string) {
     offers,
     isLoading,
     onOffersChange,
-    // Version 9.3.0: New exports for ad lifecycle control
     showBanner,
     hideBanner,
     isBannerVisible,
