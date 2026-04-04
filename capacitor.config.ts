@@ -22,7 +22,7 @@ const config: CapacitorConfig = {
       forceCodeForRefreshToken: true
       // Version 9.3.0: REMOVED redirectUri — it breaks native Android OAuth.
       // Native Google Sign-In uses intent-based auth, not redirect URIs.
-      // The redirect URI is only needed for web popup auth (handled by Firebase SDK).
+      // The redirect URI is only needed for web popup auth (handled by Firebase SDK automatically).
     }
   }
 };
