@@ -3,301 +3,180 @@ workflows:
     name: Android Capacitor Release
     max_build_duration: 60
     instance_type: mac_mini_m1
-
     environment:
       groups:
-        - android_signing
-        - admob_secrets
-        - firebase_secrets
+        - admob_secrets # Create this group in Codemagic UI
+        - firebase_secrets # Create this group in Codemagic UI
+        - android_signing # Create this group in Codemagic UI
       node: 22
       java: 21
-
     scripts:
-
       - name: Install Node 22
         script: |
-          brew install node@22 || true
-          brew link --overwrite node@22 || true
-          echo "Node: $(node -v)"
-          echo "NPM:  $(npm -v)"
-
-      - name: Install npm dependencies
+          brew install node@22
+          brew link --overwrite node@22
+          node -v # To verify installation
+      - name: Install dependencies
+        script: npm install --legacy-peer-deps
+      - name: Build and Sync Capacitor
         script: |
-          npm install --legacy-peer-deps
-
-      - name: Build web assets
-        script: |
+          # 🏗️ Build Web Assets
           npm run build
+          
+          # 🔍 Verify dist exists
           if [ ! -d "dist" ]; then
-            echo "ERROR: dist/ not created"
+            echo "❌ Error: dist directory was not created by npm run build"
             exit 1
           fi
-          ls dist/
-
-      - name: Deploy to Firebase Hosting
-        script: |
-          npx firebase-tools deploy \
-            --only hosting \
-            --token "$FIREBASE_TOKEN" \
-            --non-interactive \
-            --project rewardhub-1ea27
-          echo "Live: https://rewardhub-1ea27.web.app"
-
-      - name: Add Android platform
-        script: |
+          
+          # 📱 Prepare Android Project
           rm -rf android
           npx cap add android
-
-      - name: Generate app assets
-        script: |
+          
+          # 🎨 Generate Assets (Ensure assets directory exists)
           mkdir -p assets
+          
+          # Use user-provided icon.png if it exists
           if [ -f "assets/icon.png" ]; then
+            echo "✅ Using user-provided icon.png"
             cp assets/icon.png assets/icon-only.png
             cp assets/icon.png assets/icon-foreground.png
             cp assets/icon.png assets/splash.png
-            [ ! -f "assets/icon-background.png" ] && \
-              curl -sL -o assets/icon-background.png \
-                "https://placehold.co/1024x1024/4f46e5/4f46e5/png" || true
+            # Create a simple background if it doesn't exist
+            if [ ! -f "assets/icon-background.png" ]; then
+              curl -L -o assets/icon-background.png "https://placehold.co/1024x1024/7c3aed/7c3aed/png"
+            fi
           else
-            curl -sL -o assets/icon.png \
-              "https://api.dicebear.com/7.x/initials/png?seed=RH&backgroundColor=4f46e5&fontSize=50&fontWeight=900&radius=20" || true
-            cp assets/icon.png assets/icon-only.png
-            cp assets/icon.png assets/icon-foreground.png
-            curl -sL -o assets/icon-background.png \
-              "https://placehold.co/1024x1024/4f46e5/4f46e5/png" || true
-            curl -sL -o assets/splash.png \
-              "https://api.dicebear.com/7.x/initials/png?seed=RH&backgroundColor=4f46e5&fontSize=30" || true
+            # Use high-quality placeholders if they don't exist
+            if [ ! -f "assets/icon-only.png" ]; then
+              curl -L -o assets/icon-only.png "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=7c3aed&fontSize=50&fontWeight=900&radius=20"
+            fi
+            cp assets/icon-only.png assets/icon.png
+            if [ ! -f "assets/icon-foreground.png" ]; then
+              curl -L -o assets/icon-foreground.png "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=transparent&fontSize=50&fontWeight=900"
+            fi
+            if [ ! -f "assets/icon-background.png" ]; then
+              curl -L -o assets/icon-background.png "https://placehold.co/1024x1024/7c3aed/7c3aed/png"
+            fi
+            if [ ! -f "assets/splash.png" ]; then
+              curl -L -o assets/splash.png "https://api.dicebear.com/7.x/initials/png?seed=RewardHub&backgroundColor=7c3aed&fontSize=30&fontWeight=900"
+            fi
           fi
-          npx @capacitor/assets generate --android --assetPath assets || true
-
-      - name: Sync Capacitor
-        script: |
+          
+          # Generate icons and splash screens
+          npx @capacitor/assets generate --android --assetPath assets
+          
+          # 🔄 Sync Capacitor
           npx cap sync android
-
-      - name: Inject google-services.json
-        script: |
-          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
-            echo "$GOOGLE_SERVICES_JSON" | base64 --decode > android/app/google-services.json
-            echo "Injected from Codemagic secret."
+          
+          # 🔑 Inject google-services.json
+          if [ ! -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "✅ Injecting google-services.json from environment variable"
+            echo $GOOGLE_SERVICES_JSON | base64 --decode > android/app/google-services.json
           elif [ -f "google-services.json" ]; then
+            echo "✅ Injecting google-services.json from root directory"
             cp google-services.json android/app/google-services.json
-            echo "Copied from repo root."
           else
-            echo "ERROR: GOOGLE_SERVICES_JSON secret not set and no file in repo."
-            exit 1
+            echo "⚠️ Warning: google-services.json not found. Google Sign-In might fail on Android."
           fi
-          python3 -c "
-          import json
-          with open('android/app/google-services.json') as f:
-              d = json.load(f)
-          pkg = d['client'][0]['client_info']['android_client_info']['package_name']
-          assert pkg == 'com.rewardhub.official.app', 'Package mismatch: ' + pkg
-          print('Verified:', pkg)
-          "
-
-      # ── CRITICAL: Write the complete AndroidManifest.xml via Python ─────────
-      # This replaces ALL sed-based manifest patching, which is fragile.
-      # Fixes:
-      #   1. singleCommunity → singleTask  (was causing startup crash)
-      #   2. AdActivity declared explicitly (required for AdMob fullscreen ads)
-      #   3. AdMob App ID hardcoded in meta-data (never missing)
-      #   4. AD_ID permission included
-      - name: Write correct AndroidManifest.xml
-        script: |
-          python3 << 'PYMANIFEST'
-          manifest = '''<?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-              package="com.rewardhub.official.app">
-
-              <application
-                  android:allowBackup="true"
-                  android:icon="@mipmap/ic_launcher"
-                  android:label="@string/app_name"
-                  android:roundIcon="@mipmap/ic_launcher_round"
-                  android:supportsRtl="true"
-                  android:theme="@style/AppTheme">
-
-                  <!--
-                      AdMob App ID — hardcoded to prevent build-script corruption.
-                      Must match: ca-app-pub-1560161047680443~4972275282
-                  -->
-                  <meta-data
-                      android:name="com.google.android.gms.ads.APPLICATION_ID"
-                      android:value="ca-app-pub-1560161047680443~4972275282"/>
-
-                  <!--
-                      AdActivity — REQUIRED for fullscreen rewarded ads.
-                      Without this declaration the ad overlay crashes on launch.
-                  -->
-                  <activity
-                      android:name="com.google.android.gms.ads.AdActivity"
-                      android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|uiMode|screenSize|smallestScreenSize"
-                      android:theme="@android:style/Theme.Translucent" />
-
-                  <activity
-                      android:name="com.rewardhub.official.app.MainActivity"
-                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
-                      android:label="@string/title_activity_main"
-                      android:launchMode="singleTask"
-                      android:theme="@style/AppTheme.NoActionBarLaunch"
-                      android:exported="true">
-
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-
-                  </activity>
-
-                  <provider
-                      android:name="androidx.core.content.FileProvider"
-                      android:authorities="${applicationId}.fileprovider"
-                      android:exported="false"
-                      android:grantUriPermissions="true">
-                      <meta-data
-                          android:name="android.support.FILE_PROVIDER_PATHS"
-                          android:resource="@xml/file_paths"></meta-data>
-                  </provider>
-
-              </application>
-
-              <uses-permission android:name="android.permission.INTERNET" />
-              <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
-
-          </manifest>
-          '''
-          path = 'android/app/src/main/AndroidManifest.xml'
-          with open(path, 'w') as f:
-              f.write(manifest)
-          print('AndroidManifest.xml written.')
-
-          # Verify
-          with open(path) as f:
-              content = f.read()
-          assert 'singleTask'                           in content, 'MISSING singleTask'
-          assert 'AdActivity'                           in content, 'MISSING AdActivity'
-          assert 'APPLICATION_ID'                       in content, 'MISSING AdMob meta-data'
-          assert '4972275282'                           in content, 'MISSING AdMob App ID'
-          assert 'AD_ID'                                in content, 'MISSING AD_ID permission'
-          assert 'singleCommunity'                  not in content, 'singleCommunity still present!'
-          print('All assertions passed.')
-          PYMANIFEST
-
-      - name: Patch Gradle files
-        script: |
-          # Pin Gradle to 8.7 (Java 21)
-          printf 'distributionBase=GRADLE_USER_HOME\ndistributionPath=wrapper/dists\ndistributionUrl=https\\://services.gradle.org/distributions/gradle-8.7-all.zip\nzipStoreBase=GRADLE_USER_HOME\nzipStorePath=wrapper/dists\n' \
-            > android/gradle/wrapper/gradle-wrapper.properties
-          echo "Gradle -> 8.7"
-
-          # AGP 8.2.1
-          sed -i "s|com.android.tools.build:gradle:[0-9.]*|com.android.tools.build:gradle:8.2.1|g" \
-            android/build.gradle
-          # google-services classpath
-          if ! grep -q "com.google.gms:google-services" android/build.gradle; then
-            sed -i '/dependencies {/a\        classpath "com.google.gms:google-services:4.4.1"' \
-              android/build.gradle
+          
+          # 🔑 Version 9.3.0: Inject server_client_id into strings.xml for native Google Sign-In
+          # The @codetrix-studio/capacitor-google-auth plugin reads this value from strings.xml
+          STRINGS_XML="android/app/src/main/res/values/strings.xml"
+          if [ -f "$STRINGS_XML" ]; then
+            if ! grep -q "server_client_id" "$STRINGS_XML"; then
+              sed -i '' 's|</resources>|    <string name="server_client_id">563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com</string>\n</resources>|' "$STRINGS_XML"
+              echo "✅ Injected server_client_id into strings.xml"
+            else
+              echo "ℹ️ server_client_id already present in strings.xml"
+            fi
+          else
+            echo "⚠️ strings.xml not found at $STRINGS_XML"
           fi
-
-          # Fix duplicate google-services plugin in app/build.gradle
-          python3 << 'PYFIX'
-          import re
-          path = 'android/app/build.gradle'
-          with open(path) as f:
-              content = f.read()
-          cleaned = re.sub(
-              r'\ntry\s*\{[^{}]*apply\s+plugin\s*:\s*[\'"]com\.google\.gms\.google-services[\'"][^{}]*\}\s*catch\s*\([^)]*\)\s*\{[^{}]*\}',
-              '', content)
-          if cleaned != content:
-              with open(path, 'w') as f:
-                  f.write(cleaned)
-              print('Removed duplicate google-services block.')
-          else:
-              print('No duplicate block.')
-          PYFIX
-
-          # Fix Espresso typo
-          sed -i "s/indigoEspressoCoreVersion/androidEspressoCoreVersion/g" \
-            android/app/build.gradle
-          echo "Espresso typo fixed."
-
-          # Ensure plugin applied
-          if ! grep -q "apply plugin: 'com.google.gms.google-services'" android/app/build.gradle; then
-            printf "\napply plugin: 'com.google.gms.google-services'\n" >> android/app/build.gradle
+          
+          # 🔢 Set Version Code and Name
+          if [ -f "android/app/build.gradle" ]; then
+            sed -i '' 's/versionCode [0-9]*/versionCode 10/g' android/app/build.gradle
+            sed -i '' 's/versionName "[0-9.]*"/versionName "9.3.0"/g' android/app/build.gradle
           fi
-
-          # ── SDK 34 — NOT 35 ─────────────────────────────────────────────────
-          # SDK 35 breaks AdMob's fullscreen Activity on Capacitor 6.
-          # Downgrade to 34 until the upstream fix is released.
+          
+          # 🛠️ PATCH: Force Gradle 8.7 and AGP 8.2.1 for Java 21 compatibility
+          if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
+            printf "distributionBase=GRADLE_USER_HOME\ndistributionPath=wrapper/dists\ndistributionUrl=https\://services.gradle.org/distributions/gradle-8.7-all.zip\nzipStoreBase=GRADLE_USER_HOME\nzipStorePath=wrapper/dists\n" > android/gradle/wrapper/gradle-wrapper.properties
+          fi
+          if [ -f "android/build.gradle" ]; then
+            sed -i '' 's/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:8.2.1/g' android/build.gradle
+            # Add Google Services classpath
+            if ! grep -q "com.google.gms:google-services" android/build.gradle; then
+              sed -i '' '/dependencies {/a \
+              classpath "com.google.gms:google-services:4.4.1"' android/build.gradle
+            fi
+          fi
+          
+          # 🛠️ PATCH: Apply Google Services Plugin in app/build.gradle
+          if [ -f "android/app/build.gradle" ]; then
+            if ! grep -q "com.google.gms.google-services" android/app/build.gradle; then
+              echo "apply plugin: 'com.google.gms.google-services'" >> android/app/build.gradle
+            fi
+          fi
+          
+          # 🛠️ PATCH: Set SDK 35
           if [ -f "android/variables.gradle" ]; then
-            sed -i "s/compileSdkVersion = [0-9]*/compileSdkVersion = 34/" android/variables.gradle
-            sed -i "s/targetSdkVersion = [0-9]*/targetSdkVersion = 34/"   android/variables.gradle
-            echo "SDK -> 34"
+            sed -i '' 's/compileSdkVersion = [0-9]*/compileSdkVersion = 35/g' android/variables.gradle
+            sed -i '' 's/targetSdkVersion = [0-9]*/targetSdkVersion = 35/g' android/variables.gradle
           fi
-
-          echo "Gradle patches done."
-
-      - name: Set version
+          
+          # 🛠️ PATCH: Add AD_ID permission
+          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
+            sed -i '' 's/<application/<uses-permission android:name="com.google.android.gms.permission.AD_ID"\/>\n    <application/g' android/app/src/main/AndroidManifest.xml
+          fi
+          
+          # 🛠️ PATCH: Add AdMob Application ID to AndroidManifest
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            if ! grep -q "com.google.android.gms.ads.APPLICATION_ID" "$MANIFEST"; then
+              sed -i '' 's|</application>|        <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-1560161047680443~4972275282"/>\n    </application>|' "$MANIFEST"
+              echo "✅ Added AdMob APPLICATION_ID to AndroidManifest.xml"
+            fi
+          fi
+          
+          # 🛠️ PATCH: Add Signing Configs to build.gradle
+          if [ -f "android/app/build.gradle" ]; then
+            sed -i '' '/buildTypes {/i \
+            signingConfigs { \
+                release { \
+                    storeFile file(System.getenv("CM_KEYSTORE_PATH") ?: "rewardhub-key.jks") \
+                    storePassword System.getenv("CM_KEYSTORE_PASSWORD") ?: "123456" \
+                    keyAlias System.getenv("CM_KEY_ALIAS") ?: "rewardhub" \
+                    keyPassword System.getenv("CM_KEY_PASSWORD") ?: "123456" \
+                } \
+            }' android/app/build.gradle
+            
+            sed -i '' '/proguardFiles/a \
+                signingConfig signingConfigs.release' android/app/build.gradle
+          fi
+      - name: Build Signed Android (APK & AAB)
         script: |
-          VC="${APP_VERSION_CODE:-10}"
-          VN="9.2.0"
-          sed -i "s/versionCode [0-9]*/versionCode ${VC}/" android/app/build.gradle
-          sed -i "s/versionName \"[^\"]*\"/versionName \"${VN}\"/" android/app/build.gradle
-          echo "Version: ${VN} (code ${VC})"
-
-      - name: Add signing config
-        script: |
-          python3 << 'PYSIGN'
-          path = 'android/app/build.gradle'
-          with open(path) as f:
-              content = f.read()
-          if 'signingConfigs' not in content:
-              block = (
-                  '\n    signingConfigs {\n'
-                  '        release {\n'
-                  '            storeFile file(System.getenv("CM_KEYSTORE_PATH") ?: "rewardhub-key.jks")\n'
-                  '            storePassword System.getenv("CM_KEYSTORE_PASSWORD") ?: ""\n'
-                  '            keyAlias System.getenv("CM_KEY_ALIAS") ?: ""\n'
-                  '            keyPassword System.getenv("CM_KEY_PASSWORD") ?: ""\n'
-                  '        }\n'
-                  '    }\n'
-              )
-              content = content.replace('    buildTypes {', block + '    buildTypes {', 1)
-              print('signingConfigs added.')
-          if 'signingConfig signingConfigs.release' not in content:
-              content = content.replace(
-                  'minifyEnabled false',
-                  'minifyEnabled false\n            signingConfig signingConfigs.release', 1)
-              print('Release linked to signingConfig.')
-          with open(path, 'w') as f:
-              f.write(content)
-          PYSIGN
-
-      - name: Build signed APK and AAB
-        script: |
-          echo "$CM_KEYSTORE" | base64 --decode \
-            > "$FCI_BUILD_DIR/android/app/rewardhub-key.jks"
-
+          # 🔑 Decode Keystore
+          echo $CM_KEYSTORE | base64 --decode > $FCI_BUILD_DIR/android/app/rewardhub-key.jks
+          
           cd android
           chmod +x gradlew
-
+          
+          # 🏗️ Build APK and AAB with Signing
           ./gradlew assembleRelease bundleRelease \
-            -Pandroid.injected.signing.store.file="$FCI_BUILD_DIR/android/app/rewardhub-key.jks" \
-            -Pandroid.injected.signing.store.password="$CM_KEYSTORE_PASSWORD" \
-            -Pandroid.injected.signing.key.alias="$CM_KEY_ALIAS" \
-            -Pandroid.injected.signing.key.password="$CM_KEY_PASSWORD" \
-            --no-daemon \
-            --stacktrace
-
+            -Pandroid.injected.signing.store.file=$FCI_BUILD_DIR/android/app/rewardhub-key.jks \
+            -Pandroid.injected.signing.store.password=$CM_KEYSTORE_PASSWORD \
+            -Pandroid.injected.signing.key.alias=$CM_KEY_ALIAS \
+            -Pandroid.injected.signing.key.password=$CM_KEY_PASSWORD \
+            --no-daemon
     artifacts:
       - android/app/build/outputs/bundle/release/*.aab
       - android/app/build/outputs/apk/release/*.apk
-      - android/app/build/outputs/mapping/release/mapping.txt
-
     publishing:
       email:
         recipients:
-          - m.bahlaq94@gmail.com
+          - m.bahlaq@dv8dm.com
         notify:
           success: true
           failure: true
