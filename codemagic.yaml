@@ -29,7 +29,7 @@ workflows:
         script: |
           npm run build
           if [ ! -d "dist" ]; then
-            echo "ERROR: dist/ was not created"
+            echo "ERROR: dist/ not created"
             exit 1
           fi
           ls dist/
@@ -55,10 +55,9 @@ workflows:
             cp assets/icon.png assets/icon-only.png
             cp assets/icon.png assets/icon-foreground.png
             cp assets/icon.png assets/splash.png
-            if [ ! -f "assets/icon-background.png" ]; then
+            [ ! -f "assets/icon-background.png" ] && \
               curl -sL -o assets/icon-background.png \
                 "https://placehold.co/1024x1024/4f46e5/4f46e5/png" || true
-            fi
           else
             curl -sL -o assets/icon.png \
               "https://api.dicebear.com/7.x/initials/png?seed=RH&backgroundColor=4f46e5&fontSize=50&fontWeight=900&radius=20" || true
@@ -84,7 +83,7 @@ workflows:
             cp google-services.json android/app/google-services.json
             echo "Copied from repo root."
           else
-            echo "ERROR: GOOGLE_SERVICES_JSON secret is not set and no file in repo root."
+            echo "ERROR: GOOGLE_SERVICES_JSON secret not set and no file in repo."
             exit 1
           fi
           python3 -c "
@@ -93,69 +92,150 @@ workflows:
               d = json.load(f)
           pkg = d['client'][0]['client_info']['android_client_info']['package_name']
           assert pkg == 'com.rewardhub.official.app', 'Package mismatch: ' + pkg
-          print('Verified package:', pkg)
+          print('Verified:', pkg)
           "
+
+      # ── CRITICAL: Write the complete AndroidManifest.xml via Python ─────────
+      # This replaces ALL sed-based manifest patching, which is fragile.
+      # Fixes:
+      #   1. singleCommunity → singleTask  (was causing startup crash)
+      #   2. AdActivity declared explicitly (required for AdMob fullscreen ads)
+      #   3. AdMob App ID hardcoded in meta-data (never missing)
+      #   4. AD_ID permission included
+      - name: Write correct AndroidManifest.xml
+        script: |
+          python3 << 'PYMANIFEST'
+          manifest = '''<?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="com.rewardhub.official.app">
+
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="@string/app_name"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:supportsRtl="true"
+                  android:theme="@style/AppTheme">
+
+                  <!--
+                      AdMob App ID — hardcoded to prevent build-script corruption.
+                      Must match: ca-app-pub-1560161047680443~4972275282
+                  -->
+                  <meta-data
+                      android:name="com.google.android.gms.ads.APPLICATION_ID"
+                      android:value="ca-app-pub-1560161047680443~4972275282"/>
+
+                  <!--
+                      AdActivity — REQUIRED for fullscreen rewarded ads.
+                      Without this declaration the ad overlay crashes on launch.
+                  -->
+                  <activity
+                      android:name="com.google.android.gms.ads.AdActivity"
+                      android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|uiMode|screenSize|smallestScreenSize"
+                      android:theme="@android:style/Theme.Translucent" />
+
+                  <activity
+                      android:name="com.rewardhub.official.app.MainActivity"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+                      android:label="@string/title_activity_main"
+                      android:launchMode="singleTask"
+                      android:theme="@style/AppTheme.NoActionBarLaunch"
+                      android:exported="true">
+
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+
+                  </activity>
+
+                  <provider
+                      android:name="androidx.core.content.FileProvider"
+                      android:authorities="${applicationId}.fileprovider"
+                      android:exported="false"
+                      android:grantUriPermissions="true">
+                      <meta-data
+                          android:name="android.support.FILE_PROVIDER_PATHS"
+                          android:resource="@xml/file_paths"></meta-data>
+                  </provider>
+
+              </application>
+
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
+
+          </manifest>
+          '''
+          path = 'android/app/src/main/AndroidManifest.xml'
+          with open(path, 'w') as f:
+              f.write(manifest)
+          print('AndroidManifest.xml written.')
+
+          # Verify
+          with open(path) as f:
+              content = f.read()
+          assert 'singleTask'                           in content, 'MISSING singleTask'
+          assert 'AdActivity'                           in content, 'MISSING AdActivity'
+          assert 'APPLICATION_ID'                       in content, 'MISSING AdMob meta-data'
+          assert '4972275282'                           in content, 'MISSING AdMob App ID'
+          assert 'AD_ID'                                in content, 'MISSING AD_ID permission'
+          assert 'singleCommunity'                  not in content, 'singleCommunity still present!'
+          print('All assertions passed.')
+          PYMANIFEST
 
       - name: Patch Gradle files
         script: |
-          # Pin Gradle to 8.7 (Java 21 compatible)
+          # Pin Gradle to 8.7 (Java 21)
           printf 'distributionBase=GRADLE_USER_HOME\ndistributionPath=wrapper/dists\ndistributionUrl=https\\://services.gradle.org/distributions/gradle-8.7-all.zip\nzipStoreBase=GRADLE_USER_HOME\nzipStorePath=wrapper/dists\n' \
             > android/gradle/wrapper/gradle-wrapper.properties
-          echo "Gradle wrapper -> 8.7"
+          echo "Gradle -> 8.7"
 
-          # Pin Android Gradle Plugin to 8.2.1
+          # AGP 8.2.1
           sed -i "s|com.android.tools.build:gradle:[0-9.]*|com.android.tools.build:gradle:8.2.1|g" \
             android/build.gradle
-
-          # Add google-services classpath to root build.gradle if missing
+          # google-services classpath
           if ! grep -q "com.google.gms:google-services" android/build.gradle; then
             sed -i '/dependencies {/a\        classpath "com.google.gms:google-services:4.4.1"' \
               android/build.gradle
           fi
 
-          # FIX: Remove duplicate google-services try/catch block from app/build.gradle
-          python3 << 'PYEOF'
+          # Fix duplicate google-services plugin in app/build.gradle
+          python3 << 'PYFIX'
           import re
           path = 'android/app/build.gradle'
           with open(path) as f:
               content = f.read()
           cleaned = re.sub(
               r'\ntry\s*\{[^{}]*apply\s+plugin\s*:\s*[\'"]com\.google\.gms\.google-services[\'"][^{}]*\}\s*catch\s*\([^)]*\)\s*\{[^{}]*\}',
-              '',
-              content
-          )
+              '', content)
           if cleaned != content:
               with open(path, 'w') as f:
                   f.write(cleaned)
               print('Removed duplicate google-services block.')
           else:
-              print('No duplicate block found.')
-          PYEOF
+              print('No duplicate block.')
+          PYFIX
 
-          # FIX: Espresso variable name typo
+          # Fix Espresso typo
           sed -i "s/indigoEspressoCoreVersion/androidEspressoCoreVersion/g" \
             android/app/build.gradle
           echo "Espresso typo fixed."
 
-          # Ensure google-services plugin is applied in app/build.gradle
+          # Ensure plugin applied
           if ! grep -q "apply plugin: 'com.google.gms.google-services'" android/app/build.gradle; then
             printf "\napply plugin: 'com.google.gms.google-services'\n" >> android/app/build.gradle
           fi
 
-          # Set SDK versions
+          # ── SDK 34 — NOT 35 ─────────────────────────────────────────────────
+          # SDK 35 breaks AdMob's fullscreen Activity on Capacitor 6.
+          # Downgrade to 34 until the upstream fix is released.
           if [ -f "android/variables.gradle" ]; then
-            sed -i "s/compileSdkVersion = [0-9]*/compileSdkVersion = 35/" android/variables.gradle
-            sed -i "s/targetSdkVersion = [0-9]*/targetSdkVersion = 35/"   android/variables.gradle
+            sed -i "s/compileSdkVersion = [0-9]*/compileSdkVersion = 34/" android/variables.gradle
+            sed -i "s/targetSdkVersion = [0-9]*/targetSdkVersion = 34/"   android/variables.gradle
+            echo "SDK -> 34"
           fi
 
-          # Add AD_ID permission if missing
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if ! grep -q "AD_ID" "$MANIFEST"; then
-            sed -i 's|<uses-permission android:name="android.permission.INTERNET" />|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />|' \
-              "$MANIFEST"
-          fi
-
-          echo "All patches done."
+          echo "Gradle patches done."
 
       - name: Set version
         script: |
@@ -167,11 +247,10 @@ workflows:
 
       - name: Add signing config
         script: |
-          python3 << 'PYEOF'
+          python3 << 'PYSIGN'
           path = 'android/app/build.gradle'
           with open(path) as f:
               content = f.read()
-
           if 'signingConfigs' not in content:
               block = (
                   '\n    signingConfigs {\n'
@@ -185,20 +264,14 @@ workflows:
               )
               content = content.replace('    buildTypes {', block + '    buildTypes {', 1)
               print('signingConfigs added.')
-          else:
-              print('signingConfigs already present.')
-
           if 'signingConfig signingConfigs.release' not in content:
               content = content.replace(
                   'minifyEnabled false',
-                  'minifyEnabled false\n            signingConfig signingConfigs.release',
-                  1
-              )
-              print('Release buildType linked to signingConfig.')
-
+                  'minifyEnabled false\n            signingConfig signingConfigs.release', 1)
+              print('Release linked to signingConfig.')
           with open(path, 'w') as f:
               f.write(content)
-          PYEOF
+          PYSIGN
 
       - name: Build signed APK and AAB
         script: |
