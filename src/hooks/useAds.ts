@@ -1,19 +1,11 @@
 /**
  * src/hooks/useAds.ts
  *
- * Connects the real AdMob SDK (admobService) to Firestore (firebaseService).
+ * Connects the AdMob service to Firestore.
  *
- * Flow for a rewarded ad:
- *   1. watchAd() is called from App.tsx when user taps "Watch Ad"
- *   2. admobService.showRewardedAd() prepares and shows the full-screen ad (native)
- *   3. When the user completes watching, AdMob fires the Rewarded event
- *   4. onRewarded() callback calls firebaseService.recordAdWatch()
- *   5. Firestore transaction increments currentLevelAdCounter atomically
- *   6. The Firestore real-time listener in App.tsx updates `user` state
- *   7. HomeScreen re-renders with the correct counter from Firestore
- *
- * IMPORTANT: There is NO local counter anywhere in this hook.
- * The ONLY source of truth for ad progress is Firestore.
+ * Key design rule: the ONLY source of truth for ad progress is Firestore.
+ * No local counter lives here. The App.tsx modal calls startWatchAd() and
+ * receives callbacks that drive modal state transitions.
  */
 
 import { useState, useCallback } from 'react';
@@ -21,11 +13,9 @@ import { AdLog, Offer } from '../types';
 import { firebaseService } from '../services/firebase';
 import { admobService } from '../services/admob';
 
-// ─── Public return types ──────────────────────────────────────────────────────
-
 export interface WatchAdResult {
   boostLevel:            number;
-  currentLevelAdCounter: number; // Firestore-confirmed counter after this ad
+  currentLevelAdCounter: number;
   adsNeeded:             number;
   adsWatchedToday:       number;
 }
@@ -36,14 +26,31 @@ export interface ClaimBoostResult {
   completedLevel: number;
 }
 
-// ─── Hook ─────────────────────────────────────────────────────────────────────
+export interface StartWatchAdCallbacks {
+  /** Ad overlay is ready to appear — transition modal to "watching" state. */
+  onLoaded:    () => void;
+  /**
+   * Ad completed + Firestore updated.
+   * result is the server-confirmed state (null if Firestore write failed).
+   * Transition modal to "rewarded" state.
+   */
+  onRewarded:  (result: WatchAdResult | null) => void;
+  /**
+   * Native overlay closed — user is back in the app.
+   * If onRewarded already fired, show the Claim/Next-Ad button.
+   * If it didn't fire, user dismissed early — close modal without awarding.
+   */
+  onDismissed: () => void;
+  /** Ad failed to load — show error in modal. */
+  onError:     (message: string) => void;
+}
 
 export function useAds(uid?: string) {
   const [logs,      setLogs]      = useState<AdLog[]>([]);
   const [offers,    setOffers]    = useState<Offer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // ── Offer subscription ──────────────────────────────────────────────────────
+  // ── Offer subscription ────────────────────────────────────────────────────
   const onOffersChange = useCallback(() => {
     setIsLoading(true);
     const unsub = firebaseService.onOffersChange((data) => {
@@ -53,94 +60,80 @@ export function useAds(uid?: string) {
     return unsub;
   }, []);
 
-  // ── Debug logging ───────────────────────────────────────────────────────────
-  const addLog = useCallback(
-    (type: AdLog['type'], event: AdLog['event'], message?: string) => {
-      setLogs((prev) =>
-        [
-          {
-            id:        Math.random().toString(36).slice(2, 11),
-            type,
-            event,
-            timestamp: new Date().toISOString(),
-            message:   message ?? '',
-          } as AdLog,
-          ...prev,
-        ].slice(0, 100)
-      );
-    },
-    []
-  );
+  // ── Debug log helper ──────────────────────────────────────────────────────
+  const addLog = useCallback((
+    type: AdLog['type'],
+    event: AdLog['event'],
+    message?: string
+  ) => {
+    setLogs(prev => [{
+      id:        Math.random().toString(36).slice(2, 11),
+      type, event,
+      timestamp: new Date().toISOString(),
+      message:   message ?? '',
+    } as AdLog, ...prev].slice(0, 100));
+  }, []);
 
-  // ── Watch Ad ────────────────────────────────────────────────────────────────
+  // ── Start Watch Ad ────────────────────────────────────────────────────────
   /**
-   * Shows a real AdMob rewarded ad.
-   * Returns the Firestore-confirmed state after the user earns the reward.
-   * Returns null if the ad was not watched or an error occurred.
+   * Starts loading and showing a rewarded ad.
+   * Returns immediately — the caller receives progress via callbacks.
    *
-   * The caller (App.tsx) should use the returned `currentLevelAdCounter`
-   * and `adsNeeded` as the single source of truth for the UI.
-   * Do NOT maintain any additional local counter alongside this.
+   * Flow:
+   *   startWatchAd({ onLoaded, onRewarded, onDismissed, onError })
+   *     → onLoaded()                      modal shows "ad is playing"
+   *     → [user watches fullscreen ad]
+   *     → onRewarded(WatchAdResult|null)  Firestore updated, modal ready for Claim
+   *     → onDismissed()                   native overlay gone, show Claim button
    */
-  const watchAd = useCallback(async (): Promise<WatchAdResult | null> => {
+  const startWatchAd = useCallback((callbacks: StartWatchAdCallbacks): void => {
     if (!uid) {
-      addLog('rewarded', 'error', 'watchAd called without uid — user not authenticated');
-      return null;
+      callbacks.onError('User not authenticated.');
+      return;
     }
 
-    addLog('rewarded', 'load', 'Preparing rewarded ad…');
+    addLog('rewarded', 'load', 'Requesting rewarded ad…');
 
-    return new Promise<WatchAdResult | null>((resolve) => {
-      admobService.showRewardedAd(
-        // ── onRewarded: called by AdMob SDK when user earns the reward ────────
-        async () => {
-          addLog('rewarded', 'show', 'Ad completed — recording in Firestore…');
-          try {
-            const result = await firebaseService.recordAdWatch(uid);
-            addLog(
-              'rewarded',
-              'reward',
-              `Firestore confirmed — counter: ${result.currentLevelAdCounter}/${result.adsNeeded} (Level ${result.boostLevel})`
-            );
-            resolve(result);
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            addLog('rewarded', 'error', `Firestore write failed: ${msg}`);
-            resolve(null);
-          }
-        },
+    admobService.showRewardedAd({
+      onLoaded: () => {
+        addLog('rewarded', 'show', 'Ad overlay appeared');
+        callbacks.onLoaded();
+      },
 
-        // ── onError: called if the ad fails to load or show ──────────────────
-        (errorMsg) => {
-          addLog('rewarded', 'error', `Ad error: ${errorMsg}`);
-          resolve(null);
+      onRewarded: async () => {
+        addLog('rewarded', 'reward', 'User earned reward — writing to Firestore…');
+        try {
+          const result = await firebaseService.recordAdWatch(uid);
+          addLog('rewarded', 'reward',
+            `Firestore confirmed: ${result.currentLevelAdCounter}/${result.adsNeeded} (Level ${result.boostLevel})`
+          );
+          callbacks.onRewarded(result);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          addLog('rewarded', 'error', `Firestore write failed: ${msg}`);
+          callbacks.onRewarded(null);
         }
-      );
+      },
+
+      onDismissed: () => {
+        addLog('rewarded', 'show', 'Ad overlay dismissed');
+        callbacks.onDismissed();
+      },
+
+      onError: (msg) => {
+        addLog('rewarded', 'error', `Ad error: ${msg}`);
+        callbacks.onError(msg);
+      },
     });
   }, [uid, addLog]);
 
-  // ── Claim Boost Reward ──────────────────────────────────────────────────────
-  /**
-   * Atomically in Firestore:
-   *   - points += 100
-   *   - boostLevel += 1
-   *   - currentLevelAdCounter = 0
-   *   - Writes earn history document (fields: uid, type, points, message, timestamp)
-   *
-   * This will REJECT server-side if currentLevelAdCounter < boostLevel,
-   * providing a double-protection against premature claims.
-   */
+  // ── Claim Boost Reward ────────────────────────────────────────────────────
   const claimBoostReward = useCallback(async (): Promise<ClaimBoostResult | null> => {
-    if (!uid) {
-      addLog('rewarded', 'error', 'claimBoostReward called without uid');
-      return null;
-    }
+    if (!uid) return null;
     try {
       const result = await firebaseService.claimBoostReward(uid);
-      addLog(
-        'rewarded',
-        'reward',
-        `Level ${result.completedLevel} claimed — +100 pts. Total: ${result.points}. Next: Level ${result.boostLevel}`
+      addLog('rewarded', 'reward',
+        `Level ${result.completedLevel} claimed — +100 pts. Next: Level ${result.boostLevel}`
       );
       return result;
     } catch (err) {
@@ -151,12 +144,9 @@ export function useAds(uid?: string) {
   }, [uid, addLog]);
 
   return {
-    logs,
-    addLog,
-    watchAd,
+    logs, addLog,
+    startWatchAd,
     claimBoostReward,
-    offers,
-    isLoading,
-    onOffersChange,
+    offers, isLoading, onOffersChange,
   };
 }
