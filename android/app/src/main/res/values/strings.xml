@@ -1,32 +1,9 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <resources>
-
-    <!-- ═══════════════════════════════════════════════════════════════════
-         APP IDENTITY
-         Package: com.rewardhub.official.app
-         ═══════════════════════════════════════════════════════════════════ -->
     <string name="app_name">RewardHub</string>
     <string name="title_activity_main">RewardHub</string>
     <string name="package_name">com.rewardhub.official.app</string>
     <string name="custom_url_scheme">com.rewardhub.official.app</string>
-
-    <!-- ═══════════════════════════════════════════════════════════════════
-         GOOGLE SIGN-IN — server_client_id
-         ───────────────────────────────────────────────────────────────────
-         MUST be the Web OAuth Client (client_type 3) from google-services.json.
-         NOT the Android client IDs (client_type 1).
-
-         The Capacitor Google Auth plugin reads this string at runtime and
-         calls GoogleSignInOptions.requestIdToken(server_client_id).
-         If this is wrong or missing, signIn() returns no idToken and
-         Firebase Auth will fail with DEVELOPER_ERROR / Error 10.
-
-         Cross-reference check (all three must match):
-           This file          → server_client_id           ✓
-           capacitor.config.ts → GoogleAuth.serverClientId  ✓
-           firebase.ts         → WEB_CLIENT_ID              ✓
-           google-services.json→ oauth_client client_type:3 ✓
-         ═══════════════════════════════════════════════════════════════════ -->
+    <!-- Version 9.3.0: Required by @codetrix-studio/capacitor-google-auth for native Android sign-in -->
     <string name="server_client_id">563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com</string>
-
 </resources>
