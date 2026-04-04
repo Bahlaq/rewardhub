@@ -3,76 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-
-    <!--
-      Web Client ID — must match ALL FOUR locations:
-        1. index.html  (this file)
-        2. firebase.ts           PRODUCTION_WEB_CLIENT_ID
-        3. capacitor.config.ts   GoogleAuth.serverClientId
-        4. strings.xml           server_client_id
-    -->
-    <meta
-      name="google-signin-client_id"
-      content="563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com"
-    />
-
-    <title>RewardHub — Earn While You Play</title>
-
-    <!--
-      Static styles for the privacy footer that Google's crawler sees.
-      The React app mounts inside #root and does not affect this footer.
-    -->
-    <style>
-      #static-privacy-footer {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        background: #1e1b4b;
-        color: #c7d2fe;
-        text-align: center;
-        padding: 10px 16px;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        font-size: 12px;
-        z-index: 99999;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 16px;
-      }
-      #static-privacy-footer a {
-        color: #a5b4fc;
-        text-decoration: underline;
-      }
-      #static-privacy-footer a:hover {
-        color: #ffffff;
-      }
-    </style>
+    <!-- Version 9.3.0: Fixed Client ID — was 563861371307-3moj6n7qanfg0tgn1vrv8ok59rnh8pj2 (WRONG) -->
+    <!-- Must match the Web Client ID used in firebase.ts and capacitor.config.ts -->
+    <meta name="google-signin-client_id" content="563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com" />
+    <title>RewardHub</title>
   </head>
   <body>
-
-    <!-- React app mounts here -->
     <div id="root"></div>
-
-    <!--
-      STATIC PRIVACY FOOTER
-      =====================
-      This footer is rendered in plain HTML — visible to Google's OAuth
-      verification crawler before JavaScript loads.
-      It satisfies Google's requirement:
-        "There must be a visible link to your Privacy Policy on your homepage."
-      Do NOT remove this element.
-    -->
-    <footer id="static-privacy-footer">
-      <span>© 2026 RewardHub</span>
-      <a href="/privacy.html" target="_blank" rel="noopener noreferrer">
-        Privacy Policy
-      </a>
-      <a href="/privacy.html" target="_blank" rel="noopener noreferrer">
-        Terms of Service
-      </a>
-    </footer>
-
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
