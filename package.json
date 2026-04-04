@@ -1,7 +1,7 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "9.2.0",
+  "version": "9.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
@@ -14,13 +14,13 @@
     "build:android": "npm run build && npx cap sync android"
   },
   "dependencies": {
-    "@capacitor-community/admob": "^6.0.0",
     "@capacitor/android": "^6.0.0",
     "@capacitor/assets": "^3.0.5",
     "@capacitor/browser": "^6.0.6",
     "@capacitor/clipboard": "^6.0.3",
     "@capacitor/core": "^6.0.0",
     "@capacitor/toast": "^6.0.4",
+    "@capacitor-community/admob": "^6.0.0",
     "@codetrix-studio/capacitor-google-auth": "^3.4.0-rc.4",
     "@google/genai": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",
