@@ -13,12 +13,19 @@ import { Offer, UserProfile, Transaction } from '../types';
 const PRODUCTION_WEB_CLIENT_ID = "563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com";
 
 // ═══════════════════════════════════════════════════════════════════════
-// v10: GoogleAuth as awaitable singleton
-// OLD BUG: fire-and-forget import().then() raced with signIn() calls.
-//   If user tapped "Sign In" before the import resolved, GoogleAuthInstance
-//   was null → crash. Also grantOfflineAccess:true requested a server
-//   auth code that requires a backend to exchange.
-// FIX: ensureGoogleAuth() returns a promise. signInWithGoogle() awaits it.
+// GoogleAuth as awaitable singleton
+//
+// ROOT CAUSE OF AUTH FAILURE: Three compounding issues:
+//   1. fire-and-forget import().then() — if user taps Sign In before
+//      the dynamic import resolves, GoogleAuthInstance is null → crash.
+//   2. grantOfflineAccess: true — requests a server authorization code
+//      that requires a backend server to exchange. RewardHub has no backend.
+//   3. clientId set to Web Client ID — on Android, clientId should come
+//      from google-services.json, NOT be explicitly set. Only serverClientId
+//      should be set (to get the idToken for Firebase credential exchange).
+//
+// FIX: ensureGoogleAuth() returns a Promise. signInWithGoogle() awaits it.
+//   grantOfflineAccess set to false. clientId removed (let google-services.json handle it).
 // ═══════════════════════════════════════════════════════════════════════
 let googleAuthPromise: Promise<any> | null = null;
 
@@ -32,9 +39,9 @@ function ensureGoogleAuth(): Promise<any> {
       (GoogleAuth as any).initialize({
         serverClientId: PRODUCTION_WEB_CLIENT_ID,
         scopes: ['profile', 'email'],
-        grantOfflineAccess: false  // v10: was true — caused server-code-only response
+        grantOfflineAccess: false
       });
-      console.log("[GoogleAuth] Initialized with serverClientId");
+      console.log("[GoogleAuth] Initialized with serverClientId only");
       return GoogleAuth;
     } catch (error) {
       console.error("[GoogleAuth] Init failed:", error);
@@ -45,7 +52,7 @@ function ensureGoogleAuth(): Promise<any> {
   return googleAuthPromise;
 }
 
-// Eagerly start import (non-blocking)
+// Start eagerly (non-blocking)
 if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
   ensureGoogleAuth();
 }
@@ -61,11 +68,9 @@ const firebaseConfig = {
 };
 
 export const isConfigValid = true;
-
 let app;
 try {
   app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-  console.log("[Firebase] Initialized");
 } catch (error) {
   console.error("Firebase init failed:", error);
 }
@@ -73,73 +78,51 @@ try {
 const db = app ? initializeFirestore(app, { experimentalForceLongPolling: true }) : null;
 const auth = app ? getAuth(app) : null;
 const googleProvider = new GoogleAuthProvider();
-
 const webClientId = import.meta.env.VITE_FIREBASE_WEB_CLIENT_ID || PRODUCTION_WEB_CLIENT_ID;
 if (webClientId) googleProvider.setCustomParameters({ client_id: webClientId });
 
 export { auth, googleProvider, db };
 export type { FirebaseUser };
 
-enum OperationType { CREATE = 'create', UPDATE = 'update', DELETE = 'delete', LIST = 'list', GET = 'get', WRITE = 'write' }
+enum Op { CREATE='create', UPDATE='update', DELETE='delete', LIST='list', GET='get', WRITE='write' }
 
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null, shouldThrow = true) {
-  const errInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: { userId: auth?.currentUser?.uid, email: auth?.currentUser?.email, isAnonymous: auth?.currentUser?.isAnonymous },
-    operationType, path
-  };
-  console.error('Firestore Error:', JSON.stringify(errInfo));
-  if (shouldThrow) throw new Error(JSON.stringify(errInfo));
+function handleFsError(error: unknown, op: Op, path: string | null, shouldThrow = true) {
+  console.error('Firestore Error:', { error: error instanceof Error ? error.message : String(error), op, path, uid: auth?.currentUser?.uid });
+  if (shouldThrow) throw error;
 }
 
+function getCol(uid: string) { return uid.startsWith('local_guest_') ? 'guests' : 'users'; }
+
 export const firebaseService = {
+  // ─── AUTH ────────────────────────────────────────────────────────
   async signInWithGoogle() {
     if (!auth) throw new Error("Firebase Auth not initialized");
     try {
       if (Capacitor.isNativePlatform()) {
         console.log("[Auth] Native — awaiting GoogleAuth singleton");
-        const GoogleAuthPlugin = await ensureGoogleAuth();
-        if (!GoogleAuthPlugin) throw new Error("GoogleAuth plugin failed to initialize.");
+        const plugin = await ensureGoogleAuth();
+        if (!plugin) throw new Error("GoogleAuth plugin failed to load");
         
-        console.log("[Auth] Calling GoogleAuth.signIn()...");
-        const googleUser = await GoogleAuthPlugin.signIn();
-        console.log("[Auth] signIn() success:", googleUser.email);
+        const googleUser = await plugin.signIn();
+        console.log("[Auth] GoogleAuth.signIn() returned:", googleUser.email);
         
         const idToken = googleUser.authentication?.idToken || (googleUser as any).idToken;
         if (!idToken) {
-          console.error("[Auth] No idToken. Keys:", JSON.stringify(Object.keys(googleUser)));
-          throw new Error("No ID Token. Check: 1) SHA-1 in Firebase 2) server_client_id in strings.xml 3) Re-download google-services.json");
+          console.error("[Auth] No idToken. Response keys:", Object.keys(googleUser));
+          throw new Error("No ID Token. Verify: SHA-1 in Firebase, server_client_id in strings.xml, re-download google-services.json");
         }
         
         const credential = GoogleAuthProvider.credential(idToken);
         const result = await signInWithCredential(auth, credential);
-        console.log("[Auth] Firebase credential success:", result.user.uid);
-        
-        const profile = await this.getUserProfile(result.user.uid);
-        if (!profile) {
-          await this.saveUserProfile({
-            uid: result.user.uid, email: result.user.email || 'Google User',
-            points: 0, claimsToday: 0, lastClaimDate: null, totalEarned: 0,
-            boostLevel: 1, adsWatchedToday: 0, currentLevelAdCounter: 0, lastBoostDate: new Date().toDateString()
-          });
-        }
+        await this._ensureProfile(result.user);
         return result.user;
       }
       
-      // Web: popup
-      console.log("[Auth] Web — using signInWithPopup");
       const result = await signInWithPopup(auth, googleProvider);
-      const profile = await this.getUserProfile(result.user.uid);
-      if (!profile) {
-        await this.saveUserProfile({
-          uid: result.user.uid, email: result.user.email || 'Google User',
-          points: 0, claimsToday: 0, lastClaimDate: null, totalEarned: 0,
-          boostLevel: 1, adsWatchedToday: 0, currentLevelAdCounter: 0, lastBoostDate: new Date().toDateString()
-        });
-      }
+      await this._ensureProfile(result.user);
       return result.user;
-    } catch (error: any) {
-      console.error("[Auth] Google Sign-In failed:", error);
+    } catch (error) {
+      console.error("[Auth] signInWithGoogle failed:", error);
       throw error;
     }
   },
@@ -147,242 +130,177 @@ export const firebaseService = {
   async signInAnonymously() {
     if (!auth) throw new Error("Firebase Auth not initialized");
     const result = await signInAnonymously(auth);
-    const profile = await this.getUserProfile(result.user.uid);
+    await this._ensureProfile(result.user, 'Guest User');
+    return result.user;
+  },
+
+  async _ensureProfile(fbUser: FirebaseUser, fallbackEmail?: string) {
+    const profile = await this.getUserProfile(fbUser.uid);
     if (!profile) {
       await this.saveUserProfile({
-        uid: result.user.uid, email: 'Guest User',
+        uid: fbUser.uid, email: fbUser.email || fallbackEmail || 'Unknown',
         points: 0, claimsToday: 0, lastClaimDate: null, totalEarned: 0,
-        boostLevel: 1, adsWatchedToday: 0, currentLevelAdCounter: 0, lastBoostDate: new Date().toDateString()
+        boostLevel: 1, adsWatchedToday: 0, currentLevelAdCounter: 0,
+        lastBoostDate: new Date().toDateString()
       });
     }
-    return result.user;
   },
 
   async logout() { if (auth) await signOut(auth); },
   async deleteAccount() { if (auth?.currentUser) await deleteUser(auth.currentUser); },
+  async deleteUserProfile(uid: string) { if (db) await deleteDoc(doc(db, getCol(uid), uid)); },
+  onAuthChange(cb: (user: FirebaseUser | null) => void) { if (!auth) { cb(null); return () => {}; } return onAuthStateChanged(auth, cb); },
 
-  async deleteUserProfile(uid: string) {
-    if (!db) return;
-    const col = uid.startsWith('local_guest_') ? 'guests' : 'users';
-    await deleteDoc(doc(db, col, uid));
-  },
-
-  onAuthChange(callback: (user: FirebaseUser | null) => void) {
-    if (!auth) { callback(null); return () => {}; }
-    return onAuthStateChanged(auth, callback);
-  },
-
-  onProfileChange(uid: string, callback: (profile: UserProfile | null) => void) {
-    if (!db) { callback(null); return () => {}; }
-    const col = uid.startsWith('local_guest_') ? 'guests' : 'users';
-    return onSnapshot(doc(db, col, uid),
-      (d) => callback(d.exists() ? d.data() as UserProfile : null),
-      (err) => { handleFirestoreError(err, OperationType.GET, `${col}/${uid}`, false); callback(null); }
-    );
+  // ─── PROFILE ─────────────────────────────────────────────────────
+  onProfileChange(uid: string, cb: (p: UserProfile | null) => void) {
+    if (!db) { cb(null); return () => {}; }
+    return onSnapshot(doc(db, getCol(uid), uid), d => cb(d.exists() ? d.data() as UserProfile : null),
+      err => { handleFsError(err, Op.GET, `${getCol(uid)}/${uid}`, false); cb(null); });
   },
 
   async getUserProfile(uid: string): Promise<UserProfile | null> {
     if (!db) return null;
-    const col = uid.startsWith('local_guest_') ? 'guests' : 'users';
     try {
-      const d = await getDoc(doc(db, col, uid));
-      if (d.exists()) {
-        const profile = d.data() as UserProfile;
-        localStorage.setItem(`profile_${uid}`, JSON.stringify(profile));
-        return profile;
-      }
-      const cached = localStorage.getItem(`profile_${uid}`);
-      return cached ? JSON.parse(cached) : null;
-    } catch {
-      const cached = localStorage.getItem(`profile_${uid}`);
-      return cached ? JSON.parse(cached) : null;
-    }
+      const d = await getDoc(doc(db, getCol(uid), uid));
+      if (d.exists()) { const p = d.data() as UserProfile; localStorage.setItem(`profile_${uid}`, JSON.stringify(p)); return p; }
+      const c = localStorage.getItem(`profile_${uid}`);
+      return c ? JSON.parse(c) : null;
+    } catch { const c = localStorage.getItem(`profile_${uid}`); return c ? JSON.parse(c) : null; }
   },
 
   async saveUserProfile(profile: UserProfile) {
     if (!db) return;
-    const col = profile.uid.startsWith('local_guest_') ? 'guests' : 'users';
-    try {
-      await setDoc(doc(db, col, profile.uid), profile, { merge: true });
-      localStorage.setItem(`profile_${profile.uid}`, JSON.stringify(profile));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `${col}/${profile.uid}`, false);
-    }
+    try { await setDoc(doc(db, getCol(profile.uid), profile.uid), profile, { merge: true }); localStorage.setItem(`profile_${profile.uid}`, JSON.stringify(profile)); }
+    catch (e) { handleFsError(e, Op.WRITE, `${getCol(profile.uid)}/${profile.uid}`, false); }
   },
 
   async checkDailyReset(uid: string) {
     if (!db) return;
-    const isGuest = uid.startsWith('local_guest_');
-    const col = isGuest ? 'guests' : 'users';
-    if (!isGuest && (!auth || !auth.currentUser)) return;
+    if (!uid.startsWith('local_guest_') && (!auth || !auth.currentUser)) return;
     try {
-      const d = await getDoc(doc(db, col, uid));
+      const d = await getDoc(doc(db, getCol(uid), uid));
       if (d.exists() && d.data().lastBoostDate !== new Date().toDateString()) {
-        await setDoc(doc(db, col, uid), {
-          boostLevel: 1, adsWatchedToday: 0, currentLevelAdCounter: 0, lastBoostDate: new Date().toDateString()
-        }, { merge: true });
+        await setDoc(doc(db, getCol(uid), uid), { boostLevel: 1, adsWatchedToday: 0, currentLevelAdCounter: 0, lastBoostDate: new Date().toDateString() }, { merge: true });
       }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.GET, `${col}/${uid}`, false);
-    }
+    } catch (e) { handleFsError(e, Op.GET, `${getCol(uid)}/${uid}`, false); }
   },
 
   // ═══════════════════════════════════════════════════════════════════
-  // v10: recordAdWatch — BOUNDS GUARD added
-  // OLD BUG: currentLevelAdCounter += 1 with NO cap check.
-  //   The "Watch Next Ad" loop in AdSimulatorModal called onReward()
-  //   repeatedly, incrementing past boostLevel → showed "5/3".
+  // recordAdWatch — WITH BOUNDS GUARD
+  //
+  // ROOT CAUSE OF "5/3": currentLevelAdCounter += 1 with NO cap check.
+  // The modal loop called onReward() repeatedly past the boost level.
   // FIX: Refuse to increment if counter >= boostLevel.
   // ═══════════════════════════════════════════════════════════════════
   async recordAdWatch(uid: string) {
     if (!db) throw new Error("Firestore not initialized");
-    const isGuest = uid.startsWith('local_guest_');
-    const col = isGuest ? 'guests' : 'users';
+    const col = getCol(uid);
     const userRef = doc(db, col, uid);
     const today = new Date().toDateString();
 
-    try {
-      return await runTransaction(db, async (transaction) => {
-        const userDoc = await transaction.get(userRef);
-        let userData: any;
-        if (!userDoc.exists()) {
-          userData = { uid, points: 0, totalEarned: 0, boostLevel: 1, adsWatchedToday: 0, currentLevelAdCounter: 0, lastBoostDate: today, email: auth?.currentUser?.email || (isGuest ? 'Guest User' : 'Unknown') };
-          transaction.set(userRef, userData);
-        } else {
-          userData = userDoc.data();
-        }
+    return await runTransaction(db, async (tx) => {
+      const snap = await tx.get(userRef);
+      let d: any;
+      if (!snap.exists()) {
+        d = { uid, points: 0, totalEarned: 0, boostLevel: 1, adsWatchedToday: 0, currentLevelAdCounter: 0, lastBoostDate: today, email: auth?.currentUser?.email || 'Unknown' };
+        tx.set(userRef, d);
+      } else {
+        d = snap.data();
+      }
 
-        let boostLevel = Number(userData.boostLevel) || 1;
-        let adsWatchedToday = Number(userData.adsWatchedToday) || 0;
-        let currentLevelAdCounter = Number(userData.currentLevelAdCounter) || 0;
-        let lastBoostDate = userData.lastBoostDate || null;
+      let boostLevel = Number(d.boostLevel) || 1;
+      let currentLevelAdCounter = Number(d.currentLevelAdCounter) || 0;
+      let lastBoostDate = d.lastBoostDate || null;
 
-        if (lastBoostDate !== today) {
-          boostLevel = 1; adsWatchedToday = 0; currentLevelAdCounter = 0; lastBoostDate = today;
-        }
+      if (lastBoostDate !== today) { boostLevel = 1; currentLevelAdCounter = 0; lastBoostDate = today; }
 
-        const adsNeeded = boostLevel;
+      const adsNeeded = boostLevel;
 
-        // ── v10 BOUNDS GUARD: Stop at cap ──
-        if (currentLevelAdCounter >= adsNeeded) {
-          return { isLocalGuest: isGuest, rewardClaimed: false, boostLevel, adsWatchedToday, currentLevelAdCounter, adsNeeded };
-        }
+      // BOUNDS GUARD: Do not exceed boost level
+      if (currentLevelAdCounter >= adsNeeded) {
+        return { boostLevel, currentLevelAdCounter, adsNeeded, isLocalGuest: uid.startsWith('local_guest_') };
+      }
 
-        currentLevelAdCounter += 1;
-        transaction.set(userRef, { currentLevelAdCounter, lastBoostDate: today }, { merge: true });
+      currentLevelAdCounter += 1;
+      tx.set(userRef, { currentLevelAdCounter, lastBoostDate: today }, { merge: true });
 
-        return { isLocalGuest: isGuest, rewardClaimed: false, boostLevel, adsWatchedToday, currentLevelAdCounter, adsNeeded };
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'ad_watch');
-      throw error;
-    }
+      return { boostLevel, currentLevelAdCounter, adsNeeded, isLocalGuest: uid.startsWith('local_guest_') };
+    });
   },
 
   async claimBoostReward(uid: string) {
     if (!db) throw new Error("Firestore not initialized");
-    const isGuest = uid.startsWith('local_guest_');
-    const col = isGuest ? 'guests' : 'users';
+    const col = getCol(uid);
     const userRef = doc(db, col, uid);
     const historyRef = doc(collection(db, 'history'));
     const today = new Date().toDateString();
 
-    try {
-      return await runTransaction(db, async (transaction) => {
-        const userDoc = await transaction.get(userRef);
-        if (!userDoc.exists()) throw new Error("User not found");
-        const d = userDoc.data();
-        let boostLevel = Number(d.boostLevel) || 1;
-        let currentLevelAdCounter = Number(d.currentLevelAdCounter) || 0;
-        let adsWatchedToday = Number(d.adsWatchedToday) || 0;
-        let points = Number(d.points) || 0;
-        let totalEarned = Number(d.totalEarned) || 0;
+    return await runTransaction(db, async (tx) => {
+      const snap = await tx.get(userRef);
+      if (!snap.exists()) throw new Error("User not found");
+      const d = snap.data();
+      let boostLevel = Number(d.boostLevel) || 1;
+      let currentLevelAdCounter = Number(d.currentLevelAdCounter) || 0;
+      let adsWatchedToday = Number(d.adsWatchedToday) || 0;
+      let points = Number(d.points) || 0;
+      let totalEarned = Number(d.totalEarned) || 0;
 
-        if (currentLevelAdCounter < boostLevel) throw new Error("Boost requirement not met");
+      if (currentLevelAdCounter < boostLevel) throw new Error("Boost requirement not met");
 
-        points += 100; totalEarned += 100;
-        const completedLevel = boostLevel;
-        boostLevel += 1; adsWatchedToday += 1; currentLevelAdCounter = 0;
+      points += 100; totalEarned += 100;
+      const completedLevel = boostLevel;
+      boostLevel += 1; adsWatchedToday += 1; currentLevelAdCounter = 0;
 
-        transaction.set(userRef, { points, totalEarned, boostLevel, adsWatchedToday, currentLevelAdCounter, lastBoostDate: today }, { merge: true });
-        transaction.set(historyRef, { uid, type: 'earn', points: 100, message: `Completed Boost Level ${completedLevel}`, timestamp: serverTimestamp() });
+      tx.set(userRef, { points, totalEarned, boostLevel, adsWatchedToday, currentLevelAdCounter, lastBoostDate: today }, { merge: true });
+      tx.set(historyRef, { uid, type: 'earn', points: 100, message: `Completed Boost Level ${completedLevel}`, timestamp: serverTimestamp() });
 
-        return { points, boostLevel };
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'claim_boost');
-      throw error;
-    }
+      return { points, boostLevel };
+    });
   },
 
-  onOffersChange(callback: (offers: Offer[]) => void) {
-    if (!db) { callback([]); return () => {}; }
+  // ─── LISTENERS ───────────────────────────────────────────────────
+  onOffersChange(cb: (offers: Offer[]) => void) {
+    if (!db) { cb([]); return () => {}; }
     return onSnapshot(query(collection(db, 'offers')),
-      (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data(), points: Number(d.data().points || 0) } as Offer))),
-      (err) => { handleFirestoreError(err, OperationType.LIST, 'offers', false); callback([]); }
-    );
+      snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data(), points: Number(d.data().points || 0) } as Offer))),
+      err => { handleFsError(err, Op.LIST, 'offers', false); cb([]); });
   },
 
-  onClaimsChange(uid: string, callback: (claims: Transaction[]) => void) {
-    if (!db) { callback([]); return () => {}; }
+  onClaimsChange(uid: string, cb: (claims: Transaction[]) => void) {
+    if (!db) { cb([]); return () => {}; }
     return onSnapshot(query(collection(db, 'claims'), where('uid', '==', uid)),
-      (snap) => callback(snap.docs.map(d => {
-        const data = d.data();
-        return { id: d.id, type: 'claim', title: data.offerBrand, amount: -data.pointsSpent,
-          timestamp: data.timestamp?.toDate?.()?.toISOString() || new Date().toISOString(),
-          code: data.code, rewardType: data.code ? 'code' : 'link' } as Transaction;
+      snap => cb(snap.docs.map(d => {
+        const x = d.data();
+        return { id: d.id, type: 'claim', title: x.offerBrand, amount: -x.pointsSpent,
+          timestamp: x.timestamp?.toDate?.()?.toISOString() || new Date().toISOString(),
+          code: x.code, rewardType: x.code ? 'code' : 'link' } as Transaction;
       })),
-      (err) => { handleFirestoreError(err, OperationType.LIST, 'claims', false); callback([]); }
-    );
+      err => { handleFsError(err, Op.LIST, 'claims', false); cb([]); });
   },
 
-  onHistoryChange(uid: string, callback: (history: Transaction[]) => void) {
-    if (!db) { callback([]); return () => {}; }
+  onHistoryChange(uid: string, cb: (history: Transaction[]) => void) {
+    if (!db) { cb([]); return () => {}; }
     return onSnapshot(query(collection(db, 'history'), where('uid', '==', uid)),
-      (snap) => callback(snap.docs.map(d => {
-        const data = d.data();
-        return { id: d.id, type: 'earn', title: data.title || data.message, amount: data.amount || data.points,
-          timestamp: data.timestamp?.toDate?.()?.toISOString() || new Date().toISOString() } as Transaction;
+      snap => cb(snap.docs.map(d => {
+        const x = d.data();
+        return { id: d.id, type: 'earn', title: x.title || x.message, amount: x.amount || x.points,
+          timestamp: x.timestamp?.toDate?.()?.toISOString() || new Date().toISOString() } as Transaction;
       })),
-      (err) => { handleFirestoreError(err, OperationType.LIST, 'history', false); callback([]); }
-    );
+      err => { handleFsError(err, Op.LIST, 'history', false); cb([]); });
   },
 
   async claimOffer(uid: string, offer: Offer) {
     if (!db) throw new Error("Firestore not initialized");
-    const col = uid.startsWith('local_guest_') ? 'guests' : 'users';
-    const userRef = doc(db, col, uid);
+    const userRef = doc(db, getCol(uid), uid);
     const claimRef = doc(collection(db, 'claims'));
-    try {
-      await runTransaction(db, async (transaction) => {
-        const userDoc = await transaction.get(userRef);
-        if (!userDoc.exists()) throw new Error("User profile not found");
-        const userData = userDoc.data() as UserProfile;
-        if (userData.points < offer.points) throw new Error("Insufficient points");
-        transaction.update(userRef, { points: Number(userData.points) - Number(offer.points), claimsToday: (Number(userData.claimsToday) || 0) + 1, lastClaimDate: new Date().toISOString() });
-        const historyRef = doc(collection(db, 'history'));
-        transaction.set(historyRef, { uid, type: 'claim', points: -Number(offer.points), message: `Claimed ${offer.brand}`, timestamp: serverTimestamp() });
-        transaction.set(claimRef, { uid, offerId: offer.id, offerBrand: offer.brand, code: offer.code || null, url: offer.url, pointsSpent: offer.points, timestamp: serverTimestamp() });
-      });
-      return true;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'claim');
-      throw error;
-    }
-  },
-
-  async rewardUserPoints(uid: string, points: number, title: string) {
-    if (!db) throw new Error("Firestore not initialized");
-    const col = uid.startsWith('local_guest_') ? 'guests' : 'users';
-    const userRef = doc(db, col, uid);
-    const historyRef = doc(collection(db, 'history'));
-    await setDoc(userRef, { uid, points: 0, totalEarned: 0 }, { merge: true });
-    await runTransaction(db, async (transaction) => {
-      const userDoc = await transaction.get(userRef);
-      if (!userDoc.exists()) throw new Error("User profile not found");
-      const userData = userDoc.data() as UserProfile;
-      transaction.update(userRef, { points: (userData.points || 0) + points, totalEarned: (userData.totalEarned || 0) + points });
-      transaction.set(historyRef, { uid, type: 'earn', title, amount: points, timestamp: serverTimestamp() });
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(userRef);
+      if (!snap.exists()) throw new Error("User not found");
+      const u = snap.data() as UserProfile;
+      if (u.points < offer.points) throw new Error("Insufficient points");
+      tx.update(userRef, { points: Number(u.points) - Number(offer.points), claimsToday: (Number(u.claimsToday) || 0) + 1, lastClaimDate: new Date().toISOString() });
+      tx.set(doc(collection(db, 'history')), { uid, type: 'claim', points: -Number(offer.points), message: `Claimed ${offer.brand}`, timestamp: serverTimestamp() });
+      tx.set(claimRef, { uid, offerId: offer.id, offerBrand: offer.brand, code: offer.code || null, url: offer.url, pointsSpent: offer.points, timestamp: serverTimestamp() });
     });
     return true;
   },
