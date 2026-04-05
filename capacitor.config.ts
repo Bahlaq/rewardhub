@@ -16,12 +16,12 @@ const config: CapacitorConfig = {
       splashFullScreen: true,
       splashImmersive: true,
     },
-    GoogleAuth: {
-      scopes: ["profile", "email"],
-      serverClientId: "563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com"
-      // REMOVED forceCodeForRefreshToken — it requests a server authorization code
-      //   that requires a backend to exchange. RewardHub has no backend.
-      // REMOVED redirectUri — native Android uses intent-based auth, not HTTP redirects.
+    // v12: Switched from @codetrix-studio/capacitor-google-auth to @capacitor-firebase/authentication.
+    // skipNativeAuth: true → plugin only handles the native picker + token retrieval.
+    // We handle Firebase web SDK sign-in ourselves via signInWithCredential().
+    FirebaseAuthentication: {
+      skipNativeAuth: true,
+      providers: ["google.com"]
     }
   }
 };
