@@ -82,14 +82,13 @@ interface HomeScreenProps {
   handleWatchAd: () => void;
   handleClaimOffer: (offer: Offer, cost: number) => void;
   handleClaimBoostReward: () => void;
-  isBannerVisible?: boolean;
   isAdRunning?: boolean;
 }
 
 export const HomeScreen = ({
   user, offers, isLoading, searchQuery, setSearchQuery, selectedCategory, setSelectedCategory,
   categories, filteredOffers, transactions, handleWatchAd, handleClaimOffer, handleClaimBoostReward,
-  isBannerVisible = true, isAdRunning = false
+  isAdRunning = false
 }: HomeScreenProps) => {
   const today = new Date().toDateString();
   const isNewDay = user.lastBoostDate !== today;
@@ -122,7 +121,7 @@ export const HomeScreen = ({
         </div>
       </div>
 
-      {/* Daily Boost — Three states: Running / Complete / Watch */}
+      {/* Daily Boost Card */}
       <div className="bg-gradient-to-br from-indigo-600 to-violet-700 rounded-3xl p-6 text-white shadow-xl shadow-indigo-200 overflow-hidden relative">
         <div className="relative z-10">
           <div className="flex justify-between items-start mb-1">
@@ -185,15 +184,8 @@ export const HomeScreen = ({
         )}
       </div>
 
-      <div className="h-[140px]" />
-
-      {isBannerVisible && (
-        <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+100px)] left-0 right-0 px-4 pointer-events-none z-[1000]">
-          <div className="max-w-md mx-auto bg-zinc-900/95 backdrop-blur-md border border-zinc-800 h-14 rounded-2xl flex items-center justify-center text-[11px] font-black text-white uppercase tracking-[0.2em] pointer-events-auto shadow-2xl shadow-black/40">
-            <span className="opacity-40">Sponsored Ad Space</span>
-          </div>
-        </div>
-      )}
+      {/* Bottom padding for navbar — no fake banner placeholder */}
+      <div className="h-[100px]" />
     </motion.div>
   );
 };
