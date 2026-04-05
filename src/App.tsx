@@ -1,25 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  Gift, 
-  User, 
-  LayoutDashboard, 
-  PlayCircle, 
-  TrendingUp, 
-  Clock, 
-  CheckCircle2, 
-  AlertCircle,
-  X,
-  ChevronRight,
-  ChevronDown,
-  Zap,
-  Search,
-  History,
-  Copy,
-  ExternalLink,
-  ShieldCheck,
-  Trash2,
-  Terminal
+  Gift, User, LayoutDashboard, PlayCircle, TrendingUp, Clock, CheckCircle2, AlertCircle,
+  X, ChevronRight, Zap, History, Copy, ExternalLink, ShieldCheck, Trash2, Terminal
 } from 'lucide-react';
 import { Clipboard } from '@capacitor/clipboard';
 import { Toast } from '@capacitor/toast';
@@ -31,23 +14,13 @@ import { useAds } from './hooks/useAds';
 import { firebaseService, FirebaseUser, isConfigValid } from './services/firebase';
 import { APP_NAME, APP_VERSION } from './constants';
 import { HomeScreen } from './components/HomeScreen';
-
 import icon from '../assets/icon.png';
 
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
-
-// --- Components ---
+function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
 const Logo = ({ className }: { className?: string }) => (
   <div className={cn("relative w-full mx-auto group cursor-pointer", className)}>
-    <img 
-      src={icon} 
-      alt={`${APP_NAME} Logo`} 
-      className="w-full h-auto object-contain rounded-[2.5rem] shadow-2xl transition-transform group-hover:scale-105"
-      referrerPolicy="no-referrer"
-    />
+    <img src={icon} alt={`${APP_NAME} Logo`} className="w-full h-auto object-contain rounded-[2.5rem] shadow-2xl transition-transform group-hover:scale-105" referrerPolicy="no-referrer" />
   </div>
 );
 
@@ -56,22 +29,11 @@ const Navbar = ({ activeTab, setActiveTab }: { activeTab: string, setActiveTab: 
     { id: 'offers', icon: LayoutDashboard, label: 'Rewards' },
     { id: 'profile', icon: User, label: 'Profile' },
   ];
-
   return (
-    <nav 
-      className="fixed bottom-0 left-0 right-0 bg-white border-t border-zinc-200 px-6 pt-3 z-50"
-      style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.75rem)' }}
-    >
+    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-zinc-200 px-6 pt-3 z-50" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.75rem)' }}>
       <div className="max-w-md mx-auto flex justify-between items-center">
         {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={cn(
-              "flex flex-col items-center gap-1 transition-colors",
-              activeTab === tab.id ? "text-indigo-600" : "text-zinc-400 hover:text-zinc-600"
-            )}
-          >
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === tab.id ? "text-indigo-600" : "text-zinc-400 hover:text-zinc-600")}>
             <tab.icon size={20} strokeWidth={activeTab === tab.id ? 2.5 : 2} />
             <span className="text-[10px] font-medium uppercase tracking-wider">{tab.label}</span>
           </button>
@@ -82,10 +44,7 @@ const Navbar = ({ activeTab, setActiveTab }: { activeTab: string, setActiveTab: 
 };
 
 const Header = ({ user }: { user: UserProfile }) => (
-  <header 
-    className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-zinc-100 px-5 pb-2 z-40"
-    style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.5rem)' }}
-  >
+  <header className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-zinc-100 px-5 pb-2 z-40" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.5rem)' }}>
     <div className="max-w-md mx-auto flex justify-between items-center">
       <div className="flex items-center gap-3">
         <Logo className="max-w-[36px]" />
@@ -102,61 +61,38 @@ const Header = ({ user }: { user: UserProfile }) => (
   </header>
 );
 
-// Version 9.3.0: AdSimulatorModal z-index fixed from z-[100] to z-[9999]
-const AdSimulatorModal = ({ 
-  isOpen, 
-  onClose, 
-  onReward, 
-  isBoost = false, 
-  user = null, 
-  onClaim = null 
-}: { 
-  isOpen: boolean, 
-  onClose: () => void, 
-  onReward: () => Promise<any>, 
-  isBoost?: boolean,
-  user?: UserProfile | null,
-  onClaim?: () => Promise<any>
+// ═══════════════════════════════════════════════════════════════════════
+// v10: AdSimulatorModal — WEB ONLY, single simple countdown
+// OLD BUGS: 
+//   1. z-[100] while banner was z-[1000] → banner on top of modal
+//   2. "Watch Next Ad" loop called onReward() multiple times → counter overflow
+//   3. Used stale user?.currentLevelAdCounter from prop → showed wrong progress
+// FIX: z-[9999], single-ad-per-open (no loop), simple onComplete callback
+// ═══════════════════════════════════════════════════════════════════════
+const AdSimulatorModal = ({ isOpen, onClose, onComplete }: {
+  isOpen: boolean; onClose: () => void; onComplete: () => void;
 }) => {
   const [timeLeft, setTimeLeft] = useState(5);
   const [isFinished, setIsFinished] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
-    
     setTimeLeft(5);
     setIsFinished(false);
-    
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          setIsFinished(true);
-          return 0;
-        }
+        if (prev <= 1) { clearInterval(timer); setIsFinished(true); return 0; }
         return prev - 1;
       });
     }, 1000);
-
     return () => clearInterval(timer);
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  // Version 8.0.0: Boost Logic
-  const adsNeeded = user?.boostLevel || 1;
-  const adsWatched = user?.currentLevelAdCounter || 0;
-  const isLastAd = isBoost && (adsWatched + 1 >= adsNeeded);
-  const canClaim = isBoost && isFinished && isLastAd;
-
   return (
-    <div 
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-6 bg-black/90 backdrop-blur-sm"
-      style={{ 
-        paddingTop: 'calc(env(safe-area-inset-top) + 1.5rem)',
-        paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)'
-      }}
-    >
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6 bg-black/90 backdrop-blur-sm"
+      style={{ paddingTop: 'calc(env(safe-area-inset-top) + 1.5rem)', paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)' }}>
       <div className="w-full max-w-sm bg-zinc-900 rounded-3xl overflow-hidden border border-zinc-800 shadow-2xl">
         <div className="relative aspect-video bg-zinc-800 flex items-center justify-center">
           <PlayCircle size={48} className="text-zinc-600 animate-pulse" />
@@ -165,190 +101,92 @@ const AdSimulatorModal = ({
           </div>
         </div>
         <div className="p-6 text-center">
-          <h3 className="text-lg font-bold text-white mb-2">
-            {isBoost ? `Daily Boost Level ${adsNeeded}` : 'Watching Sponsored Content'}
-          </h3>
-          <p className="text-sm text-zinc-400 mb-6">
-            {isBoost 
-              ? `Progress: ${adsWatched}/${adsNeeded} ads watched. ${isLastAd ? 'This is the final ad!' : 'Complete requirements to claim 100 points.'}`
-              : 'Complete this short video to earn 100 points and unlock rewards.'}
-          </p>
-          
-          <div className="flex flex-col gap-3">
-            <button
-              onClick={async () => {
-                if (isFinished) {
-                  if (isBoost) {
-                    if (isLastAd) {
-                      // Record last ad AND claim
-                      await onReward();
-                      if (onClaim) await onClaim();
-                      onClose();
-                    } else {
-                      // Record current ad watch and start next one
-                      await onReward();
-                      setTimeLeft(5);
-                      setIsFinished(false);
-                    }
-                  } else {
-                    await onReward();
-                    onClose();
-                  }
-                } else {
-                  onClose();
-                }
-              }}
-              className={cn(
-                "w-full py-3 rounded-2xl font-bold transition-all",
-                isFinished 
-                  ? "bg-emerald-500 text-white hover:bg-emerald-600" 
-                  : "bg-zinc-800 text-zinc-500"
-              )}
-            >
-              {isFinished 
-                ? (isLastAd ? 'Claim +100 Points' : (isBoost ? 'Watch Next Ad' : 'Claim Reward'))
-                : 'Close Ad'}
-            </button>
-          </div>
+          <h3 className="text-lg font-bold text-white mb-2">Watching Sponsored Content</h3>
+          <p className="text-sm text-zinc-400 mb-6">Complete this short video to earn progress toward your boost reward.</p>
+          <button
+            onClick={() => { if (isFinished) { onComplete(); onClose(); } else { onClose(); } }}
+            className={cn("w-full py-3 rounded-2xl font-bold transition-all",
+              isFinished ? "bg-emerald-500 text-white hover:bg-emerald-600" : "bg-zinc-800 text-zinc-500"
+            )}>
+            {isFinished ? 'Continue' : 'Close Ad'}
+          </button>
         </div>
       </div>
     </div>
   );
 };
 
-const DebugLogsModal = ({ isOpen, onClose, logs }: { isOpen: boolean, onClose: () => void, logs: any[] }) => {
+const DebugLogsModal = ({ isOpen, onClose, logs }: { isOpen: boolean; onClose: () => void; logs: any[] }) => {
   if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm">
       <div className="w-full max-w-md bg-zinc-900 rounded-3xl overflow-hidden border border-zinc-800 shadow-2xl flex flex-col max-h-[80vh]">
         <div className="p-4 border-b border-zinc-800 flex justify-between items-center">
           <h3 className="text-lg font-bold text-white">System Debug Logs</h3>
-          <button onClick={onClose} className="p-2 text-zinc-400 hover:text-white">
-            <X size={20} />
-          </button>
+          <button onClick={onClose} className="p-2 text-zinc-400 hover:text-white"><X size={20} /></button>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-2 font-mono text-[10px]">
-          {logs.length === 0 ? (
-            <p className="text-zinc-500 text-center py-8">No logs yet...</p>
-          ) : (
-            logs.map((log: any) => (
-              <div key={log.id} className={cn(
-                "p-2 rounded-lg border",
-                log.event === 'error' ? "bg-rose-900/20 border-rose-800 text-rose-400" :
-                log.event === 'reward' ? "bg-emerald-900/20 border-emerald-800 text-emerald-400" :
-                "bg-zinc-800/50 border-zinc-700 text-zinc-300"
-              )}>
-                <span className="text-zinc-500">{new Date(log.timestamp).toLocaleTimeString()}</span>{' '}
-                <span className="font-bold uppercase">[{log.type}:{log.event}]</span>{' '}
-                <span>{log.message}</span>
-              </div>
-            ))
-          )}
+          {logs.length === 0 ? <p className="text-zinc-500 text-center py-8">No logs yet...</p>
+          : logs.map((log: any) => (
+            <div key={log.id} className={cn("p-2 rounded-lg border",
+              log.event === 'error' ? "bg-rose-900/20 border-rose-800 text-rose-400" :
+              log.event === 'reward' ? "bg-emerald-900/20 border-emerald-800 text-emerald-400" :
+              "bg-zinc-800/50 border-zinc-700 text-zinc-300"
+            )}>
+              <span className="text-zinc-500">{new Date(log.timestamp).toLocaleTimeString()}</span>{' '}
+              <span className="font-bold uppercase">[{log.type}:{log.event}]</span>{' '}
+              <span>{log.message}</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>
   );
 };
 
-const PrivacyModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) => {
+const PrivacyModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
   if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-[100] flex items-end justify-center">
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
-        className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
-      />
-      <motion.div
-        initial={{ opacity: 0, y: 100 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 100 }}
-        className="relative w-full max-w-md bg-white rounded-t-[2.5rem] shadow-2xl overflow-hidden"
-        style={{ maxHeight: '80vh', paddingBottom: 'env(safe-area-inset-bottom)' }}
-      >
+    <div className="fixed inset-0 z-[9999] flex items-end justify-center">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" />
+      <motion.div initial={{ opacity: 0, y: 100 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 100 }}
+        className="relative w-full max-w-md bg-white rounded-t-[2.5rem] shadow-2xl overflow-hidden" style={{ maxHeight: '80vh', paddingBottom: 'env(safe-area-inset-bottom)' }}>
         <div className="p-8 overflow-y-auto" style={{ maxHeight: '75vh' }}>
           <div className="flex justify-between items-center mb-6">
-            <div className="flex items-center gap-3">
-              <ShieldCheck size={24} className="text-indigo-600" />
-              <h3 className="text-xl font-black text-zinc-900">Privacy Policy</h3>
-            </div>
-            <button onClick={onClose} className="p-2 text-zinc-400">
-              <X size={20} />
-            </button>
+            <div className="flex items-center gap-3"><ShieldCheck size={24} className="text-indigo-600" /><h3 className="text-xl font-black text-zinc-900">Privacy Policy</h3></div>
+            <button onClick={onClose} className="p-2 text-zinc-400"><X size={20} /></button>
           </div>
           <div className="text-sm text-zinc-600 space-y-4">
             <p className="font-bold text-zinc-900">Data Collection:</p>
-            <p>We collect your email address (for Google Sign-In) and in-app activity (points earned, offers claimed). No sensitive personal data is stored beyond what is necessary for app functionality.</p>
-            
+            <p>We collect your email address (for Google Sign-In) and in-app activity (points earned, offers claimed).</p>
             <p className="font-bold text-zinc-900">Data Usage:</p>
-            <p>Your data is used solely to provide app functionality, including tracking your rewards and personalizing your experience.</p>
-            
+            <p>Your data is used solely to provide app functionality, including tracking your rewards.</p>
             <p className="font-bold text-zinc-900">Data Deletion:</p>
-            <p>You can delete your account and all associated data at any time directly through the "Delete Account" option in the app settings. Once you confirm deletion, all your personal information, including your email and earned points, will be permanently removed from our databases.</p>
-            
+            <p>You can delete your account and all associated data at any time through the "Delete Account" option in settings.</p>
             <p className="font-bold text-zinc-900">Third Parties & Ads:</p>
-            <p>We do not sell your data or share it with third parties. Our app uses Google AdMob for advertisements, which may collect device identifiers and usage data for ad personalization and analytics.</p>
+            <p>We do not sell your data. Our app uses Google AdMob for advertisements, which may collect device identifiers for ad personalization.</p>
           </div>
-          <button
-            onClick={onClose}
-            className="w-full mt-8 bg-indigo-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all active:scale-95"
-          >
-            Got it
-          </button>
+          <button onClick={onClose} className="w-full mt-8 bg-indigo-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all active:scale-95">Got it</button>
         </div>
       </motion.div>
     </div>
   );
 };
 
-const DeleteAccountModal = ({ isOpen, onClose, onConfirm }: { isOpen: boolean, onClose: () => void, onConfirm: () => void }) => {
+const DeleteAccountModal = ({ isOpen, onClose, onConfirm }: { isOpen: boolean; onClose: () => void; onConfirm: () => void }) => {
   if (!isOpen) return null;
-
   return (
-    <div 
-      className="fixed inset-0 z-[100] flex items-center justify-center p-6"
-      style={{ 
-        paddingTop: 'calc(env(safe-area-inset-top) + 1.5rem)',
-        paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)'
-      }}
-    >
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
-        className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
-      />
-      <motion.div
-        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.9, y: 20 }}
-        className="relative w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl overflow-hidden"
-      >
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 1.5rem)', paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)' }}>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" />
+      <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9, y: 20 }}
+        className="relative w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl overflow-hidden">
         <div className="p-8">
-          <div className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center mb-6">
-            <AlertCircle size={24} className="text-rose-600" />
-          </div>
+          <div className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center mb-6"><AlertCircle size={24} className="text-rose-600" /></div>
           <h3 className="text-xl font-black text-zinc-900 mb-2">Delete Account?</h3>
           <p className="text-sm text-zinc-500 mb-8">This action is permanent. All your points and history will be deleted forever.</p>
-          
           <div className="flex flex-col gap-3">
-            <button
-              onClick={onConfirm}
-              className="w-full bg-rose-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-rose-200 hover:bg-rose-700 transition-all active:scale-95"
-            >
-              Yes, Delete Everything
-            </button>
-            <button
-              onClick={onClose}
-              className="w-full bg-zinc-100 text-zinc-600 py-4 rounded-2xl font-bold hover:bg-zinc-200 transition-all active:scale-95"
-            >
-              Cancel
-            </button>
+            <button onClick={onConfirm} className="w-full bg-rose-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-rose-200 hover:bg-rose-700 transition-all active:scale-95">Yes, Delete Everything</button>
+            <button onClick={onClose} className="w-full bg-zinc-100 text-zinc-600 py-4 rounded-2xl font-bold hover:bg-zinc-200 transition-all active:scale-95">Cancel</button>
           </div>
         </div>
       </motion.div>
@@ -356,55 +194,20 @@ const DeleteAccountModal = ({ isOpen, onClose, onConfirm }: { isOpen: boolean, o
   );
 };
 
-const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, confirmText, cancelText }: { 
-  isOpen: boolean, 
-  onClose: () => void, 
-  onConfirm: () => void, 
-  title: string, 
-  message: string,
-  confirmText?: string,
-  cancelText?: string
-}) => {
+const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, confirmText, cancelText }: { isOpen: boolean; onClose: () => void; onConfirm: () => void; title: string; message: string; confirmText?: string; cancelText?: string }) => {
   if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
-        className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
-      />
-      <motion.div
-        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.9, y: 20 }}
-        className="relative w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl overflow-hidden"
-      >
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" />
+      <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9, y: 20 }}
+        className="relative w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl overflow-hidden">
         <div className="p-8">
-          <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center mb-6">
-            <AlertCircle size={24} className="text-indigo-600" />
-          </div>
+          <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center mb-6"><AlertCircle size={24} className="text-indigo-600" /></div>
           <h3 className="text-xl font-black text-zinc-900 mb-2">{title}</h3>
           <p className="text-sm text-zinc-500 mb-8">{message}</p>
-          
           <div className="flex flex-col gap-3">
-            <button
-              onClick={() => {
-                onConfirm();
-                onClose();
-              }}
-              className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all active:scale-95"
-            >
-              {confirmText || 'Confirm'}
-            </button>
-            <button
-              onClick={onClose}
-              className="w-full bg-zinc-100 text-zinc-600 py-4 rounded-2xl font-bold hover:bg-zinc-200 transition-all active:scale-95"
-            >
-              {cancelText || 'Cancel'}
-            </button>
+            <button onClick={() => { onConfirm(); onClose(); }} className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all active:scale-95">{confirmText || 'Confirm'}</button>
+            <button onClick={onClose} className="w-full bg-zinc-100 text-zinc-600 py-4 rounded-2xl font-bold hover:bg-zinc-200 transition-all active:scale-95">{cancelText || 'Cancel'}</button>
           </div>
         </div>
       </motion.div>
@@ -412,8 +215,9 @@ const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, confirmText,
   );
 };
 
-// --- Main App ---
-
+// ═══════════════════════════════════════════════════════════════════════
+// MAIN APP — v10.0.0
+// ═══════════════════════════════════════════════════════════════════════
 export default function App() {
   const [activeTab, setActiveTab] = useState('offers');
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
@@ -424,211 +228,132 @@ export default function App() {
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [confirmConfig, setConfirmConfig] = useState({ title: '', message: '', onConfirm: () => {} });
+  const [isWebAdModalOpen, setIsWebAdModalOpen] = useState(false);
+  const [isAdInProgress, setIsAdInProgress] = useState(false);
 
   useEffect(() => {
-    const unsubscribeAuth = firebaseService.onAuthChange((fUser) => {
-      setFirebaseUser(fUser);
-      if (!fUser) {
-        setIsAuthLoading(false);
-      }
-    });
-
-    return () => unsubscribeAuth();
+    const unsub = firebaseService.onAuthChange((fUser) => { setFirebaseUser(fUser); if (!fUser) setIsAuthLoading(false); });
+    return () => unsub();
   }, []);
 
-  // Real-time listeners for profile, claims, and history
-  useEffect(() => {
-    if (!firebaseUser?.uid) {
-      setUser(null);
-      setFirestoreClaims([]);
-      setFirestoreHistory([]);
-      return;
-    }
+  const [firestoreClaims, setFirestoreClaims] = useState<Transaction[]>([]);
+  const [firestoreHistory, setFirestoreHistory] = useState<Transaction[]>([]);
 
+  useEffect(() => {
+    if (!firebaseUser?.uid) { setUser(null); setFirestoreClaims([]); setFirestoreHistory([]); return; }
     const uid = firebaseUser.uid;
     setIsAuthLoading(true);
+    if (uid.startsWith('local_guest_') || (firebaseUser && !isAuthLoading)) firebaseService.checkDailyReset(uid);
 
-    // Check for daily reset
-    const isLocalGuest = uid.startsWith('local_guest_');
-    if (isLocalGuest || (firebaseUser && !isAuthLoading)) {
-      firebaseService.checkDailyReset(uid);
-    }
-
-    // Listen to profile changes in real-time
-    const unsubscribeProfile = firebaseService.onProfileChange(uid, (profile) => {
-      console.log(`[DEBUG] Profile change detected for ${uid}:`, JSON.stringify({
-        points: profile?.points,
-        boostLevel: profile?.boostLevel,
-        adsWatchedToday: profile?.adsWatchedToday,
-        currentLevelAdCounter: profile?.currentLevelAdCounter,
-        lastBoostDate: profile?.lastBoostDate
-      }));
-      
-      if (profile) {
-        setUser(profile);
-      } else {
-        // Create profile if it doesn't exist
-        console.log("[DEBUG] Profile not found, initializing for:", uid);
-        const newProfile: UserProfile = {
-          uid: uid,
-          email: firebaseUser.email || (uid.startsWith('local_guest_') ? 'Guest User' : 'Unknown'),
-          points: 0,
-          claimsToday: 0,
-          lastClaimDate: null,
-          totalEarned: 0,
-          boostLevel: 1,
-          adsWatchedToday: 0,
-          currentLevelAdCounter: 0,
-          lastBoostDate: new Date().toDateString()
-        };
-        firebaseService.saveUserProfile(newProfile);
+    const unsubProfile = firebaseService.onProfileChange(uid, (profile) => {
+      if (profile) { setUser(profile); } else {
+        firebaseService.saveUserProfile({
+          uid, email: firebaseUser.email || (uid.startsWith('local_guest_') ? 'Guest User' : 'Unknown'),
+          points: 0, claimsToday: 0, lastClaimDate: null, totalEarned: 0,
+          boostLevel: 1, adsWatchedToday: 0, currentLevelAdCounter: 0, lastBoostDate: new Date().toDateString()
+        });
       }
       setIsAuthLoading(false);
     });
-
-    // Listen to claims/transactions in real-time
-    const unsubscribeClaims = firebaseService.onClaimsChange(uid, (claims) => {
-      setFirestoreClaims(claims);
-    });
-
-    const unsubscribeHistory = firebaseService.onHistoryChange(uid, (history) => {
-      setFirestoreHistory(history);
-    });
-
-    return () => {
-      unsubscribeProfile();
-      unsubscribeClaims();
-      unsubscribeHistory();
-    };
+    const unsubClaims = firebaseService.onClaimsChange(uid, setFirestoreClaims);
+    const unsubHistory = firebaseService.onHistoryChange(uid, setFirestoreHistory);
+    return () => { unsubProfile(); unsubClaims(); unsubHistory(); };
   }, [firebaseUser?.uid]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const categories = ['all', 'Fashion', 'Delivery apps', 'Shopping', 'Travel', 'Food', 'General'];
-  
-  const [isAdOpen, setIsAdOpen] = useState(false);
-  const [isBoostAd, setIsBoostAd] = useState(false);
-  
+
   const [localTransactions, setLocalTransactions] = useState<Transaction[]>(() => {
     const saved = localStorage.getItem('local_transactions');
     return saved ? JSON.parse(saved) : [];
   });
-  const [firestoreClaims, setFirestoreClaims] = useState<Transaction[]>([]);
-  const [firestoreHistory, setFirestoreHistory] = useState<Transaction[]>([]);
 
   const transactions = useMemo(() => {
     const all = [...localTransactions, ...firestoreClaims, ...firestoreHistory];
-    // Remove duplicates by ID
-    const unique = Array.from(new Map(all.map(tx => [tx.id, tx])).values());
-    return unique.sort((a, b) => 
-      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    );
+    return Array.from(new Map(all.map(tx => [tx.id, tx])).values())
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [localTransactions, firestoreClaims, firestoreHistory]);
 
-  useEffect(() => {
-    localStorage.setItem('local_transactions', JSON.stringify(localTransactions.slice(0, 50)));
-  }, [localTransactions]);
+  useEffect(() => { localStorage.setItem('local_transactions', JSON.stringify(localTransactions.slice(0, 50))); }, [localTransactions]);
+  useEffect(() => { if (user) localStorage.setItem('currentBoostProgress', JSON.stringify({ adsWatchedToday: user.adsWatchedToday, boostLevel: user.boostLevel, currentLevelAdCounter: user.currentLevelAdCounter, lastBoostDate: user.lastBoostDate })); }, [user]);
 
-  useEffect(() => {
-    if (user) {
-      localStorage.setItem('currentBoostProgress', JSON.stringify({
-        adsWatchedToday: user.adsWatchedToday,
-        boostLevel: user.boostLevel,
-        currentLevelAdCounter: user.currentLevelAdCounter,
-        lastBoostDate: user.lastBoostDate
-      }));
-    }
-  }, [user]);
-
-  // Version 9.3.0: Updated useAds destructuring with new AdMob exports
-  const { 
-    logs, addLog, watchAd, claimBoostReward, 
-    offers, isLoading, onOffersChange,
-    showBanner, hideBanner, isBannerVisible, showAppOpenAd, isNative 
+  const {
+    logs, addLog, offers, isLoading, onOffersChange,
+    showNativeRewardedAd, recordAdWatch, claimBoostReward,
+    showBanner, hideBanner, isBannerVisible, showAppOpenAd, isNative
   } = useAds(firebaseUser?.uid);
 
-  useEffect(() => {
-    // Version 7.4.0: Listen to ALL offers in real-time
-    const unsubscribe = onOffersChange();
-    return () => unsubscribe();
-  }, [onOffersChange]);
+  useEffect(() => { const unsub = onOffersChange(); return () => unsub(); }, [onOffersChange]);
 
-  // Filtered Offers (Client-Side Filtering)
   const filteredOffers = useMemo(() => {
-    const result = offers.filter(offer => {
-      // 1. Category Filter
-      const selected = selectedCategory.toLowerCase();
-      const matchesCategory = selected === 'all' || 
-        (Array.isArray(offer.category) 
-          ? offer.category.some(cat => String(cat).toLowerCase() === selected)
-          : String(offer.category || '').toLowerCase() === selected);
-      
-      if (!matchesCategory) return false;
-
-      // 2. Search Filter
-      const searchLower = searchQuery.toLowerCase();
-      const matchesSearch = 
-        offer.brand.toLowerCase().includes(searchLower) ||
-        offer.description.toLowerCase().includes(searchLower) ||
-        offer.type.toLowerCase().includes(searchLower);
-      
-      return matchesSearch;
+    return offers.filter(offer => {
+      const sel = selectedCategory.toLowerCase();
+      const matchCat = sel === 'all' || (Array.isArray(offer.category) ? offer.category.some(c => String(c).toLowerCase() === sel) : String(offer.category || '').toLowerCase() === sel);
+      if (!matchCat) return false;
+      const s = searchQuery.toLowerCase();
+      return offer.brand.toLowerCase().includes(s) || offer.description.toLowerCase().includes(s) || offer.type.toLowerCase().includes(s);
     });
-    
-    console.log(`[DEBUG] Filtering: ${offers.length} total -> ${result.length} filtered (Category: ${selectedCategory}, Search: "${searchQuery}")`);
-    return result;
   }, [offers, searchQuery, selectedCategory]);
 
   const displayPoints = useMemo(() => {
-    const points = transactions.reduce((acc, tx) => {
-      if (tx.type === 'earn') return acc + tx.amount;
-      if (tx.type === 'claim') return acc - tx.amount;
-      return acc;
-    }, 0);
-    return Math.max(0, Number(points || 0));
+    return Math.max(0, transactions.reduce((acc, tx) => tx.type === 'earn' ? acc + tx.amount : tx.type === 'claim' ? acc - tx.amount : acc, 0));
   }, [transactions]);
 
-  // Version 9.3.0: Real App Open Ad on native, no-op on web
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      showAppOpenAd();
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, [showAppOpenAd]);
+  // App Open Ad
+  useEffect(() => { const t = setTimeout(() => showAppOpenAd(), 1500); return () => clearTimeout(t); }, [showAppOpenAd]);
 
-  // Version 9.3.0: Banner should only show on HomeScreen tab, hide when modals are open
+  // Banner lifecycle
   useEffect(() => {
-    if (activeTab === 'offers' && !isAdOpen) {
-      showBanner();
+    if (activeTab === 'offers' && !isWebAdModalOpen && !isAdInProgress) showBanner();
+    else hideBanner();
+  }, [activeTab, isWebAdModalOpen, isAdInProgress, showBanner, hideBanner]);
+
+  // ═══════════════════════════════════════════════════════════════════
+  // v10: PLATFORM-AWARE AD FLOW — the core fix for Bug #1
+  //
+  // OLD: handleWatchAd() → opens AdSimulatorModal (5s timer) →
+  //   handleAdReward() → watchAd() → simulateAd() (ANOTHER 3s timer) →
+  //   recordAdWatch(). Double timers, double ads, counter overflow.
+  //
+  // NEW: Two completely separate paths:
+  //   Native: showNativeRewardedAd() → recordAdWatch(). No modal at all.
+  //   Web: Open AdSimulatorModal → countdown → recordAdWatch(). No AdMob.
+  // ═══════════════════════════════════════════════════════════════════
+  const handleWatchAd = async () => {
+    if (isAdInProgress) return;
+    setIsAdInProgress(true);
+
+    if (isNative) {
+      await hideBanner();
+      addLog('rewarded', 'load', 'Starting native rewarded ad');
+      const completed = await showNativeRewardedAd();
+      if (completed) {
+        const result = await recordAdWatch();
+        if (result) {
+          addLog('rewarded', 'reward', `Progress: ${result.currentLevelAdCounter}/${result.adsNeeded}`);
+          Toast.show({ text: `Ad watched! (${result.currentLevelAdCounter}/${result.adsNeeded})`, duration: 'short' });
+          if (result.currentLevelAdCounter >= result.adsNeeded) await handleClaimBoostReward();
+        }
+      } else {
+        Toast.show({ text: 'Ad was not completed.', duration: 'short' });
+      }
+      setIsAdInProgress(false);
+      if (activeTab === 'offers') showBanner();
     } else {
-      hideBanner();
+      // Web: open modal, let countdown handle it
+      await hideBanner();
+      setIsWebAdModalOpen(true);
+      setIsAdInProgress(false);
     }
-  }, [activeTab, isAdOpen, showBanner, hideBanner]);
-
-  // Version 9.3.0: Hide banner before showing reward modal to prevent overlay
-  const handleWatchAd = async (isBoost: boolean = false) => {
-    setIsBoostAd(isBoost);
-    addLog('rewarded', 'load');
-    await hideBanner();
-    setIsAdOpen(true);
-    addLog('rewarded', 'show');
   };
 
-  const handleAdReward = async () => {
-    try {
-      const result = await watchAd();
-      
-      if (result) {
-        addLog('rewarded', 'show', `Ad watched. Progress: ${result.adsWatchedToday}/${result.adsNeeded}`);
-        Toast.show({ text: `Ad watched! (${result.adsWatchedToday}/${result.adsNeeded})`, duration: 'short' });
-
-        if (result.isLocalGuest) {
-          console.log("[DEBUG] Guest reward processed locally");
-        }
-      }
-    } catch (error) {
-      console.error("Failed to reward points:", error);
-      Toast.show({ text: "Error rewarding points. Please try again.", duration: 'short' });
+  const handleWebAdComplete = async () => {
+    addLog('rewarded', 'reward', 'Web ad completed');
+    const result = await recordAdWatch();
+    if (result) {
+      Toast.show({ text: `Ad watched! (${result.currentLevelAdCounter}/${result.adsNeeded})`, duration: 'short' });
+      if (result.currentLevelAdCounter >= result.adsNeeded) await handleClaimBoostReward();
     }
   };
 
@@ -636,470 +361,190 @@ export default function App() {
     try {
       const result = await claimBoostReward();
       if (result) {
-        addLog('rewarded', 'reward', `Boost Level ${result.boostLevel - 1} completed! User earned 100 points.`);
-        Toast.show({ text: `Congratulations! Boost Level ${result.boostLevel - 1} Completed! +100 pts`, duration: 'long' });
+        addLog('rewarded', 'reward', `Boost Level ${result.boostLevel - 1} completed! +100 pts`);
+        Toast.show({ text: `Boost Level ${result.boostLevel - 1} Completed! +100 pts`, duration: 'long' });
       }
     } catch (error) {
-      console.error("Failed to claim boost reward:", error);
-      Toast.show({ text: "Error claiming reward. Please try again.", duration: 'short' });
+      console.error("Claim boost failed:", error);
+      Toast.show({ text: "Error claiming reward.", duration: 'short' });
     }
-  };
-
-  const openPrivacyPolicy = () => {
-    setIsPrivacyModalOpen(true);
   };
 
   const handleClaimOffer = async (offer: Offer, currentCost: number) => {
-    if (!user) {
-      console.warn("[DEBUG] handleClaimOffer called but no user found");
-      return;
-    }
-
-    console.log(`[DEBUG] handleClaimOffer started for ${offer.brand} (Cost: ${currentCost}, User Points: ${user.points})`);
-
-    // Check eligibility
+    if (!user) return;
     if (user.points < currentCost) {
-      console.log("[DEBUG] Insufficient points for claim");
-      addLog('rewarded', 'error', 'Insufficient points for claim');
-      setConfirmConfig({
-        title: 'Not Enough Points',
-        message: `You need ${currentCost - user.points} more points. Would you like to watch a short ad to earn 100 points?`,
-        onConfirm: handleWatchAd
-      });
+      setConfirmConfig({ title: 'Not Enough Points', message: `You need ${currentCost - user.points} more points. Watch an ad to earn progress.`, onConfirm: handleWatchAd });
       setIsConfirmModalOpen(true);
       return;
     }
-
     try {
-      console.log("[DEBUG] Calling firebaseService.claimOffer...");
       await firebaseService.claimOffer(user.uid, offer);
-      console.log("[DEBUG] claimOffer success");
-      
-      addLog('banner', 'reward', `Successfully claimed ${offer.brand}`);
-      
-      if (!offer.code) {
-        Browser.open({ url: offer.url });
-      } else {
-        setConfirmConfig({
-          title: 'Success!',
-          message: `Your code for ${offer.brand} is: ${offer.code}. It has been saved to your history.`,
-          onConfirm: () => {
-            Clipboard.write({ string: offer.code! });
-            Toast.show({ text: 'Code copied!', duration: 'short' });
-          }
-        });
+      if (!offer.code) { Browser.open({ url: offer.url }); }
+      else {
+        setConfirmConfig({ title: 'Success!', message: `Your code: ${offer.code}. Saved to history.`, onConfirm: () => { Clipboard.write({ string: offer.code! }); Toast.show({ text: 'Code copied!', duration: 'short' }); } });
         setIsConfirmModalOpen(true);
       }
     } catch (error) {
-      console.error("[DEBUG] Claim failed:", error);
-      Toast.show({ text: "Failed to claim offer. Please try again.", duration: 'long' });
+      Toast.show({ text: "Failed to claim offer.", duration: 'long' });
     }
   };
 
   const handleSignIn = async () => {
-    console.log("[DEBUG] handleSignIn starting...");
     setIsAuthLoading(true);
     try {
-      addLog('app_open', 'load', 'Starting Google Sign-In...');
       const userObj = await firebaseService.signInWithGoogle();
-      if (userObj) {
-        console.log("[DEBUG] Google Sign-In Success:", userObj.uid);
-        setFirebaseUser(userObj);
-        addLog('app_open', 'show', `Signed in as ${userObj.email}`);
-        Toast.show({ text: "Signed in successfully!", duration: 'short' });
-      } else {
-        console.warn("[DEBUG] Google Sign-In result is null");
-      }
+      if (userObj) { setFirebaseUser(userObj); Toast.show({ text: "Signed in!", duration: 'short' }); }
     } catch (error) {
-      console.error("[DEBUG] Sign in failed:", error);
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      addLog('app_open', 'error', `Sign-in Error: ${errorMessage}`);
-      Toast.show({ 
-        text: `Google Sign-In failed: ${errorMessage.slice(0, 50)}...`, 
-        duration: 'long' 
-      });
-    } finally {
-      setIsAuthLoading(false);
-    }
+      const msg = error instanceof Error ? error.message : String(error);
+      addLog('app_open', 'error', `Sign-in: ${msg}`);
+      Toast.show({ text: `Sign-In failed: ${msg.slice(0, 60)}`, duration: 'long' });
+    } finally { setIsAuthLoading(false); }
   };
 
   const handleGuestSignIn = async () => {
     setIsAuthLoading(true);
-    addLog('app_open', 'load', 'Starting Guest Sign-In...');
-    
     try {
       const fUser = await firebaseService.signInAnonymously();
-      console.log("[DEBUG] Anonymous sign-in success", fUser.uid);
       setFirebaseUser(fUser);
-      addLog('app_open', 'show', 'Guest Sign-In Success (Firebase)');
-      
       const profile = await firebaseService.getUserProfile(fUser.uid);
-      if (profile) {
-        console.log("[DEBUG] Profile found for anonymous user");
-        setUser(profile);
-      }
+      if (profile) setUser(profile);
     } catch (err) {
-      console.error("Anonymous sign-in failed:", err);
-      addLog('app_open', 'error', `Firebase Guest Sign-In failed: ${err instanceof Error ? err.message : String(err)}`);
-      
-      // Fallback to local guest ID if Firebase fails (offline mode)
       let localUid = localStorage.getItem('persistent_guest_id');
-      if (!localUid) {
-        localUid = 'local_guest_' + Math.random().toString(36).substr(2, 9);
-        localStorage.setItem('persistent_guest_id', localUid);
-      }
-      console.log("[DEBUG] Using local guest ID", localUid);
-
-      const guestProfile: UserProfile = {
-        uid: localUid,
-        email: 'Guest User',
-        points: 0,
-        claimsToday: 0,
-        lastClaimDate: null,
-        totalEarned: 0,
-      };
-
+      if (!localUid) { localUid = 'local_guest_' + Math.random().toString(36).substr(2, 9); localStorage.setItem('persistent_guest_id', localUid); }
       setFirebaseUser({ uid: localUid, isAnonymous: true } as any);
-      setUser(guestProfile);
-      addLog('app_open', 'show', 'Guest Sign-In Success (Local Fallback)');
-    } finally {
-      setIsAuthLoading(false);
-    }
+      setUser({ uid: localUid, email: 'Guest User', points: 0, claimsToday: 0, lastClaimDate: null, totalEarned: 0 });
+    } finally { setIsAuthLoading(false); }
   };
 
-  const handleSignOut = async () => {
-    try {
-      await firebaseService.logout();
-    } catch (error) {
-      console.error("Logout error:", error);
-    } finally {
-      setFirebaseUser(null);
-      setUser(null);
-    }
-  };
+  const handleSignOut = async () => { try { await firebaseService.logout(); } catch {} finally { setFirebaseUser(null); setUser(null); } };
 
   const handleDeleteAccount = async () => {
     if (!user) return;
-    
     setIsAuthLoading(true);
     try {
       await firebaseService.deleteUserProfile(user.uid);
-      
-      if (!user.uid.startsWith('local_guest_')) {
-        await firebaseService.deleteAccount();
-      }
-      
-      await Toast.show({ text: 'Account deleted successfully', duration: 'long' });
+      if (!user.uid.startsWith('local_guest_')) await firebaseService.deleteAccount();
+      Toast.show({ text: 'Account deleted', duration: 'long' });
     } catch (error: any) {
-      console.error("Delete account error:", error);
-      if (error.code === 'auth/requires-recent-login') {
-        Toast.show({ text: "Please sign out and sign in again before deleting your account.", duration: 'long' });
-      } else {
-        Toast.show({ text: "Failed to delete account. Please try again later.", duration: 'long' });
-      }
-    } finally {
-      setFirebaseUser(null);
-      setUser(null);
-      setIsAuthLoading(false);
-      setIsDeleteModalOpen(false);
-    }
+      Toast.show({ text: error.code === 'auth/requires-recent-login' ? "Sign out & sign in again first." : "Delete failed.", duration: 'long' });
+    } finally { setFirebaseUser(null); setUser(null); setIsAuthLoading(false); setIsDeleteModalOpen(false); }
   };
 
   if (!isConfigValid) {
-    return (
-      <div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-6 text-center">
-        <AlertCircle size={48} className="text-rose-500 mb-4" />
-        <h1 className="text-xl font-bold text-zinc-900 mb-2">Configuration Error</h1>
-        <p className="text-sm text-zinc-500 max-w-xs">
-          Firebase configuration is missing. Please check your environment variables and restart the app.
-        </p>
-      </div>
-    );
+    return (<div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-6 text-center">
+      <AlertCircle size={48} className="text-rose-500 mb-4" /><h1 className="text-xl font-bold text-zinc-900 mb-2">Configuration Error</h1>
+      <p className="text-sm text-zinc-500 max-w-xs">Firebase configuration is missing.</p></div>);
   }
 
-  // Version 7.4.0: Refactored return to ensure DebugLogsModal is always available
   const renderMainContent = () => {
-    if (isAuthLoading) {
-      return (
-        <div 
-          className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center gap-6"
-          style={{ 
-            paddingTop: 'env(safe-area-inset-top)',
-            paddingBottom: 'env(safe-area-inset-bottom)'
-          }}
-        >
-          <Logo className="max-w-[120px]" />
-          <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-        </div>
-      );
-    }
+    if (isAuthLoading) return (
+      <div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center gap-6" style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        <Logo className="max-w-[120px]" /><div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
 
-    if (!firebaseUser) {
-      return (
-        <div 
-          className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-8 text-center"
-          style={{ 
-            paddingTop: 'env(safe-area-inset-top)',
-            paddingBottom: 'env(safe-area-inset-bottom)'
-          }}
-        >
-          <div className="w-full max-w-sm flex flex-col items-center">
-            <Logo className="max-w-[160px]" />
-            <h1 className="text-3xl font-black tracking-tight text-zinc-900 mt-8 mb-3">Welcome to RewardHub</h1>
-            <p className="text-sm text-zinc-500 mb-10 max-w-[280px]">Sign in with Google to start earning points and save your progress.</p>
-            
-            <div className="w-full space-y-4">
-              <button 
-                onClick={handleSignIn}
-                disabled={isAuthLoading}
-                className="w-full bg-white border border-zinc-200 py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-sm hover:shadow-md transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
-              >
-                {isAuthLoading ? (
-                  <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
-                )}
-                {isAuthLoading ? 'Signing in...' : 'Continue with Google'}
-              </button>
-
-              <button 
-                onClick={handleGuestSignIn}
-                className="w-full bg-zinc-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg shadow-zinc-200 hover:bg-zinc-800 transition-all active:scale-95"
-              >
-                <User size={20} />
-                Continue as Guest
-              </button>
-            </div>
-            
-            <p className="mt-12 text-[10px] text-zinc-400 font-medium uppercase tracking-widest">
-              Version {APP_VERSION}
-            </p>
-
-            <button 
-              onClick={() => setIsDebugModalOpen(true)}
-              className="mt-4 flex items-center gap-2 text-[10px] font-bold text-zinc-300 uppercase tracking-wider hover:text-zinc-500 transition-colors"
-            >
-              <Terminal size={12} />
-              System Debugger
+    if (!firebaseUser) return (
+      <div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-8 text-center" style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        <div className="w-full max-w-sm flex flex-col items-center">
+          <Logo className="max-w-[160px]" />
+          <h1 className="text-3xl font-black tracking-tight text-zinc-900 mt-8 mb-3">Welcome to RewardHub</h1>
+          <p className="text-sm text-zinc-500 mb-10 max-w-[280px]">Sign in with Google to start earning points.</p>
+          <div className="w-full space-y-4">
+            <button onClick={handleSignIn} disabled={isAuthLoading} className="w-full bg-white border border-zinc-200 py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-sm hover:shadow-md transition-all active:scale-95 disabled:opacity-70">
+              {isAuthLoading ? <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" /> : <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />}
+              {isAuthLoading ? 'Signing in...' : 'Continue with Google'}
             </button>
+            <button onClick={handleGuestSignIn} className="w-full bg-zinc-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg shadow-zinc-200 hover:bg-zinc-800 transition-all active:scale-95"><User size={20} /> Continue as Guest</button>
           </div>
+          <p className="mt-12 text-[10px] text-zinc-400 font-medium uppercase tracking-widest">Version {APP_VERSION}</p>
+          <button onClick={() => setIsDebugModalOpen(true)} className="mt-4 flex items-center gap-2 text-[10px] font-bold text-zinc-300 uppercase tracking-wider hover:text-zinc-500 transition-colors"><Terminal size={12} /> System Debugger</button>
         </div>
-      );
-    }
+      </div>
+    );
 
-    if (!user) {
-      return (
-        <div className="h-screen flex flex-col items-center justify-center bg-zinc-50 p-6">
-          <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4" />
-          <p className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Loading Profile...</p>
-        </div>
-      );
-    }
+    if (!user) return (
+      <div className="h-screen flex flex-col items-center justify-center bg-zinc-50 p-6">
+        <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4" />
+        <p className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Loading Profile...</p>
+      </div>
+    );
 
     return (
       <div className="h-screen flex flex-col bg-zinc-50 font-sans selection:bg-indigo-100 selection:text-indigo-900 overflow-hidden">
         <div className="flex-1 overflow-y-auto scroll-smooth relative">
           <Header user={{ ...user, points: Number(displayPoints || 0) }} />
-
           <main className="max-w-md mx-auto px-6 py-6 pb-[120px]">
             <AnimatePresence mode="wait">
               {activeTab === 'offers' && (
-                <HomeScreen 
-                  user={{ ...user, points: Number(displayPoints || 0) }}
-                  offers={offers}
-                  isLoading={isLoading}
-                  searchQuery={searchQuery}
-                  setSearchQuery={setSearchQuery}
-                  selectedCategory={selectedCategory}
-                  setSelectedCategory={setSelectedCategory}
-                  categories={categories}
-                  filteredOffers={filteredOffers}
-                  transactions={transactions}
-                  handleWatchAd={() => handleWatchAd(true)}
-                  handleClaimOffer={handleClaimOffer}
-                  handleClaimBoostReward={handleClaimBoostReward}
-                  isBannerVisible={isBannerVisible && !isNative}
-                />
+                <HomeScreen user={{ ...user, points: Number(displayPoints || 0) }}
+                  offers={offers} isLoading={isLoading} searchQuery={searchQuery} setSearchQuery={setSearchQuery}
+                  selectedCategory={selectedCategory} setSelectedCategory={setSelectedCategory} categories={categories}
+                  filteredOffers={filteredOffers} transactions={transactions} handleWatchAd={handleWatchAd}
+                  handleClaimOffer={handleClaimOffer} handleClaimBoostReward={handleClaimBoostReward}
+                  isBannerVisible={isBannerVisible && !isNative} />
               )}
-
               {activeTab === 'profile' && (
-              <motion.div
-                key="profile"
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 10 }}
-                className="space-y-6"
-              >
-                <div className="bg-white rounded-3xl p-6 border border-zinc-200 shadow-sm text-center">
-                  <div className="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <User size={40} className="text-indigo-600" />
-                  </div>
-                  <h2 className="text-xl font-bold text-zinc-900">{user.email}</h2>
-                  <p className="text-xs text-zinc-500 font-medium">Member since {APP_VERSION}</p>
-                  
-                  <div className="grid grid-cols-2 gap-4 mt-8">
-                    <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100">
-                      <span className="block text-[10px] uppercase font-bold text-zinc-400 tracking-wider mb-1">Total Points</span>
-                      <span className="text-lg font-bold text-zinc-900">{Math.max(0, Number(displayPoints || 0))}</span>
+                <motion.div key="profile" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} className="space-y-6">
+                  <div className="bg-white rounded-3xl p-6 border border-zinc-200 shadow-sm text-center">
+                    <div className="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4"><User size={40} className="text-indigo-600" /></div>
+                    <h2 className="text-xl font-bold text-zinc-900">{user.email}</h2>
+                    <p className="text-xs text-zinc-500 font-medium">Member since {APP_VERSION}</p>
+                    <div className="grid grid-cols-2 gap-4 mt-8">
+                      <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100"><span className="block text-[10px] uppercase font-bold text-zinc-400 tracking-wider mb-1">Total Points</span><span className="text-lg font-bold text-zinc-900">{Math.max(0, Number(displayPoints || 0))}</span></div>
+                      <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100"><span className="block text-[10px] uppercase font-bold text-zinc-400 tracking-wider mb-1">Claims</span><span className="text-lg font-bold text-zinc-900">{transactions.filter(t => t.type === 'claim').length}</span></div>
                     </div>
-                    <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100">
-                      <span className="block text-[10px] uppercase font-bold text-zinc-400 tracking-wider mb-1">Claims</span>
-                      <span className="text-lg font-bold text-zinc-900">{transactions.filter(t => t.type === 'claim').length}</span>
+                    <div className="mt-6 pt-6 border-t border-zinc-100">
+                      <button onClick={() => setIsDebugModalOpen(true)} className="w-full flex items-center justify-between p-4 bg-zinc-50 rounded-2xl text-left hover:bg-zinc-100 transition-colors">
+                        <div className="flex items-center gap-3"><Terminal size={18} className="text-zinc-400" /><span className="text-sm font-bold text-zinc-700">System Debugger</span></div>
+                        <ChevronRight size={18} className="text-zinc-400" />
+                      </button>
                     </div>
                   </div>
-
-                  <div className="mt-6 pt-6 border-t border-zinc-100">
-                    <button 
-                      onClick={() => setIsDebugModalOpen(true)}
-                      className="w-full flex items-center justify-between p-4 bg-zinc-50 rounded-2xl text-left hover:bg-zinc-100 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <Terminal size={18} className="text-zinc-400" />
-                        <span className="text-sm font-bold text-zinc-700">System Debugger</span>
-                      </div>
-                      <ChevronRight size={18} className="text-zinc-400" />
+                  <div className="space-y-3">
+                    <button onClick={() => setIsPrivacyModalOpen(true)} className="w-full flex items-center justify-between p-5 bg-white rounded-2xl border border-zinc-200 shadow-sm hover:bg-zinc-50 transition-colors">
+                      <div className="flex items-center gap-3"><ShieldCheck size={20} className="text-indigo-600" /><span className="text-sm font-bold text-zinc-700">Privacy Policy</span></div><ChevronRight size={18} className="text-zinc-400" />
+                    </button>
+                    <button onClick={handleSignOut} className="w-full flex items-center justify-between p-5 bg-white rounded-2xl border border-zinc-200 shadow-sm hover:bg-zinc-50 transition-colors">
+                      <div className="flex items-center gap-3"><ExternalLink size={20} className="text-zinc-400" /><span className="text-sm font-bold text-zinc-700">Sign Out</span></div><ChevronRight size={18} className="text-zinc-400" />
+                    </button>
+                    <button onClick={() => setIsDeleteModalOpen(true)} className="w-full flex items-center justify-between p-5 bg-white rounded-2xl border border-rose-200 shadow-sm hover:bg-rose-50 transition-colors">
+                      <div className="flex items-center gap-3"><Trash2 size={20} className="text-rose-500" /><span className="text-sm font-bold text-rose-600">Delete Account</span></div><ChevronRight size={18} className="text-rose-400" />
                     </button>
                   </div>
-                </div>
-
-                {/* Quick Actions */}
-                <div className="space-y-3">
-                  <button 
-                    onClick={openPrivacyPolicy}
-                    className="w-full flex items-center justify-between p-5 bg-white rounded-2xl border border-zinc-200 shadow-sm hover:bg-zinc-50 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <ShieldCheck size={20} className="text-indigo-600" />
-                      <span className="text-sm font-bold text-zinc-700">Privacy Policy</span>
-                    </div>
-                    <ChevronRight size={18} className="text-zinc-400" />
-                  </button>
-
-                  <button 
-                    onClick={handleSignOut}
-                    className="w-full flex items-center justify-between p-5 bg-white rounded-2xl border border-zinc-200 shadow-sm hover:bg-zinc-50 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <ExternalLink size={20} className="text-zinc-400" />
-                      <span className="text-sm font-bold text-zinc-700">Sign Out</span>
-                    </div>
-                    <ChevronRight size={18} className="text-zinc-400" />
-                  </button>
-
-                  <button 
-                    onClick={() => setIsDeleteModalOpen(true)}
-                    className="w-full flex items-center justify-between p-5 bg-white rounded-2xl border border-rose-200 shadow-sm hover:bg-rose-50 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Trash2 size={20} className="text-rose-500" />
-                      <span className="text-sm font-bold text-rose-600">Delete Account</span>
-                    </div>
-                    <ChevronRight size={18} className="text-rose-400" />
-                  </button>
-                </div>
-
-                {/* Transaction History */}
-                <div className="space-y-3">
-                  <h2 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Recent History</h2>
-                  {transactions.length === 0 ? (
-                    <div className="bg-white rounded-2xl p-8 border border-dashed border-zinc-200 text-center">
-                      <History size={24} className="text-zinc-300 mx-auto mb-2" />
-                      <p className="text-xs text-zinc-500">No transactions yet</p>
-                    </div>
-                  ) : (
-                    transactions.slice(0, 20).map((tx) => (
+                  <div className="space-y-3">
+                    <h2 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Recent History</h2>
+                    {transactions.length === 0 ? (
+                      <div className="bg-white rounded-2xl p-8 border border-dashed border-zinc-200 text-center"><History size={24} className="text-zinc-300 mx-auto mb-2" /><p className="text-xs text-zinc-500">No transactions yet</p></div>
+                    ) : transactions.slice(0, 20).map((tx) => (
                       <div key={tx.id} className="bg-white rounded-2xl p-4 border border-zinc-200 shadow-sm flex justify-between items-center">
                         <div className="flex items-center gap-3">
-                          <div className={cn(
-                            "w-8 h-8 rounded-xl flex items-center justify-center",
-                            tx.type === 'earn' ? "bg-emerald-50" : "bg-indigo-50"
-                          )}>
-                            {tx.type === 'earn' 
-                              ? <TrendingUp size={16} className="text-emerald-600" />
-                              : <Gift size={16} className="text-indigo-600" />
-                            }
+                          <div className={cn("w-8 h-8 rounded-xl flex items-center justify-center", tx.type === 'earn' ? "bg-emerald-50" : "bg-indigo-50")}>
+                            {tx.type === 'earn' ? <TrendingUp size={16} className="text-emerald-600" /> : <Gift size={16} className="text-indigo-600" />}
                           </div>
-                          <div>
-                            <p className="text-xs font-bold text-zinc-900">{tx.title}</p>
-                            <p className="text-[10px] text-zinc-400">{new Date(tx.timestamp).toLocaleDateString()}</p>
-                          </div>
+                          <div><p className="text-xs font-bold text-zinc-900">{tx.title}</p><p className="text-[10px] text-zinc-400">{new Date(tx.timestamp).toLocaleDateString()}</p></div>
                         </div>
                         <div className="text-right">
-                          <span className={cn(
-                            "text-sm font-bold",
-                            tx.type === 'earn' ? "text-emerald-600" : "text-indigo-600"
-                          )}>
-                            {tx.type === 'earn' ? '+' : '-'}{tx.amount} pts
-                          </span>
-                          {tx.code && (
-                            <button 
-                              onClick={async () => {
-                                await Clipboard.write({ string: tx.code! });
-                                await Toast.show({ text: 'Code copied!', duration: 'short' });
-                              }}
-                              className="flex items-center gap-1 text-[10px] font-mono bg-zinc-100 px-2 py-0.5 rounded text-zinc-600 border border-zinc-200 hover:bg-zinc-200 transition-colors"
-                            >
-                              {tx.code}
-                              <Copy size={10} />
-                            </button>
-                          )}
+                          <span className={cn("text-sm font-bold", tx.type === 'earn' ? "text-emerald-600" : "text-indigo-600")}>{tx.type === 'earn' ? '+' : '-'}{Math.abs(tx.amount)} pts</span>
+                          {tx.code && <button onClick={async () => { await Clipboard.write({ string: tx.code! }); await Toast.show({ text: 'Code copied!', duration: 'short' }); }}
+                            className="flex items-center gap-1 text-[10px] font-mono bg-zinc-100 px-2 py-0.5 rounded text-zinc-600 border border-zinc-200 hover:bg-zinc-200 transition-colors">{tx.code}<Copy size={10} /></button>}
                         </div>
                       </div>
-                    ))
-                  )}
-                  
-                  {/* Extra space at the bottom of the list to prevent overlap with Banner Ad and Navbar */}
-                  <div className="h-40" />
-                </div>
-              </motion.div>
-            )}
-
-          </AnimatePresence>
-        </main>
+                    ))}
+                    <div className="h-40" />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </main>
+        </div>
+        <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
+        <AdSimulatorModal isOpen={isWebAdModalOpen} onClose={() => { setIsWebAdModalOpen(false); if (activeTab === 'offers') showBanner(); }} onComplete={handleWebAdComplete} />
+        <AnimatePresence><PrivacyModal isOpen={isPrivacyModalOpen} onClose={() => setIsPrivacyModalOpen(false)} /></AnimatePresence>
+        <AnimatePresence><DeleteAccountModal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} onConfirm={handleDeleteAccount} /></AnimatePresence>
+        <AnimatePresence><ConfirmModal isOpen={isConfirmModalOpen} onClose={() => setIsConfirmModalOpen(false)} onConfirm={confirmConfig.onConfirm} title={confirmConfig.title} message={confirmConfig.message} /></AnimatePresence>
       </div>
-
-      <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
-      
-      {/* Version 9.3.0: Re-show banner when ad modal closes */}
-      <AdSimulatorModal 
-        isOpen={isAdOpen} 
-        onClose={() => { setIsAdOpen(false); if (activeTab === 'offers') showBanner(); }}
-        onReward={handleAdReward}
-        isBoost={isBoostAd}
-        user={user}
-        onClaim={handleClaimBoostReward}
-      />
-
-      <AnimatePresence>
-        <PrivacyModal 
-          isOpen={isPrivacyModalOpen} 
-          onClose={() => setIsPrivacyModalOpen(false)} 
-        />
-      </AnimatePresence>
-
-      <AnimatePresence>
-        <DeleteAccountModal 
-          isOpen={isDeleteModalOpen} 
-          onClose={() => setIsDeleteModalOpen(false)} 
-          onConfirm={handleDeleteAccount}
-        />
-      </AnimatePresence>
-    </div>
     );
   };
 
-  return (
-    <>
-      {renderMainContent()}
-      <AnimatePresence>
-        {isDebugModalOpen && (
-          <DebugLogsModal 
-            isOpen={isDebugModalOpen} 
-            onClose={() => setIsDebugModalOpen(false)} 
-            logs={logs}
-          />
-        )}
-      </AnimatePresence>
-    </>
-  );
+  return (<>{renderMainContent()}<AnimatePresence>{isDebugModalOpen && <DebugLogsModal isOpen={isDebugModalOpen} onClose={() => setIsDebugModalOpen(false)} logs={logs} />}</AnimatePresence></>);
 }
