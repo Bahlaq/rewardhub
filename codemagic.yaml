@@ -21,72 +21,55 @@ workflows:
       - name: Build and Sync Capacitor
         script: |
           npm run build
-          
-          if [ ! -d "dist" ]; then
-            echo "❌ Error: dist directory was not created"
-            exit 1
-          fi
+          if [ ! -d "dist" ]; then echo "❌ dist not found"; exit 1; fi
           
           rm -rf android
           npx cap add android
           
+          # Assets
           mkdir -p assets
           if [ -f "assets/icon.png" ]; then
-            echo "✅ Using user-provided icon.png"
             cp assets/icon.png assets/icon-only.png
             cp assets/icon.png assets/icon-foreground.png
             cp assets/icon.png assets/splash.png
-            if [ ! -f "assets/icon-background.png" ]; then
-              curl -L -o assets/icon-background.png "https://placehold.co/1024x1024/7c3aed/7c3aed/png"
-            fi
+            [ ! -f "assets/icon-background.png" ] && curl -L -o assets/icon-background.png "https://placehold.co/1024x1024/7c3aed/7c3aed/png"
           else
-            if [ ! -f "assets/icon-only.png" ]; then
-              curl -L -o assets/icon-only.png "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=7c3aed&fontSize=50&fontWeight=900&radius=20"
-            fi
+            [ ! -f "assets/icon-only.png" ] && curl -L -o assets/icon-only.png "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=7c3aed&fontSize=50&fontWeight=900&radius=20"
             cp assets/icon-only.png assets/icon.png
-            if [ ! -f "assets/icon-foreground.png" ]; then
-              curl -L -o assets/icon-foreground.png "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=transparent&fontSize=50&fontWeight=900"
-            fi
-            if [ ! -f "assets/icon-background.png" ]; then
-              curl -L -o assets/icon-background.png "https://placehold.co/1024x1024/7c3aed/7c3aed/png"
-            fi
-            if [ ! -f "assets/splash.png" ]; then
-              curl -L -o assets/splash.png "https://api.dicebear.com/7.x/initials/png?seed=RewardHub&backgroundColor=7c3aed&fontSize=30&fontWeight=900"
-            fi
+            [ ! -f "assets/icon-foreground.png" ] && curl -L -o assets/icon-foreground.png "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=transparent&fontSize=50&fontWeight=900"
+            [ ! -f "assets/icon-background.png" ] && curl -L -o assets/icon-background.png "https://placehold.co/1024x1024/7c3aed/7c3aed/png"
+            [ ! -f "assets/splash.png" ] && curl -L -o assets/splash.png "https://api.dicebear.com/7.x/initials/png?seed=RewardHub&backgroundColor=7c3aed&fontSize=30&fontWeight=900"
           fi
-          
           npx @capacitor/assets generate --android --assetPath assets
           npx cap sync android
           
-          # 🔑 Inject google-services.json
+          # google-services.json
           if [ ! -z "$GOOGLE_SERVICES_JSON" ]; then
-            echo "✅ Injecting google-services.json from env var"
             echo $GOOGLE_SERVICES_JSON | base64 --decode > android/app/google-services.json
+            echo "✅ google-services.json injected"
           elif [ -f "google-services.json" ]; then
-            echo "✅ Injecting google-services.json from root"
             cp google-services.json android/app/google-services.json
+            echo "✅ google-services.json copied"
           else
-            echo "⚠️ Warning: google-services.json not found"
+            echo "⚠️ google-services.json not found"
           fi
           
-          # 🔑 v10: Inject server_client_id into strings.xml for native Google Sign-In
+          # server_client_id in strings.xml (for native Google Sign-In)
           STRINGS_XML="android/app/src/main/res/values/strings.xml"
           if [ -f "$STRINGS_XML" ]; then
             if ! grep -q "server_client_id" "$STRINGS_XML"; then
               sed -i '' 's|</resources>|    <string name="server_client_id">563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com</string>\n</resources>|' "$STRINGS_XML"
-              echo "✅ Injected server_client_id into strings.xml"
-            else
-              echo "ℹ️ server_client_id already present"
+              echo "✅ server_client_id injected"
             fi
           fi
           
-          # 🔢 Set Version
+          # Version
           if [ -f "android/app/build.gradle" ]; then
-            sed -i '' 's/versionCode [0-9]*/versionCode 11/g' android/app/build.gradle
-            sed -i '' 's/versionName "[0-9.]*"/versionName "10.0.0"/g' android/app/build.gradle
+            sed -i '' 's/versionCode [0-9]*/versionCode 12/g' android/app/build.gradle
+            sed -i '' 's/versionName "[0-9.]*"/versionName "11.0.0"/g' android/app/build.gradle
           fi
           
-          # 🛠️ Force Gradle 8.7 and AGP 8.2.1
+          # Gradle & AGP
           if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
             printf "distributionBase=GRADLE_USER_HOME\ndistributionPath=wrapper/dists\ndistributionUrl=https\://services.gradle.org/distributions/gradle-8.7-all.zip\nzipStoreBase=GRADLE_USER_HOME\nzipStorePath=wrapper/dists\n" > android/gradle/wrapper/gradle-wrapper.properties
           fi
@@ -98,34 +81,32 @@ workflows:
             fi
           fi
           
-          # 🛠️ Apply Google Services Plugin
+          # Google Services plugin
           if [ -f "android/app/build.gradle" ]; then
             if ! grep -q "com.google.gms.google-services" android/app/build.gradle; then
               echo "apply plugin: 'com.google.gms.google-services'" >> android/app/build.gradle
             fi
           fi
           
-          # 🛠️ SDK 35
+          # SDK 35
           if [ -f "android/variables.gradle" ]; then
             sed -i '' 's/compileSdkVersion = [0-9]*/compileSdkVersion = 35/g' android/variables.gradle
             sed -i '' 's/targetSdkVersion = [0-9]*/targetSdkVersion = 35/g' android/variables.gradle
           fi
           
-          # 🛠️ AD_ID permission
+          # AD_ID permission + AdMob App ID
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
-            sed -i '' 's/<application/<uses-permission android:name="com.google.android.gms.permission.AD_ID"\/>\n    <application/g' "$MANIFEST"
-          fi
-          
-          # 🛠️ v10: AdMob APPLICATION_ID in manifest
-          if [ -f "$MANIFEST" ]; then
+            if ! grep -q "com.google.android.gms.permission.AD_ID" "$MANIFEST"; then
+              sed -i '' 's/<application/<uses-permission android:name="com.google.android.gms.permission.AD_ID"\/>\n    <application/g' "$MANIFEST"
+            fi
             if ! grep -q "com.google.android.gms.ads.APPLICATION_ID" "$MANIFEST"; then
               sed -i '' 's|</application>|        <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-1560161047680443~4972275282"/>\n    </application>|' "$MANIFEST"
-              echo "✅ Added AdMob APPLICATION_ID"
+              echo "✅ AdMob APPLICATION_ID added"
             fi
           fi
           
-          # 🛠️ Signing Configs
+          # Signing
           if [ -f "android/app/build.gradle" ]; then
             sed -i '' '/buildTypes {/i \
             signingConfigs { \
@@ -136,15 +117,13 @@ workflows:
                     keyPassword System.getenv("CM_KEY_PASSWORD") ?: "123456" \
                 } \
             }' android/app/build.gradle
-            
             sed -i '' '/proguardFiles/a \
                 signingConfig signingConfigs.release' android/app/build.gradle
           fi
-      - name: Build Signed Android (APK & AAB)
+      - name: Build Signed Android
         script: |
           echo $CM_KEYSTORE | base64 --decode > $FCI_BUILD_DIR/android/app/rewardhub-key.jks
-          cd android
-          chmod +x gradlew
+          cd android && chmod +x gradlew
           ./gradlew assembleRelease bundleRelease \
             -Pandroid.injected.signing.store.file=$FCI_BUILD_DIR/android/app/rewardhub-key.jks \
             -Pandroid.injected.signing.store.password=$CM_KEYSTORE_PASSWORD \
