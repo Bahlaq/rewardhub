@@ -13,54 +13,29 @@ import { Offer, UserProfile, Transaction } from '../types';
 const PRODUCTION_WEB_CLIENT_ID = "563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com";
 
 // ═══════════════════════════════════════════════════════════════════════
-// GoogleAuth — Awaitable singleton with TIMEOUT protection
+// Google Sign-In — Native Auth Fix
 //
-// ROOT CAUSE OF INFINITE LOADING:
-//   GoogleAuth.signIn() opens a native Android intent for Google's
-//   account picker. If the intent never returns (plugin bug, activity
-//   lifecycle issue, or missing Google Play Services), the Promise
-//   hangs FOREVER. The `finally { setIsAuthLoading(false) }` in
-//   App.tsx never executes → user is stuck on loading spinner.
+// ROOT CAUSE OF "STUCK ON LOAD" + "OPENS BROWSER":
+//   1. ensureGoogleAuth() called GoogleAuth.initialize() on native.
+//      But Capacitor ALREADY auto-initializes the native plugin from
+//      capacitor.config.ts → plugins.GoogleAuth.serverClientId and from
+//      android/.../strings.xml → server_client_id during app startup.
+//      Calling initialize() AGAIN resets the native GoogleSignInClient
+//      with potentially different params, corrupting the sign-in flow.
+//      Result: signIn() hangs (no native picker appears).
 //
-// FIX: Wrap signIn() in a 15-second timeout via Promise.race().
-//   If native auth fails OR times out, automatically fall back to
-//   Firebase's signInWithPopup() which works in Capacitor's WebView.
-//   This guarantees the user ALWAYS gets either a sign-in or an error.
+//   2. The withTimeout() fallback then fires signInWithPopup(), which
+//      opens an external browser tab. The browser can't redirect back
+//      to the Capacitor app, so the user is stuck.
+//
+// FIX:
+//   - NEVER call GoogleAuth.initialize() on native. Let Capacitor's
+//     auto-init handle it from capacitor.config.ts + strings.xml.
+//   - NEVER fall back to signInWithPopup() on native. If native fails,
+//     show the error directly instead of silently opening a browser.
+//   - Extract idToken from ALL possible response shapes (the plugin's
+//     response format varies between Android API versions).
 // ═══════════════════════════════════════════════════════════════════════
-let googleAuthPromise: Promise<any> | null = null;
-
-function ensureGoogleAuth(): Promise<any> {
-  if (googleAuthPromise) return googleAuthPromise;
-  googleAuthPromise = (async () => {
-    if (!Capacitor.isNativePlatform()) return null;
-    try {
-      const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
-      (GoogleAuth as any).initialize({
-        serverClientId: PRODUCTION_WEB_CLIENT_ID,
-        scopes: ['profile', 'email'],
-        grantOfflineAccess: false
-      });
-      console.log("[GoogleAuth] Initialized");
-      return GoogleAuth;
-    } catch (err) {
-      console.error("[GoogleAuth] Init failed:", err);
-      return null;
-    }
-  })();
-  return googleAuthPromise;
-}
-
-if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
-  ensureGoogleAuth();
-}
-
-// Timeout helper — rejects if the promise doesn't resolve in time
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms))
-  ]);
-}
 
 const firebaseConfig = {
   apiKey: 'AIzaSyBLlefWEa3WHUSPD0_sDTvpCTqIImh5X6Y',
@@ -80,74 +55,84 @@ catch (e) { console.error("Firebase init failed:", e); }
 const db = app ? initializeFirestore(app, { experimentalForceLongPolling: true }) : null;
 const auth = app ? getAuth(app) : null;
 const googleProvider = new GoogleAuthProvider();
-const webClientId = import.meta.env.VITE_FIREBASE_WEB_CLIENT_ID || PRODUCTION_WEB_CLIENT_ID;
-if (webClientId) googleProvider.setCustomParameters({ client_id: webClientId });
+googleProvider.setCustomParameters({ client_id: PRODUCTION_WEB_CLIENT_ID });
 
-export { auth, googleProvider, db };
+export { auth, db };
 export type { FirebaseUser };
 
 function getCol(uid: string) { return uid.startsWith('local_guest_') ? 'guests' : 'users'; }
 
-enum Op { CREATE='create', UPDATE='update', DELETE='delete', LIST='list', GET='get', WRITE='write' }
-function handleFsError(error: unknown, op: Op, path: string | null, shouldThrow = true) {
-  console.error('Firestore Error:', { error: error instanceof Error ? error.message : String(error), op, path });
+function handleFsError(error: unknown, path: string | null, shouldThrow = true) {
+  console.error('Firestore Error:', error instanceof Error ? error.message : String(error), 'path:', path);
   if (shouldThrow) throw error;
 }
 
 export const firebaseService = {
-  // ═══════════════════════════════════════════════════════════════════
-  // signInWithGoogle — with timeout + automatic web fallback
-  // ═══════════════════════════════════════════════════════════════════
+  // ─── GOOGLE SIGN-IN ──────────────────────────────────────────────
   async signInWithGoogle() {
     if (!auth) throw new Error("Firebase Auth not initialized");
 
-    // Strategy: On native, try the Capacitor plugin first (15s timeout).
-    //           If it fails/hangs, fall back to signInWithPopup().
-    //           On web, use signInWithPopup() directly.
-
     if (Capacitor.isNativePlatform()) {
+      // ── NATIVE: Use Capacitor plugin directly ──
+      // The plugin auto-initializes from capacitor.config.ts and strings.xml.
+      // We MUST NOT call initialize() — it corrupts the native GoogleSignInClient.
       try {
-        console.log("[Auth] Attempting native Google Sign-In (15s timeout)...");
-        const user = await withTimeout(this._nativeGoogleSignIn(), 15000, 'Native Google Sign-In');
-        return user;
-      } catch (nativeError) {
-        console.warn("[Auth] Native sign-in failed:", nativeError instanceof Error ? nativeError.message : nativeError);
-        console.log("[Auth] Falling back to web popup sign-in...");
-        // Fall through to web popup below
+        const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
+
+        console.log("[Auth] Calling native GoogleAuth.signIn()...");
+        const googleUser = await GoogleAuth.signIn();
+        console.log("[Auth] Native sign-in returned. email:", googleUser?.email);
+
+        // Extract idToken — the response shape varies by Android API level:
+        //   Legacy GoogleSignIn API: { authentication: { idToken: "..." } }
+        //   Credential Manager API:  { credential: "eyJ..." } (JWT directly)
+        //   Some versions:           { idToken: "..." } (top-level)
+        const idToken =
+          googleUser?.authentication?.idToken ||
+          (googleUser as any)?.idToken ||
+          (typeof (googleUser as any)?.credential === 'string' ? (googleUser as any).credential : null);
+
+        if (!idToken) {
+          console.error("[Auth] No idToken found in response. Keys:", Object.keys(googleUser || {}));
+          if (googleUser?.authentication) {
+            console.error("[Auth] authentication keys:", Object.keys(googleUser.authentication));
+          }
+          throw new Error(
+            "Google Sign-In succeeded but no ID Token was returned. " +
+            "This usually means the SHA-1 fingerprint in Firebase Console " +
+            "doesn't match the APK's signing key. Please verify both the " +
+            "Upload and App Signing SHA-1 certificates are registered."
+          );
+        }
+
+        // Exchange Google idToken for Firebase credential
+        const credential = GoogleAuthProvider.credential(idToken);
+        const result = await signInWithCredential(auth, credential);
+        console.log("[Auth] Firebase credential exchange success:", result.user.uid);
+        await this._ensureProfile(result.user);
+        return result.user;
+
+      } catch (error: any) {
+        // If user cancelled the picker, don't throw a scary error
+        const msg = error?.message || String(error);
+        if (msg.includes('canceled') || msg.includes('cancelled') || msg.includes('12501')) {
+          throw new Error("Sign-in was cancelled.");
+        }
+        console.error("[Auth] Native sign-in error:", error);
+        throw error;
       }
     }
 
-    // Web path (also used as native fallback)
-    return await this._webPopupSignIn();
-  },
-
-  // Native Google Sign-In via Capacitor plugin
-  async _nativeGoogleSignIn(): Promise<FirebaseUser> {
-    const plugin = await ensureGoogleAuth();
-    if (!plugin) throw new Error("GoogleAuth plugin not available");
-
-    console.log("[Auth] Calling GoogleAuth.signIn()...");
-    const googleUser = await plugin.signIn();
-    console.log("[Auth] GoogleAuth returned:", googleUser?.email);
-
-    const idToken = googleUser?.authentication?.idToken || (googleUser as any)?.idToken;
-    if (!idToken) {
-      throw new Error("No idToken received. Check SHA-1 fingerprints and google-services.json");
+    // ── WEB: Use Firebase popup ──
+    try {
+      console.log("[Auth] Using web signInWithPopup...");
+      const result = await signInWithPopup(auth, googleProvider);
+      await this._ensureProfile(result.user);
+      return result.user;
+    } catch (error) {
+      console.error("[Auth] Web sign-in error:", error);
+      throw error;
     }
-
-    const credential = GoogleAuthProvider.credential(idToken);
-    const result = await signInWithCredential(auth!, credential);
-    await this._ensureProfile(result.user);
-    return result.user;
-  },
-
-  // Web popup sign-in via Firebase SDK (works in browser AND Capacitor WebView)
-  async _webPopupSignIn(): Promise<FirebaseUser> {
-    console.log("[Auth] Using signInWithPopup...");
-    const result = await signInWithPopup(auth!, googleProvider);
-    console.log("[Auth] Popup sign-in success:", result.user.email);
-    await this._ensureProfile(result.user);
-    return result.user;
   },
 
   async _ensureProfile(fbUser: FirebaseUser, fallbackEmail?: string) {
@@ -174,10 +159,12 @@ export const firebaseService = {
   async deleteUserProfile(uid: string) { if (db) await deleteDoc(doc(db, getCol(uid), uid)); },
   onAuthChange(cb: (user: FirebaseUser | null) => void) { if (!auth) { cb(null); return () => {}; } return onAuthStateChanged(auth, cb); },
 
+  // ─── PROFILE ─────────────────────────────────────────────────────
   onProfileChange(uid: string, cb: (p: UserProfile | null) => void) {
     if (!db) { cb(null); return () => {}; }
-    return onSnapshot(doc(db, getCol(uid), uid), d => cb(d.exists() ? d.data() as UserProfile : null),
-      err => { handleFsError(err, Op.GET, `${getCol(uid)}/${uid}`, false); cb(null); });
+    return onSnapshot(doc(db, getCol(uid), uid),
+      d => cb(d.exists() ? d.data() as UserProfile : null),
+      err => { handleFsError(err, `${getCol(uid)}/${uid}`, false); cb(null); });
   },
 
   async getUserProfile(uid: string): Promise<UserProfile | null> {
@@ -192,7 +179,7 @@ export const firebaseService = {
   async saveUserProfile(profile: UserProfile) {
     if (!db) return;
     try { await setDoc(doc(db, getCol(profile.uid), profile.uid), profile, { merge: true }); localStorage.setItem(`profile_${profile.uid}`, JSON.stringify(profile)); }
-    catch (e) { handleFsError(e, Op.WRITE, `${getCol(profile.uid)}/${profile.uid}`, false); }
+    catch (e) { handleFsError(e, `${getCol(profile.uid)}/${profile.uid}`, false); }
   },
 
   async checkDailyReset(uid: string) {
@@ -203,14 +190,13 @@ export const firebaseService = {
       if (d.exists() && d.data().lastBoostDate !== new Date().toDateString()) {
         await setDoc(doc(db, getCol(uid), uid), { boostLevel: 1, adsWatchedToday: 0, currentLevelAdCounter: 0, lastBoostDate: new Date().toDateString() }, { merge: true });
       }
-    } catch (e) { handleFsError(e, Op.GET, `${getCol(uid)}/${uid}`, false); }
+    } catch (e) { handleFsError(e, `${getCol(uid)}/${uid}`, false); }
   },
 
-  // recordAdWatch — WITH BOUNDS GUARD (prevents 5/3)
+  // ─── AD WATCH (with bounds guard) ───────────────────────────────
   async recordAdWatch(uid: string) {
     if (!db) throw new Error("Firestore not initialized");
-    const col = getCol(uid);
-    const userRef = doc(db, col, uid);
+    const userRef = doc(db, getCol(uid), uid);
     const today = new Date().toDateString();
 
     return await runTransaction(db, async (tx) => {
@@ -224,24 +210,20 @@ export const firebaseService = {
       let boostLevel = Number(d.boostLevel) || 1;
       let currentLevelAdCounter = Number(d.currentLevelAdCounter) || 0;
       let lastBoostDate = d.lastBoostDate || null;
-      if (lastBoostDate !== today) { boostLevel = 1; currentLevelAdCounter = 0; lastBoostDate = today; }
+      if (lastBoostDate !== today) { boostLevel = 1; currentLevelAdCounter = 0; }
       const adsNeeded = boostLevel;
-
-      // BOUNDS GUARD
       if (currentLevelAdCounter >= adsNeeded) {
-        return { boostLevel, currentLevelAdCounter, adsNeeded, isLocalGuest: uid.startsWith('local_guest_') };
+        return { boostLevel, currentLevelAdCounter, adsNeeded };
       }
-
       currentLevelAdCounter += 1;
       tx.set(userRef, { currentLevelAdCounter, lastBoostDate: today }, { merge: true });
-      return { boostLevel, currentLevelAdCounter, adsNeeded, isLocalGuest: uid.startsWith('local_guest_') };
+      return { boostLevel, currentLevelAdCounter, adsNeeded };
     });
   },
 
   async claimBoostReward(uid: string) {
     if (!db) throw new Error("Firestore not initialized");
-    const col = getCol(uid);
-    const userRef = doc(db, col, uid);
+    const userRef = doc(db, getCol(uid), uid);
     const historyRef = doc(collection(db, 'history'));
     const today = new Date().toDateString();
 
@@ -265,25 +247,26 @@ export const firebaseService = {
     });
   },
 
+  // ─── LISTENERS ───────────────────────────────────────────────────
   onOffersChange(cb: (offers: Offer[]) => void) {
     if (!db) { cb([]); return () => {}; }
     return onSnapshot(query(collection(db, 'offers')),
       snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data(), points: Number(d.data().points || 0) } as Offer))),
-      err => { handleFsError(err, Op.LIST, 'offers', false); cb([]); });
+      err => { handleFsError(err, 'offers', false); cb([]); });
   },
 
   onClaimsChange(uid: string, cb: (claims: Transaction[]) => void) {
     if (!db) { cb([]); return () => {}; }
     return onSnapshot(query(collection(db, 'claims'), where('uid', '==', uid)),
       snap => cb(snap.docs.map(d => { const x = d.data(); return { id: d.id, type: 'claim', title: x.offerBrand, amount: -x.pointsSpent, timestamp: x.timestamp?.toDate?.()?.toISOString() || new Date().toISOString(), code: x.code, rewardType: x.code ? 'code' : 'link' } as Transaction; })),
-      err => { handleFsError(err, Op.LIST, 'claims', false); cb([]); });
+      err => { handleFsError(err, 'claims', false); cb([]); });
   },
 
   onHistoryChange(uid: string, cb: (history: Transaction[]) => void) {
     if (!db) { cb([]); return () => {}; }
     return onSnapshot(query(collection(db, 'history'), where('uid', '==', uid)),
       snap => cb(snap.docs.map(d => { const x = d.data(); return { id: d.id, type: 'earn', title: x.title || x.message, amount: x.amount || x.points, timestamp: x.timestamp?.toDate?.()?.toISOString() || new Date().toISOString() } as Transaction; })),
-      err => { handleFsError(err, Op.LIST, 'history', false); cb([]); });
+      err => { handleFsError(err, 'history', false); cb([]); });
   },
 
   async claimOffer(uid: string, offer: Offer) {
