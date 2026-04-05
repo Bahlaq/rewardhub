@@ -5,9 +5,9 @@ workflows:
     instance_type: mac_mini_m1
     environment:
       groups:
-        - admob_secrets # Create this group in Codemagic UI
-        - firebase_secrets # Create this group in Codemagic UI
-        - android_signing # Create this group in Codemagic UI
+        - admob_secrets
+        - firebase_secrets
+        - android_signing
       node: 22
       java: 21
     scripts:
@@ -15,39 +15,31 @@ workflows:
         script: |
           brew install node@22
           brew link --overwrite node@22
-          node -v # To verify installation
+          node -v
       - name: Install dependencies
         script: npm install --legacy-peer-deps
       - name: Build and Sync Capacitor
         script: |
-          # 🏗️ Build Web Assets
           npm run build
           
-          # 🔍 Verify dist exists
           if [ ! -d "dist" ]; then
-            echo "❌ Error: dist directory was not created by npm run build"
+            echo "❌ Error: dist directory was not created"
             exit 1
           fi
           
-          # 📱 Prepare Android Project
           rm -rf android
           npx cap add android
           
-          # 🎨 Generate Assets (Ensure assets directory exists)
           mkdir -p assets
-          
-          # Use user-provided icon.png if it exists
           if [ -f "assets/icon.png" ]; then
             echo "✅ Using user-provided icon.png"
             cp assets/icon.png assets/icon-only.png
             cp assets/icon.png assets/icon-foreground.png
             cp assets/icon.png assets/splash.png
-            # Create a simple background if it doesn't exist
             if [ ! -f "assets/icon-background.png" ]; then
               curl -L -o assets/icon-background.png "https://placehold.co/1024x1024/7c3aed/7c3aed/png"
             fi
           else
-            # Use high-quality placeholders if they don't exist
             if [ ! -f "assets/icon-only.png" ]; then
               curl -L -o assets/icon-only.png "https://api.dicebear.com/7.x/initials/png?seed=R&backgroundColor=7c3aed&fontSize=50&fontWeight=900&radius=20"
             fi
@@ -63,84 +55,77 @@ workflows:
             fi
           fi
           
-          # Generate icons and splash screens
           npx @capacitor/assets generate --android --assetPath assets
-          
-          # 🔄 Sync Capacitor
           npx cap sync android
           
           # 🔑 Inject google-services.json
           if [ ! -z "$GOOGLE_SERVICES_JSON" ]; then
-            echo "✅ Injecting google-services.json from environment variable"
+            echo "✅ Injecting google-services.json from env var"
             echo $GOOGLE_SERVICES_JSON | base64 --decode > android/app/google-services.json
           elif [ -f "google-services.json" ]; then
-            echo "✅ Injecting google-services.json from root directory"
+            echo "✅ Injecting google-services.json from root"
             cp google-services.json android/app/google-services.json
           else
-            echo "⚠️ Warning: google-services.json not found. Google Sign-In might fail on Android."
+            echo "⚠️ Warning: google-services.json not found"
           fi
           
-          # 🔑 Version 9.3.0: Inject server_client_id into strings.xml for native Google Sign-In
-          # The @codetrix-studio/capacitor-google-auth plugin reads this value from strings.xml
+          # 🔑 v10: Inject server_client_id into strings.xml for native Google Sign-In
           STRINGS_XML="android/app/src/main/res/values/strings.xml"
           if [ -f "$STRINGS_XML" ]; then
             if ! grep -q "server_client_id" "$STRINGS_XML"; then
               sed -i '' 's|</resources>|    <string name="server_client_id">563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com</string>\n</resources>|' "$STRINGS_XML"
               echo "✅ Injected server_client_id into strings.xml"
             else
-              echo "ℹ️ server_client_id already present in strings.xml"
+              echo "ℹ️ server_client_id already present"
             fi
-          else
-            echo "⚠️ strings.xml not found at $STRINGS_XML"
           fi
           
-          # 🔢 Set Version Code and Name
+          # 🔢 Set Version
           if [ -f "android/app/build.gradle" ]; then
-            sed -i '' 's/versionCode [0-9]*/versionCode 10/g' android/app/build.gradle
-            sed -i '' 's/versionName "[0-9.]*"/versionName "9.3.0"/g' android/app/build.gradle
+            sed -i '' 's/versionCode [0-9]*/versionCode 11/g' android/app/build.gradle
+            sed -i '' 's/versionName "[0-9.]*"/versionName "10.0.0"/g' android/app/build.gradle
           fi
           
-          # 🛠️ PATCH: Force Gradle 8.7 and AGP 8.2.1 for Java 21 compatibility
+          # 🛠️ Force Gradle 8.7 and AGP 8.2.1
           if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
             printf "distributionBase=GRADLE_USER_HOME\ndistributionPath=wrapper/dists\ndistributionUrl=https\://services.gradle.org/distributions/gradle-8.7-all.zip\nzipStoreBase=GRADLE_USER_HOME\nzipStorePath=wrapper/dists\n" > android/gradle/wrapper/gradle-wrapper.properties
           fi
           if [ -f "android/build.gradle" ]; then
             sed -i '' 's/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:8.2.1/g' android/build.gradle
-            # Add Google Services classpath
             if ! grep -q "com.google.gms:google-services" android/build.gradle; then
               sed -i '' '/dependencies {/a \
               classpath "com.google.gms:google-services:4.4.1"' android/build.gradle
             fi
           fi
           
-          # 🛠️ PATCH: Apply Google Services Plugin in app/build.gradle
+          # 🛠️ Apply Google Services Plugin
           if [ -f "android/app/build.gradle" ]; then
             if ! grep -q "com.google.gms.google-services" android/app/build.gradle; then
               echo "apply plugin: 'com.google.gms.google-services'" >> android/app/build.gradle
             fi
           fi
           
-          # 🛠️ PATCH: Set SDK 35
+          # 🛠️ SDK 35
           if [ -f "android/variables.gradle" ]; then
             sed -i '' 's/compileSdkVersion = [0-9]*/compileSdkVersion = 35/g' android/variables.gradle
             sed -i '' 's/targetSdkVersion = [0-9]*/targetSdkVersion = 35/g' android/variables.gradle
           fi
           
-          # 🛠️ PATCH: Add AD_ID permission
-          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
-            sed -i '' 's/<application/<uses-permission android:name="com.google.android.gms.permission.AD_ID"\/>\n    <application/g' android/app/src/main/AndroidManifest.xml
+          # 🛠️ AD_ID permission
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            sed -i '' 's/<application/<uses-permission android:name="com.google.android.gms.permission.AD_ID"\/>\n    <application/g' "$MANIFEST"
           fi
           
-          # 🛠️ PATCH: Add AdMob Application ID to AndroidManifest
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          # 🛠️ v10: AdMob APPLICATION_ID in manifest
           if [ -f "$MANIFEST" ]; then
             if ! grep -q "com.google.android.gms.ads.APPLICATION_ID" "$MANIFEST"; then
               sed -i '' 's|</application>|        <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-1560161047680443~4972275282"/>\n    </application>|' "$MANIFEST"
-              echo "✅ Added AdMob APPLICATION_ID to AndroidManifest.xml"
+              echo "✅ Added AdMob APPLICATION_ID"
             fi
           fi
           
-          # 🛠️ PATCH: Add Signing Configs to build.gradle
+          # 🛠️ Signing Configs
           if [ -f "android/app/build.gradle" ]; then
             sed -i '' '/buildTypes {/i \
             signingConfigs { \
@@ -157,13 +142,9 @@ workflows:
           fi
       - name: Build Signed Android (APK & AAB)
         script: |
-          # 🔑 Decode Keystore
           echo $CM_KEYSTORE | base64 --decode > $FCI_BUILD_DIR/android/app/rewardhub-key.jks
-          
           cd android
           chmod +x gradlew
-          
-          # 🏗️ Build APK and AAB with Signing
           ./gradlew assembleRelease bundleRelease \
             -Pandroid.injected.signing.store.file=$FCI_BUILD_DIR/android/app/rewardhub-key.jks \
             -Pandroid.injected.signing.store.password=$CM_KEYSTORE_PASSWORD \
