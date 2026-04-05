@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Search, PlayCircle, TrendingUp, Gift, Clock, Zap, CheckCircle2, Copy, ExternalLink, Award } from 'lucide-react';
+import { Search, PlayCircle, TrendingUp, Gift, Clock, Zap, CheckCircle2, Copy, ExternalLink, Award, Loader2 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { Offer, UserProfile, Transaction } from '../types';
@@ -10,28 +10,11 @@ import { Browser } from '@capacitor/browser';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
-interface OfferCardProps {
-  offer: Offer;
-  onClaim: (offer: Offer, currentCost: number) => void;
-  user: UserProfile;
-  isClaimedToday: boolean;
-  claimedCode?: string;
-}
-
-const OfferCard = ({ offer, onClaim, user, isClaimedToday, claimedCode }: OfferCardProps) => {
+const OfferCard = ({ offer, onClaim, user, isClaimedToday, claimedCode }: {
+  offer: Offer; onClaim: (offer: Offer, cost: number) => void; user: UserProfile; isClaimedToday: boolean; claimedCode?: string;
+}) => {
   const isLocked = user.points < offer.points && !isClaimedToday;
   const [imageError, setImageError] = React.useState(false);
-
-  const handleCopyCode = async () => {
-    if (claimedCode || offer.code) {
-      await Clipboard.write({ string: claimedCode || offer.code! });
-      await Toast.show({ text: 'Code copied!', duration: 'short' });
-    }
-  };
-
-  const handleGoToStore = async () => {
-    try { await Browser.open({ url: offer.url }); } catch { window.open(offer.url, '_blank'); }
-  };
 
   return (
     <motion.div layout initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
@@ -57,10 +40,12 @@ const OfferCard = ({ offer, onClaim, user, isClaimedToday, claimedCode }: OfferC
             {(claimedCode || offer.code) && (
               <div className="flex items-center gap-2">
                 <div className="flex-1 bg-zinc-100 px-3 py-2 rounded-xl font-mono text-sm font-bold text-zinc-700 border border-zinc-200 truncate">{claimedCode || offer.code}</div>
-                <button onClick={handleCopyCode} className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition-colors"><Copy size={18} /></button>
+                <button onClick={async () => { await Clipboard.write({ string: claimedCode || offer.code! }); await Toast.show({ text: 'Code copied!', duration: 'short' }); }}
+                  className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition-colors"><Copy size={18} /></button>
               </div>
             )}
-            <button onClick={handleGoToStore} className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 hover:bg-indigo-700 active:scale-95 transition-all">
+            <button onClick={async () => { try { await Browser.open({ url: offer.url }); } catch { window.open(offer.url, '_blank'); } }}
+              className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 hover:bg-indigo-700 active:scale-95 transition-all">
               <ExternalLink size={14} /> Go to Store
             </button>
           </div>
@@ -98,28 +83,26 @@ interface HomeScreenProps {
   handleClaimOffer: (offer: Offer, cost: number) => void;
   handleClaimBoostReward: () => void;
   isBannerVisible?: boolean;
+  isAdRunning?: boolean;
 }
 
 export const HomeScreen = ({
   user, offers, isLoading, searchQuery, setSearchQuery, selectedCategory, setSelectedCategory,
   categories, filteredOffers, transactions, handleWatchAd, handleClaimOffer, handleClaimBoostReward,
-  isBannerVisible = true
+  isBannerVisible = true, isAdRunning = false
 }: HomeScreenProps) => {
   const today = new Date().toDateString();
   const isNewDay = user.lastBoostDate !== today;
-  
   const boostLevel = isNewDay ? 1 : (Number(user.boostLevel) || 1);
-  // v10 FIX: Use currentLevelAdCounter (per-ad progress), NOT adsWatchedToday (per-boost)
   const currentProgress = isNewDay ? 0 : (Number(user.currentLevelAdCounter) || 0);
   const adsNeeded = boostLevel;
   const isLevelComplete = currentProgress >= adsNeeded;
-  const progressPercent = Math.min((currentProgress / adsNeeded) * 100, 100);
+  const progressPercent = Math.min((currentProgress / Math.max(adsNeeded, 1)) * 100, 100);
 
   const boostTitle = boostLevel === 1 ? 'First Boost' : boostLevel === 2 ? 'Second Boost' : boostLevel === 3 ? 'Third Boost' : `${boostLevel}th Boost`;
 
   return (
     <motion.div key="offers" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} className="space-y-6">
-      {/* Search */}
       <div className="space-y-4">
         <div className="relative group">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 group-focus-within:text-indigo-600 transition-colors" size={18} />
@@ -129,17 +112,17 @@ export const HomeScreen = ({
         <div className="space-y-2">
           <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest ml-1">Categories</label>
           <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-1 px-1">
-            {categories.map((cat) => (
+            {categories.map(cat => (
               <button key={cat} onClick={() => setSelectedCategory(cat)}
-                className={cn("px-4 py-2 rounded-xl text-xs font-bold capitalize transition-all border shadow-sm active:scale-95",
-                  selectedCategory === cat ? "bg-indigo-600 border-indigo-700 text-white shadow-indigo-100" : "bg-white border-zinc-200 text-zinc-600 hover:border-zinc-300"
+                className={cn("px-4 py-2 rounded-xl text-xs font-bold capitalize transition-all border shadow-sm active:scale-95 whitespace-nowrap",
+                  selectedCategory === cat ? "bg-indigo-600 border-indigo-700 text-white" : "bg-white border-zinc-200 text-zinc-600 hover:border-zinc-300"
                 )}>{cat}</button>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Daily Boost — v10: Two distinct states (Watch vs Claim) */}
+      {/* Daily Boost — Three states: Running / Complete / Watch */}
       <div className="bg-gradient-to-br from-indigo-600 to-violet-700 rounded-3xl p-6 text-white shadow-xl shadow-indigo-200 overflow-hidden relative">
         <div className="relative z-10">
           <div className="flex justify-between items-start mb-1">
@@ -147,12 +130,16 @@ export const HomeScreen = ({
             <span className="bg-white/20 backdrop-blur px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider">{boostTitle}</span>
           </div>
           <p className="text-indigo-100 text-xs mb-4">
-            {isLevelComplete
-              ? `All ${adsNeeded} ad${adsNeeded > 1 ? 's' : ''} watched! Claim your 100 points below.`
-              : `Progress: ${currentProgress}/${adsNeeded} ads for ${boostTitle} (+100 pts on completion!)`}
+            {isAdRunning ? 'Playing ads... Please wait.' :
+             isLevelComplete ? `All ${adsNeeded} ad${adsNeeded > 1 ? 's' : ''} watched! Claim your 100 points.` :
+             `Progress: ${currentProgress}/${adsNeeded} ads for ${boostTitle} (+100 pts)`}
           </p>
           <div className="flex items-center gap-3">
-            {isLevelComplete ? (
+            {isAdRunning ? (
+              <div className="bg-white/20 backdrop-blur px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2">
+                <Loader2 size={16} className="animate-spin" /> Playing Ads...
+              </div>
+            ) : isLevelComplete ? (
               <button onClick={handleClaimBoostReward}
                 className="bg-emerald-400 text-emerald-900 px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-emerald-300 transition-colors active:scale-95 animate-pulse">
                 <Award size={16} /> Claim +100 Points!
@@ -165,7 +152,7 @@ export const HomeScreen = ({
             )}
             <div className="flex-1 h-1.5 bg-white/20 rounded-full overflow-hidden">
               <motion.div initial={{ width: 0 }} animate={{ width: `${progressPercent}%` }}
-                className={cn("h-full", isLevelComplete ? "bg-emerald-400" : "bg-white")} />
+                className={cn("h-full transition-all", isLevelComplete ? "bg-emerald-400" : "bg-white")} />
             </div>
           </div>
         </div>
@@ -173,7 +160,7 @@ export const HomeScreen = ({
       </div>
 
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">{searchQuery ? `Search Results (${filteredOffers.length})` : 'Available Rewards'}</h2>
+        <h2 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">{searchQuery ? `Results (${filteredOffers.length})` : 'Available Rewards'}</h2>
         {!searchQuery && <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">{offers.length} Offers</span>}
       </div>
 
@@ -181,13 +168,13 @@ export const HomeScreen = ({
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-12 space-y-4">
             <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-            <p className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Refreshing deals...</p>
+            <p className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Refreshing...</p>
           </div>
         ) : filteredOffers.length > 0 ? (
-          filteredOffers.map((offer) => {
-            const isClaimedToday = transactions.some(t => t.type === 'claim' && t.title === offer.brand && new Date(t.timestamp).toDateString() === today);
-            return <OfferCard key={offer.id} offer={offer} onClaim={handleClaimOffer} user={user} isClaimedToday={isClaimedToday}
-              claimedCode={isClaimedToday ? transactions.find(t => t.title === offer.brand)?.code : undefined} />;
+          filteredOffers.map(offer => {
+            const claimed = transactions.some(t => t.type === 'claim' && t.title === offer.brand && new Date(t.timestamp).toDateString() === today);
+            return <OfferCard key={offer.id} offer={offer} onClaim={handleClaimOffer} user={user} isClaimedToday={claimed}
+              claimedCode={claimed ? transactions.find(t => t.title === offer.brand)?.code : undefined} />;
           })
         ) : (
           <div className="bg-white rounded-3xl p-12 border border-dashed border-zinc-200 text-center">
@@ -200,9 +187,8 @@ export const HomeScreen = ({
 
       <div className="h-[140px]" />
 
-      {/* v10: Web-only placeholder banner — on native, AdMob renders its own */}
       {isBannerVisible && (
-        <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+100px)] left-0 right-0 px-6 pointer-events-none z-[1000]">
+        <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+100px)] left-0 right-0 px-4 pointer-events-none z-[1000]">
           <div className="max-w-md mx-auto bg-zinc-900/95 backdrop-blur-md border border-zinc-800 h-14 rounded-2xl flex items-center justify-center text-[11px] font-black text-white uppercase tracking-[0.2em] pointer-events-auto shadow-2xl shadow-black/40">
             <span className="opacity-40">Sponsored Ad Space</span>
           </div>
