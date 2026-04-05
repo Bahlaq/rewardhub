@@ -54,22 +54,13 @@ workflows:
             echo "⚠️ google-services.json not found"
           fi
           
-          # server_client_id in strings.xml (for native Google Sign-In)
-          STRINGS_XML="android/app/src/main/res/values/strings.xml"
-          if [ -f "$STRINGS_XML" ]; then
-            if ! grep -q "server_client_id" "$STRINGS_XML"; then
-              sed -i '' 's|</resources>|    <string name="server_client_id">563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com</string>\n</resources>|' "$STRINGS_XML"
-              echo "✅ server_client_id injected"
-            fi
-          fi
-          
           # Version
           if [ -f "android/app/build.gradle" ]; then
-            sed -i '' 's/versionCode [0-9]*/versionCode 12/g' android/app/build.gradle
-            sed -i '' 's/versionName "[0-9.]*"/versionName "11.0.0"/g' android/app/build.gradle
+            sed -i '' 's/versionCode [0-9]*/versionCode 13/g' android/app/build.gradle
+            sed -i '' 's/versionName "[0-9.]*"/versionName "12.0.0"/g' android/app/build.gradle
           fi
           
-          # Gradle & AGP
+          # Gradle 8.7 + AGP 8.2.1
           if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
             printf "distributionBase=GRADLE_USER_HOME\ndistributionPath=wrapper/dists\ndistributionUrl=https\://services.gradle.org/distributions/gradle-8.7-all.zip\nzipStoreBase=GRADLE_USER_HOME\nzipStorePath=wrapper/dists\n" > android/gradle/wrapper/gradle-wrapper.properties
           fi
