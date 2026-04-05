@@ -4,6 +4,6 @@
     <string name="title_activity_main">RewardHub</string>
     <string name="package_name">com.rewardhub.official.app</string>
     <string name="custom_url_scheme">com.rewardhub.official.app</string>
-    <!-- Version 9.3.0: Required by @codetrix-studio/capacitor-google-auth for native Android sign-in -->
+    <!-- v10: Required by @codetrix-studio/capacitor-google-auth for native Android sign-in -->
     <string name="server_client_id">563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com</string>
 </resources>
