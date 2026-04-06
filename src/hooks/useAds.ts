@@ -11,7 +11,7 @@ let admobInitPromise: Promise<boolean> | null = null;
 const AD_IDS = {
   banner:   import.meta.env.VITE_ADMOB_BANNER_ID   || 'ca-app-pub-3940256099942544/6300978111',
   rewarded: import.meta.env.VITE_ADMOB_REWARDED_ID  || 'ca-app-pub-3940256099942544/5224354917',
-  appOpen:  import.meta.env.VITE_ADMOB_APP_OPEN_ID  || 'ca-app-pub-3940256099942544/9257395921',
+  appOpen:  import.meta.env.VITE_ADMOB_APP_OPEN_ID  || 'ca-app-pub-1560161047680443/4621280288',
 };
 
 async function initAdMob(): Promise<boolean> {
@@ -61,7 +61,7 @@ export function useAds(uid?: string) {
     try { await AdMobPlugin.hideBanner(); } catch {}
   }, [isNative]);
 
-  // ─── REWARDED AD — resolves ONLY on dismiss ─────────────────────
+  // ─── REWARDED AD — resolves on dismiss ───────────────────────────
   const showRewardedAdAndWait = useCallback(async (): Promise<boolean> => {
     if (!isNative) return false;
     const ready = await initAdMob();
@@ -85,6 +85,42 @@ export function useAds(uid?: string) {
     });
   }, [isNative]);
 
+  // ═══════════════════════════════════════════════════════════════════
+  // APP OPEN AD — Shows on cold start and app resume
+  //
+  // Uses the correct @capacitor-community/admob App Open Ad API:
+  //   prepareAppOpenAd() → loads the ad from AdMob servers
+  //   showAppOpenAd()    → displays the fullscreen ad
+  //
+  // Fails silently if the ad isn't available (no fill, network error).
+  // The app continues normally regardless of ad load outcome.
+  // ═══════════════════════════════════════════════════════════════════
+  const showAppOpenAd = useCallback(async (): Promise<void> => {
+    if (!isNative) return;
+
+    const ready = await initAdMob();
+    if (!ready || !AdMobPlugin) return;
+
+    try {
+      console.log('[AppOpenAd] Preparing ad:', AD_IDS.appOpen);
+
+      await AdMobPlugin.prepareAppOpenAd({
+        adId: AD_IDS.appOpen,
+        isTesting: !import.meta.env.VITE_ADMOB_APP_OPEN_ID,
+      });
+
+      console.log('[AppOpenAd] Ad loaded, showing...');
+      await AdMobPlugin.showAppOpenAd();
+      console.log('[AppOpenAd] Ad displayed successfully');
+
+    } catch (err: any) {
+      // Common failures: no fill, network error, ad already showing.
+      // All are non-fatal — app continues normally.
+      console.warn('[AppOpenAd] Failed (non-fatal):', err?.message || err);
+    }
+  }, [isNative]);
+
+  // ─── FIRESTORE OPS ───────────────────────────────────────────────
   const recordAdWatch = useCallback(async () => {
     if (!uid) return null;
     try { return await firebaseService.recordAdWatch(uid); }
@@ -96,18 +132,6 @@ export function useAds(uid?: string) {
     try { return await firebaseService.claimBoostReward(uid); }
     catch (e) { console.error("claimBoost:", e); return null; }
   }, [uid]);
-
-  const showAppOpenAd = useCallback(async () => {
-    if (!isNative) return;
-    const ready = await initAdMob();
-    if (!ready || !AdMobPlugin) return;
-    try {
-      if (typeof AdMobPlugin.prepareInterstitial === 'function') {
-        await AdMobPlugin.prepareInterstitial({ adId: AD_IDS.appOpen, isTesting: !import.meta.env.VITE_ADMOB_APP_OPEN_ID });
-        await AdMobPlugin.showInterstitial();
-      }
-    } catch (err) { console.warn('[AdMob] App open error:', err); }
-  }, [isNative]);
 
   return {
     offers, isLoading, onOffersChange,
