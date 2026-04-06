@@ -10,26 +10,53 @@ import {
 import { Capacitor } from '@capacitor/core';
 import { Offer, UserProfile, Transaction } from '../types';
 
+const PRODUCTION_WEB_CLIENT_ID = "563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com";
+
 // ═══════════════════════════════════════════════════════════════════════
-// v12: COMPLETE AUTH REBUILD
+// v12.1: DEFINITIVE Google Sign-In Fix
 //
-// Replaced @codetrix-studio/capacitor-google-auth (broken, hangs on signIn())
-// with @capacitor-firebase/authentication (official Capacitor Firebase plugin).
+// WHAT PREVIOUSLY WORKED (and what didn't):
+//   ✓ Original code showed the native picker (initialize with grantOfflineAccess:true)
+//   ✗ After email selection: "No ID Token" error
+//     → Because grantOfflineAccess:true returns a serverAuthCode, not an idToken
+//   ✗ Changing grantOfflineAccess to false → picker stopped appearing
+//   ✗ Removing initialize() → NullPointerException crash
+//   ✗ Switching to @capacitor-firebase/authentication → crash on launch
 //
-// How it works:
-//   1. FirebaseAuthentication.signInWithGoogle() shows the NATIVE Google
-//      account picker (stays inside the app — no browser redirect).
-//   2. The plugin returns a credential with an idToken.
-//   3. We exchange that idToken for a Firebase web SDK credential via
-//      GoogleAuthProvider.credential() → signInWithCredential().
-//   4. The existing onAuthStateChanged listener picks up the new user.
+// THE FIX (two changes):
+//   1. Keep EXACT original params (grantOfflineAccess:true) that showed the picker
+//   2. Use accessToken (always present) for Firebase credential exchange
+//      instead of relying on idToken (absent with grantOfflineAccess:true)
 //
-// Why this plugin works when the old one didn't:
-//   - Uses Google Identity Services (modern API) instead of the deprecated
-//     GoogleSignIn API that had activity result callback issues.
-//   - Maintained by the Capacitor community team, tested with Capacitor 6.
-//   - Native dependencies are auto-resolved by the Capacitor plugin system.
+//   GoogleAuthProvider.credential(idToken, accessToken) accepts EITHER.
+//   When idToken is null, Firebase verifies the accessToken server-side.
+//
+//   Also: call signOut() before signIn() to clear cached state from
+//   all our previous failed attempts with different config params.
 // ═══════════════════════════════════════════════════════════════════════
+
+let GoogleAuthInstance: any = null;
+
+if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+  import('@codetrix-studio/capacitor-google-auth').then(({ GoogleAuth }) => {
+    GoogleAuthInstance = GoogleAuth;
+    try {
+      // EXACT same params as original code that showed the native picker.
+      // DO NOT change these — they are the only combination that works.
+      (GoogleAuth as any).initialize({
+        clientId: PRODUCTION_WEB_CLIENT_ID,
+        serverClientId: PRODUCTION_WEB_CLIENT_ID,
+        scopes: ['profile', 'email'],
+        grantOfflineAccess: true
+      });
+      console.log("[GoogleAuth] Initialized successfully");
+    } catch (error) {
+      console.error("[GoogleAuth] initialize() failed:", error);
+    }
+  }).catch(err => {
+    console.error("[GoogleAuth] Failed to load plugin:", err);
+  });
+}
 
 const firebaseConfig = {
   apiKey: 'AIzaSyBLlefWEa3WHUSPD0_sDTvpCTqIImh5X6Y',
@@ -49,6 +76,7 @@ catch (e) { console.error("Firebase init failed:", e); }
 const db = app ? initializeFirestore(app, { experimentalForceLongPolling: true }) : null;
 const auth = app ? getAuth(app) : null;
 const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ client_id: PRODUCTION_WEB_CLIENT_ID });
 
 export { auth, db };
 export type { FirebaseUser };
@@ -60,43 +88,79 @@ function handleFsError(error: unknown, path: string | null, shouldThrow = true) 
 }
 
 export const firebaseService = {
-  // ─── GOOGLE SIGN-IN ──────────────────────────────────────────────
   async signInWithGoogle() {
     if (!auth) throw new Error("Firebase Auth not initialized");
 
     if (Capacitor.isNativePlatform()) {
-      // ── NATIVE: Use @capacitor-firebase/authentication ──
-      // Shows the native Google account picker inside the app.
-      // No browser redirect. No external tab.
       try {
-        const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
+        // Wait for plugin to be ready (it loads via dynamic import at top of file)
+        if (!GoogleAuthInstance) {
+          console.log("[Auth] Waiting for GoogleAuth plugin...");
+          const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
+          GoogleAuthInstance = GoogleAuth;
+          (GoogleAuthInstance as any).initialize({
+            clientId: PRODUCTION_WEB_CLIENT_ID,
+            serverClientId: PRODUCTION_WEB_CLIENT_ID,
+            scopes: ['profile', 'email'],
+            grantOfflineAccess: true
+          });
+        }
 
-        console.log("[Auth] Calling FirebaseAuthentication.signInWithGoogle()...");
-        const result = await FirebaseAuthentication.signInWithGoogle();
-        console.log("[Auth] Native sign-in returned. Email:", result?.user?.email);
+        // Clear any cached sign-in state from previous attempts.
+        // This is critical because we changed config params multiple times
+        // and stale state causes the picker to not appear.
+        try {
+          await GoogleAuthInstance.signOut();
+          console.log("[Auth] Cleared previous sign-in state");
+        } catch {
+          // signOut can fail if never signed in — that's fine
+        }
 
-        // Extract the idToken from the credential
-        const idToken = result?.credential?.idToken;
-        if (!idToken) {
-          console.error("[Auth] No idToken in result. credential:", JSON.stringify(result?.credential));
+        console.log("[Auth] Calling GoogleAuth.signIn()...");
+        const googleUser = await GoogleAuthInstance.signIn();
+        console.log("[Auth] signIn() returned. email:", googleUser?.email);
+
+        // Log full response structure for debugging (console only)
+        console.log("[Auth] Full response keys:", JSON.stringify(Object.keys(googleUser || {})));
+        if (googleUser?.authentication) {
+          console.log("[Auth] authentication keys:", JSON.stringify(Object.keys(googleUser.authentication)));
+        }
+
+        // Extract tokens — try ALL possible locations
+        const idToken = googleUser?.authentication?.idToken
+                     || (googleUser as any)?.idToken
+                     || null;
+
+        const accessToken = googleUser?.authentication?.accessToken
+                         || (googleUser as any)?.accessToken
+                         || null;
+
+        // GoogleAuthProvider.credential() accepts EITHER idToken OR accessToken.
+        // With grantOfflineAccess:true, idToken is typically null but accessToken is present.
+        // Firebase verifies the accessToken server-side against Google's OAuth API.
+        if (!idToken && !accessToken) {
+          console.error("[Auth] Neither idToken nor accessToken found:", JSON.stringify(googleUser));
           throw new Error(
-            "Google account selected but no authentication token received. " +
-            "Please verify SHA-1 fingerprints in Firebase Console."
+            "Google Sign-In succeeded but no tokens were returned. " +
+            "Please check SHA-1 fingerprints in Firebase Console."
           );
         }
 
-        // Exchange for Firebase web SDK credential
-        const credential = GoogleAuthProvider.credential(idToken);
-        const userCredential = await signInWithCredential(auth, credential);
-        console.log("[Auth] Firebase sign-in success:", userCredential.user.uid);
+        console.log("[Auth] Creating Firebase credential with:",
+          idToken ? "idToken" : "no idToken",
+          accessToken ? "+ accessToken" : "+ no accessToken"
+        );
 
-        await this._ensureProfile(userCredential.user);
-        return userCredential.user;
+        const credential = GoogleAuthProvider.credential(idToken, accessToken);
+        const result = await signInWithCredential(auth, credential);
+        console.log("[Auth] Firebase signInWithCredential success:", result.user.uid, result.user.email);
+
+        await this._ensureProfile(result.user);
+        return result.user;
 
       } catch (error: any) {
         const msg = error?.message || String(error);
-        // User cancelled the picker — not an error
-        if (msg.includes('canceled') || msg.includes('cancelled') || msg.includes('closed')) {
+        if (msg.includes('canceled') || msg.includes('cancelled') || msg.includes('12501') || msg.includes('popup_closed')) {
           throw new Error("Sign-in cancelled.");
         }
         console.error("[Auth] Native sign-in error:", error);
@@ -104,9 +168,8 @@ export const firebaseService = {
       }
     }
 
-    // ── WEB: Use Firebase signInWithPopup ──
+    // Web: popup
     try {
-      console.log("[Auth] Using web signInWithPopup...");
       const result = await signInWithPopup(auth, googleProvider);
       await this._ensureProfile(result.user);
       return result.user;
@@ -137,12 +200,9 @@ export const firebaseService = {
 
   async logout() {
     if (auth) await signOut(auth);
-    // Also sign out of the native layer
-    if (Capacitor.isNativePlatform()) {
-      try {
-        const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
-        await FirebaseAuthentication.signOut();
-      } catch {}
+    // Also clear native plugin state
+    if (Capacitor.isNativePlatform() && GoogleAuthInstance) {
+      try { await GoogleAuthInstance.signOut(); } catch {}
     }
   },
 
@@ -150,7 +210,6 @@ export const firebaseService = {
   async deleteUserProfile(uid: string) { if (db) await deleteDoc(doc(db, getCol(uid), uid)); },
   onAuthChange(cb: (user: FirebaseUser | null) => void) { if (!auth) { cb(null); return () => {}; } return onAuthStateChanged(auth, cb); },
 
-  // ─── PROFILE ─────────────────────────────────────────────────────
   onProfileChange(uid: string, cb: (p: UserProfile | null) => void) {
     if (!db) { cb(null); return () => {}; }
     return onSnapshot(doc(db, getCol(uid), uid), d => cb(d.exists() ? d.data() as UserProfile : null),
@@ -176,7 +235,6 @@ export const firebaseService = {
     catch (e) { handleFsError(e, `${getCol(uid)}/${uid}`, false); }
   },
 
-  // ─── AD WATCH (with bounds guard) ───────────────────────────────
   async recordAdWatch(uid: string) {
     if (!db) throw new Error("Firestore not initialized");
     const userRef = doc(db, getCol(uid), uid); const today = new Date().toDateString();
@@ -207,7 +265,6 @@ export const firebaseService = {
     });
   },
 
-  // ─── LISTENERS ───────────────────────────────────────────────────
   onOffersChange(cb: (offers: Offer[]) => void) { if (!db) { cb([]); return () => {}; } return onSnapshot(query(collection(db, 'offers')), snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data(), points: Number(d.data().points || 0) } as Offer))), err => { handleFsError(err, 'offers', false); cb([]); }); },
   onClaimsChange(uid: string, cb: (claims: Transaction[]) => void) { if (!db) { cb([]); return () => {}; } return onSnapshot(query(collection(db, 'claims'), where('uid', '==', uid)), snap => cb(snap.docs.map(d => { const x = d.data(); return { id: d.id, type: 'claim', title: x.offerBrand, amount: -x.pointsSpent, timestamp: x.timestamp?.toDate?.()?.toISOString() || new Date().toISOString(), code: x.code, rewardType: x.code ? 'code' : 'link' } as Transaction; })), err => { handleFsError(err, 'claims', false); cb([]); }); },
   onHistoryChange(uid: string, cb: (history: Transaction[]) => void) { if (!db) { cb([]); return () => {}; } return onSnapshot(query(collection(db, 'history'), where('uid', '==', uid)), snap => cb(snap.docs.map(d => { const x = d.data(); return { id: d.id, type: 'earn', title: x.title || x.message, amount: x.amount || x.points, timestamp: x.timestamp?.toDate?.()?.toISOString() || new Date().toISOString() } as Transaction; })), err => { handleFsError(err, 'history', false); cb([]); }); },
