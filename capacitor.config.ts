@@ -16,12 +16,14 @@ const config: CapacitorConfig = {
       splashFullScreen: true,
       splashImmersive: true,
     },
-    // v12: Switched from @codetrix-studio/capacitor-google-auth to @capacitor-firebase/authentication.
-    // skipNativeAuth: true → plugin only handles the native picker + token retrieval.
-    // We handle Firebase web SDK sign-in ourselves via signInWithCredential().
-    FirebaseAuthentication: {
-      skipNativeAuth: true,
-      providers: ["google.com"]
+    // v12.1: Reverted to EXACT config that showed the native picker.
+    // forceCodeForRefreshToken:true + grantOfflineAccess:true are what
+    // made the picker appear. The token exchange is now handled differently
+    // in firebase.ts (using accessToken instead of idToken).
+    GoogleAuth: {
+      scopes: ["profile", "email"],
+      serverClientId: "563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com",
+      forceCodeForRefreshToken: true
     }
   }
 };
