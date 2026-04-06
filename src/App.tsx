@@ -46,7 +46,6 @@ const Header = ({ user }: { user: UserProfile }) => (
   </header>
 );
 
-// Web Ad Simulator — z-[9999]
 const WebAdSimulatorModal = ({ isOpen, onComplete, onCancel, adNumber, totalAds }: {
   isOpen: boolean; onComplete: () => void; onCancel: () => void; adNumber: number; totalAds: number;
 }) => {
@@ -90,9 +89,6 @@ const SimpleModal = ({ isOpen, onClose, children }: { isOpen: boolean; onClose: 
   );
 };
 
-// ═══════════════════════════════════════════════════════════════════════
-// MAIN APP
-// ═══════════════════════════════════════════════════════════════════════
 export default function App() {
   const [activeTab, setActiveTab] = useState('offers');
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
@@ -107,6 +103,15 @@ export default function App() {
   const [webAdNumber, setWebAdNumber] = useState(1);
   const [webAdTotal, setWebAdTotal] = useState(1);
   const webAdResolveRef = useRef<((v: boolean) => void) | null>(null);
+
+  // ═══════════════════════════════════════════════════════════════════
+  // APP OPEN AD — Background timestamp tracking
+  // Records when the app goes to background so we can check on resume
+  // whether enough time passed (5 seconds) to warrant showing an ad.
+  // This prevents the ad from firing during Google Sign-In flow, which
+  // briefly backgrounds the app when the native picker opens.
+  // ═══════════════════════════════════════════════════════════════════
+  const backgroundTimestampRef = useRef<number>(0);
 
   // Auth
   useEffect(() => { const u = firebaseService.onAuthChange(f => { setFirebaseUser(f); if (!f) setIsAuthLoading(false); }); return () => u(); }, []);
@@ -129,7 +134,6 @@ export default function App() {
     return () => { u1(); u2(); u3(); };
   }, [firebaseUser?.uid]);
 
-  // State
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const categories = ['all', 'Fashion', 'Delivery apps', 'Shopping', 'Travel', 'Food', 'General'];
@@ -138,15 +142,61 @@ export default function App() {
   useEffect(() => { localStorage.setItem('local_transactions', JSON.stringify(localTransactions.slice(0, 50))); }, [localTransactions]);
   const displayPoints = useMemo(() => Math.max(0, transactions.reduce((a, t) => t.type === 'earn' ? a + t.amount : t.type === 'claim' ? a - t.amount : a, 0)), [transactions]);
 
-  // Ads
   const { offers, isLoading, onOffersChange, showRewardedAdAndWait, recordAdWatch, claimBoostReward, showBanner, hideBanner, showAppOpenAd, isNative } = useAds(firebaseUser?.uid);
   useEffect(() => { const u = onOffersChange(); return () => u(); }, [onOffersChange]);
   const filteredOffers = useMemo(() => offers.filter(o => { const s = selectedCategory.toLowerCase(); const mc = s === 'all' || (Array.isArray(o.category) ? o.category.some(c => String(c).toLowerCase() === s) : String(o.category || '').toLowerCase() === s); return mc && (o.brand.toLowerCase().includes(searchQuery.toLowerCase()) || o.description.toLowerCase().includes(searchQuery.toLowerCase())); }), [offers, searchQuery, selectedCategory]);
 
-  useEffect(() => { const t = setTimeout(() => showAppOpenAd(), 1500); return () => clearTimeout(t); }, [showAppOpenAd]);
+  // ═══════════════════════════════════════════════════════════════════
+  // APP OPEN AD — Cold Start
+  // Shows the ad 2 seconds after the app first loads.
+  // The delay allows the UI to render and Firebase to initialize first.
+  // ═══════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      showAppOpenAd();
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [showAppOpenAd]);
+
+  // ═══════════════════════════════════════════════════════════════════
+  // APP OPEN AD — Resume from Background
+  //
+  // Uses the visibilitychange event which fires reliably in Capacitor's
+  // WebView when the Android app goes to/from background.
+  //
+  // Safety: Only shows the ad if the app was in background for at least
+  // 5 seconds. This prevents the ad from triggering when:
+  //   - Google Sign-In briefly backgrounds the app (native picker)
+  //   - User quickly switches between recent apps
+  //   - System dialogs (permissions, etc.) appear and dismiss
+  // ═══════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        // App going to background — record the timestamp
+        backgroundTimestampRef.current = Date.now();
+      } else if (document.visibilityState === 'visible') {
+        // App coming to foreground — check if enough time passed
+        const backgroundDuration = Date.now() - backgroundTimestampRef.current;
+        const MIN_BACKGROUND_MS = 5000; // 5 seconds
+
+        if (backgroundTimestampRef.current > 0 && backgroundDuration >= MIN_BACKGROUND_MS) {
+          console.log(`[AppOpenAd] App resumed after ${Math.round(backgroundDuration / 1000)}s in background — showing ad`);
+          showAppOpenAd();
+        } else if (backgroundTimestampRef.current > 0) {
+          console.log(`[AppOpenAd] App resumed after ${Math.round(backgroundDuration / 1000)}s — too short, skipping ad`);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [showAppOpenAd]);
+
+  // Banner lifecycle
   useEffect(() => { if (isNative && activeTab === 'offers' && !isAdRunning) showBanner(); else if (isNative) hideBanner(); }, [activeTab, isAdRunning, isNative, showBanner, hideBanner]);
 
-  // Web simulator promise
+  // Web simulator
   const showWebSimulatorAndWait = useCallback((num: number, total: number): Promise<boolean> => {
     return new Promise(resolve => { webAdResolveRef.current = resolve; setWebAdNumber(num); setWebAdTotal(total); setIsWebAdModalOpen(true); });
   }, []);
@@ -189,7 +239,6 @@ export default function App() {
     catch { Toast.show({ text: "Claim failed.", duration: 'long' }); }
   };
 
-  // Auth handlers
   const handleSignIn = async () => {
     setIsAuthLoading(true);
     try {
@@ -218,14 +267,12 @@ export default function App() {
 
   if (!isConfigValid) return (<div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-6 text-center"><AlertCircle size={48} className="text-rose-500 mb-4" /><h1 className="text-xl font-bold text-zinc-900 mb-2">Configuration Error</h1><p className="text-sm text-zinc-500 max-w-xs">Firebase configuration is missing.</p></div>);
 
-  // ── Loading Screen ──
   if (isAuthLoading) return (
     <div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center gap-6" style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
       <Logo className="max-w-[120px]" /><div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
     </div>
   );
 
-  // ── Login Screen ──
   if (!firebaseUser) return (
     <div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-8 text-center" style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
       <div className="w-full max-w-sm flex flex-col items-center">
@@ -246,10 +293,8 @@ export default function App() {
     </div>
   );
 
-  // ── Profile Loading ──
   if (!user) return (<div className="h-screen flex flex-col items-center justify-center bg-zinc-50 p-6"><div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4" /><p className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Loading...</p></div>);
 
-  // ── Main App ──
   return (
     <div className="h-screen flex flex-col bg-zinc-50 font-sans selection:bg-indigo-100 overflow-hidden">
       <div className="flex-1 overflow-y-auto scroll-smooth relative">
@@ -264,7 +309,6 @@ export default function App() {
             )}
             {activeTab === 'profile' && (
               <motion.div key="profile" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} className="space-y-6">
-                {/* Profile Card */}
                 <div className="bg-white rounded-3xl p-6 border border-zinc-200 shadow-sm text-center">
                   <div className="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4"><User size={40} className="text-indigo-600" /></div>
                   <h2 className="text-xl font-bold text-zinc-900">{user.email}</h2>
@@ -274,15 +318,11 @@ export default function App() {
                     <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100"><span className="block text-[10px] uppercase font-bold text-zinc-400 tracking-wider mb-1">Claims</span><span className="text-lg font-bold text-zinc-900">{transactions.filter(t => t.type === 'claim').length}</span></div>
                   </div>
                 </div>
-
-                {/* Settings */}
                 <div className="space-y-3">
                   <button onClick={() => setIsPrivacyModalOpen(true)} className="w-full flex items-center justify-between p-5 bg-white rounded-2xl border border-zinc-200 shadow-sm hover:bg-zinc-50"><div className="flex items-center gap-3"><ShieldCheck size={20} className="text-indigo-600" /><span className="text-sm font-bold text-zinc-700">Privacy Policy</span></div><ChevronRight size={18} className="text-zinc-400" /></button>
                   <button onClick={handleSignOut} className="w-full flex items-center justify-between p-5 bg-white rounded-2xl border border-zinc-200 shadow-sm hover:bg-zinc-50"><div className="flex items-center gap-3"><ExternalLink size={20} className="text-zinc-400" /><span className="text-sm font-bold text-zinc-700">Sign Out</span></div><ChevronRight size={18} className="text-zinc-400" /></button>
                   <button onClick={() => setIsDeleteModalOpen(true)} className="w-full flex items-center justify-between p-5 bg-white rounded-2xl border border-rose-200 shadow-sm hover:bg-rose-50"><div className="flex items-center gap-3"><Trash2 size={20} className="text-rose-500" /><span className="text-sm font-bold text-rose-600">Delete Account</span></div><ChevronRight size={18} className="text-rose-400" /></button>
                 </div>
-
-                {/* History */}
                 <div className="space-y-3">
                   <h2 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Recent History</h2>
                   {transactions.length === 0 ? (
