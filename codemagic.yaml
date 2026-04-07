@@ -49,24 +49,20 @@ workflows:
             echo "✅ google-services.json injected"
           elif [ -f "google-services.json" ]; then
             cp google-services.json android/app/google-services.json
-            echo "✅ google-services.json copied"
-          else
-            echo "⚠️ google-services.json not found"
           fi
           
-          # server_client_id in strings.xml (needed by codetrix-studio plugin)
+          # server_client_id in strings.xml
           STRINGS_XML="android/app/src/main/res/values/strings.xml"
           if [ -f "$STRINGS_XML" ]; then
             if ! grep -q "server_client_id" "$STRINGS_XML"; then
               sed -i '' 's|</resources>|    <string name="server_client_id">563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com</string>\n</resources>|' "$STRINGS_XML"
-              echo "✅ server_client_id injected"
             fi
           fi
           
           # Version
           if [ -f "android/app/build.gradle" ]; then
-            sed -i '' 's/versionCode [0-9]*/versionCode 14/g' android/app/build.gradle
-            sed -i '' 's/versionName "[0-9.]*"/versionName "12.1.0"/g' android/app/build.gradle
+            sed -i '' 's/versionCode [0-9]*/versionCode 15/g' android/app/build.gradle
+            sed -i '' 's/versionName "[0-9.]*"/versionName "13.0.0"/g' android/app/build.gradle
           fi
           
           # Gradle 8.7 + AGP 8.2.1
@@ -94,14 +90,24 @@ workflows:
             sed -i '' 's/targetSdkVersion = [0-9]*/targetSdkVersion = 35/g' android/variables.gradle
           fi
           
-          # AD_ID permission + AdMob App ID
+          # Permissions + AdMob
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
+            # AD_ID permission
             if ! grep -q "com.google.android.gms.permission.AD_ID" "$MANIFEST"; then
               sed -i '' 's/<application/<uses-permission android:name="com.google.android.gms.permission.AD_ID"\/>\n    <application/g' "$MANIFEST"
             fi
+            # POST_NOTIFICATIONS for Android 13+ (push notifications)
+            if ! grep -q "android.permission.POST_NOTIFICATIONS" "$MANIFEST"; then
+              sed -i '' 's/<application/<uses-permission android:name="android.permission.POST_NOTIFICATIONS"\/>\n    <application/g' "$MANIFEST"
+            fi
+            # AdMob App ID
             if ! grep -q "com.google.android.gms.ads.APPLICATION_ID" "$MANIFEST"; then
               sed -i '' 's|</application>|        <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-1560161047680443~4972275282"/>\n    </application>|' "$MANIFEST"
+            fi
+            # FCM default notification channel
+            if ! grep -q "com.google.firebase.messaging.default_notification_channel_id" "$MANIFEST"; then
+              sed -i '' 's|</application>|        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="rewardhub_default"/>\n    </application>|' "$MANIFEST"
             fi
           fi
           
