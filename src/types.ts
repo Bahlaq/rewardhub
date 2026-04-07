@@ -9,6 +9,7 @@ export interface Offer {
   category: ('Fashion' | 'Delivery apps' | 'TV\'s' | 'Travel' | 'Food' | 'Shopping' | 'General')[];
   type: 'discount' | 'giftcard' | 'coupon' | 'subscription';
   expiryDate: string;
+  country?: string; // 'Jordan', 'Saudi Arabia', 'UAE', 'Global', etc.
 }
 
 export interface Transaction {
@@ -32,15 +33,6 @@ export interface UserProfile {
   adsWatchedToday?: number;
   currentLevelAdCounter?: number;
   lastBoostDate?: string | null;
-}
-
-export interface ClaimRecord {
-  id: string;
-  uid: string;
-  offerId: string;
-  offerTitle: string;
-  rewardCode: string;
-  timestamp: string;
 }
 
 export interface AdLog {
