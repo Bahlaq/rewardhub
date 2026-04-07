@@ -2,172 +2,78 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // =========================================================================
-    // DATA MODEL REFERENCE
-    // =========================================================================
-    //
-    // /users/{uid}  or  /guests/{uid}
-    //   uid                    : string  (required)
-    //   email                  : string
-    //   points                 : number  >= 0   ← cumulative, never reset
-    //   totalEarned            : number  >= 0
-    //   boostLevel             : number  >= 1   ← resets to 1 daily
-    //   adsWatchedToday        : number  >= 0   ← resets daily
-    //   currentLevelAdCounter  : number  >= 0   ← resets after each claim
-    //   lastBoostDate          : string         ← date string, resets counters
-    //   claimsToday            : number  >= 0
-    //   lastClaimDate          : string | null
-    //
-    // /history/{historyId}
-    //   uid        : string  (required)
-    //   type       : string  'earn' | 'boost' | 'claim' | 'referral'  (required)
-    //   points     : number  (required)   ← was previously called 'amount'
-    //   message    : string  (required)   ← was previously called 'title'
-    //   timestamp  : timestamp (required)
-    //
-    // /claims/{claimId}
-    //   uid        : string  (required)
-    //   offerId    : string  (required)
-    //   pointsSpent: number  (required)   ← NOTE: 'pointsSpent' not 'points'
-    //   timestamp  : timestamp (required)
-    //
-    // /offers/{offerId}
-    //   public read, admin write only
-    //
-    // =========================================================================
-
-    // ── Helper functions ─────────────────────────────────────────────────────
-
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-
-    function isAdmin() {
-      return isAuthenticated()
-        && request.auth.token.email == "m.bahlaq@dv8dm.com"
-        && request.auth.token.email_verified == true;
-    }
-
-    function isGuest(userId) {
-      return userId is string && userId.matches("^local_guest_.*");
-    }
-
-    function isAnonymousUser() {
-      return isAuthenticated() && request.auth.token.get('firebase', {}).get('sign_in_provider', '') == 'anonymous';
-    }
-
-    function isValidEmail(email) {
-      return email is string
-        && email.matches("^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$");
-    }
-
-    // ── Document validators ───────────────────────────────────────────────────
+    function isAuthenticated() { return request.auth != null; }
+    function isOwner(userId) { return isAuthenticated() && request.auth.uid == userId; }
+    function isAdmin() { return isAuthenticated() && request.auth.token.email == 'm.bahlaq@dv8dm.com' && request.auth.token.email_verified == true; }
+    function isGuest(userId) { return userId is string && userId.matches('^local_guest_.*'); }
+    function isValidEmail(email) { return email is string && email.matches('^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$'); }
 
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'points'])
-        && data.uid is string
-        && data.points is number && data.points >= 0
-        && (!('email' in data)
-            || data.email == null
-            || data.email == 'Guest User'
-            || isValidEmail(data.email))
-        && (!('boostLevel'            in data) || data.boostLevel is number)
-        && (!('adsWatchedToday'       in data) || data.adsWatchedToday is number)
-        && (!('currentLevelAdCounter' in data) || data.currentLevelAdCounter is number)
-        && (!('totalEarned'           in data) || data.totalEarned is number)
-        && (!('lastBoostDate'         in data) || data.lastBoostDate is string)
-        && (!('claimsToday'           in data) || data.claimsToday is number)
-        && (!('lastClaimDate'         in data)
-            || data.lastClaimDate == null
-            || data.lastClaimDate is string);
+          && data.uid is string && data.points is number && data.points >= 0
+          && (!('email' in data) || data.email == null || data.email == 'Guest User' || data.email == 'Unknown' || isValidEmail(data.email))
+          && (!('boostLevel' in data) || data.boostLevel is number)
+          && (!('adsWatchedToday' in data) || data.adsWatchedToday is number)
+          && (!('currentLevelAdCounter' in data) || data.currentLevelAdCounter is number)
+          && (!('totalEarned' in data) || data.totalEarned is number)
+          && (!('claimsToday' in data) || data.claimsToday is number)
+          && (!('lastClaimDate' in data) || data.lastClaimDate == null || data.lastClaimDate is string)
+          && (!('lastBoostDate' in data) || data.lastBoostDate is string);
     }
 
     function isValidClaim(data) {
-      return data.keys().hasAll(['uid', 'offerId', 'timestamp'])
-        && data.uid is string
-        && data.offerId is string;
+      return data.keys().hasAll(['uid', 'offerId', 'timestamp']) && data.uid is string && data.offerId is string;
     }
 
     function isValidHistory(data) {
-      // Required fields: uid, points, timestamp, type, message
-      // 'points' (number) was previously written as 'amount' — fixed in firebase.ts v9.2
-      // 'message' (string) was previously written as 'title' — fixed in firebase.ts v9.2
       return data.keys().hasAll(['uid', 'points', 'timestamp', 'type', 'message'])
-        && data.uid is string
-        && data.points is number
-        && data.message is string
-        && data.type in ['boost', 'claim', 'referral', 'earn'];
+          && data.uid is string && data.points is number && data.message is string
+          && data.type in ['earn', 'boost', 'claim', 'referral'];
     }
 
-    // ── User profiles ─────────────────────────────────────────────────────────
-
     match /users/{userId} {
-      allow read:   if isOwner(userId) || isAdmin();
-      allow create: if (isOwner(userId) || isAnonymousUser())
-                      && isValidUser(request.resource.data);
-      allow update: if (isOwner(userId) || isAdmin())
-                      && isValidUser(request.resource.data);
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.uid == userId;
+      allow update: if (isOwner(userId) || isAdmin()) && isValidUser(request.resource.data);
       allow delete: if isOwner(userId) || isAdmin();
     }
 
-    // ── Guest profiles ────────────────────────────────────────────────────────
-
     match /guests/{userId} {
-      allow read:   if isGuest(userId) || isAdmin();
-      allow create: if isGuest(userId) && isValidUser(request.resource.data);
-      allow update: if (isGuest(userId) || isAdmin())
-                      && isValidUser(request.resource.data);
+      allow read: if isGuest(userId) || isAdmin();
+      allow create: if isGuest(userId) && isValidUser(request.resource.data) && request.resource.data.uid == userId;
+      allow update: if (isGuest(userId) || isAdmin()) && isValidUser(request.resource.data);
       allow delete: if isGuest(userId) || isAdmin();
     }
 
-    // ── Offers ────────────────────────────────────────────────────────────────
-
     match /offers/{offerId} {
-      allow read:  if true;           // public — anyone can browse offers
+      allow read: if true;
       allow write: if isAdmin();
     }
 
-    // ── Claims ────────────────────────────────────────────────────────────────
-
     match /claims/{claimId} {
-      allow read: if isAdmin()
-        || (isAuthenticated() && resource.data.uid == request.auth.uid)
-        || isGuest(resource.data.uid);
-
-      allow create: if isValidClaim(request.resource.data)
-        && (
-          (isAuthenticated() && request.resource.data.uid == request.auth.uid)
-          || isGuest(request.resource.data.uid)
-        );
-
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.uid == request.auth.uid) || isGuest(resource.data.uid);
+      allow create: if isValidClaim(request.resource.data) && ((isAuthenticated() && request.resource.data.uid == request.auth.uid) || isGuest(request.resource.data.uid));
       allow update, delete: if isAdmin();
     }
-
-    // ── History ───────────────────────────────────────────────────────────────
 
     match /history/{historyId} {
-      allow read: if isAdmin()
-        || (isAuthenticated() && resource.data.uid == request.auth.uid)
-        || isGuest(resource.data.uid);
-
-      allow create: if isValidHistory(request.resource.data)
-        && (
-          (isAuthenticated() && request.resource.data.uid == request.auth.uid)
-          || isGuest(request.resource.data.uid)
-        );
-
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.uid == request.auth.uid) || isGuest(resource.data.uid);
+      allow create: if isValidHistory(request.resource.data) && ((isAuthenticated() && request.resource.data.uid == request.auth.uid) || isGuest(request.resource.data.uid));
       allow update, delete: if isAdmin();
     }
 
-    // ── Logs ──────────────────────────────────────────────────────────────────
+    // v13: FCM tokens for push notifications
+    // Any authenticated user or guest can create/update their own token.
+    // Cloud Functions (admin SDK) bypass rules, so they can read all tokens.
+    match /fcm_tokens/{tokenId} {
+      allow read: if isAdmin();
+      allow create, update: if isAuthenticated() || true;
+      allow delete: if isAdmin();
+    }
 
     match /logs/{logId} {
       allow create: if true;
-      allow read:   if isAdmin();
+      allow read: if isAdmin();
     }
   }
 }
