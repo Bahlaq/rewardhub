@@ -12,47 +12,27 @@ import { twMerge } from 'tailwind-merge';
 import { Offer, UserProfile, Transaction } from './types';
 import { useAds } from './hooks/useAds';
 import { firebaseService, FirebaseUser, isConfigValid } from './services/firebase';
-import { notificationService } from './services/notifications';
 import { APP_NAME, APP_VERSION } from './constants';
 import { HomeScreen } from './components/HomeScreen';
 import icon from '../assets/icon.png';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
-const COOLDOWN_DURATION_MS = 2 * 60 * 1000; // 2 minutes
+const COOLDOWN_DURATION_MS = 2 * 60 * 1000;
 const COOLDOWN_STORAGE_KEY = 'rewardhub_cooldown';
 
-// ═══════════════════════════════════════════════════════════════════════
-// Cooldown state — persisted in localStorage
-// Structure: { cooldownStartedAt: number (timestamp), level: number }
-// When a user finishes all ads for their level, we store the timestamp.
-// On app restart, we check if the cooldown is still active.
-// ═══════════════════════════════════════════════════════════════════════
 function loadCooldownState(): { cooldownStartedAt: number; level: number } | null {
   try {
     const raw = localStorage.getItem(COOLDOWN_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (typeof parsed.cooldownStartedAt !== 'number') return null;
-    // Check if cooldown is still active
-    if (Date.now() - parsed.cooldownStartedAt >= COOLDOWN_DURATION_MS) {
-      localStorage.removeItem(COOLDOWN_STORAGE_KEY);
-      return null; // Expired
-    }
+    if (Date.now() - parsed.cooldownStartedAt >= COOLDOWN_DURATION_MS) { localStorage.removeItem(COOLDOWN_STORAGE_KEY); return null; }
     return parsed;
   } catch { return null; }
 }
-
-function saveCooldownState(level: number) {
-  localStorage.setItem(COOLDOWN_STORAGE_KEY, JSON.stringify({
-    cooldownStartedAt: Date.now(),
-    level,
-  }));
-}
-
-function clearCooldownState() {
-  localStorage.removeItem(COOLDOWN_STORAGE_KEY);
-}
+function saveCooldownState(level: number) { localStorage.setItem(COOLDOWN_STORAGE_KEY, JSON.stringify({ cooldownStartedAt: Date.now(), level })); }
+function clearCooldownState() { localStorage.removeItem(COOLDOWN_STORAGE_KEY); }
 
 const Logo = ({ className }: { className?: string }) => (
   <div className={cn("relative w-full mx-auto group cursor-pointer", className)}>
@@ -126,26 +106,16 @@ export default function App() {
   const webAdResolveRef = useRef<((v: boolean) => void) | null>(null);
   const backgroundTimestampRef = useRef<number>(0);
 
-  // ═══════════════════════════════════════════════════════════════════
-  // COOLDOWN STATE — persisted in localStorage
-  // Activates AFTER user finishes all ads for their current level.
-  // Timer counts down from 2 minutes. Button disabled during cooldown.
-  // ═══════════════════════════════════════════════════════════════════
+  // Cooldown
   const [isCooldownActive, setIsCooldownActive] = useState(false);
   const [cooldownSecondsLeft, setCooldownSecondsLeft] = useState(0);
   const cooldownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // On mount: check if there's an active cooldown from a previous session
   useEffect(() => {
     const saved = loadCooldownState();
     if (saved) {
-      const elapsed = Date.now() - saved.cooldownStartedAt;
-      const remaining = COOLDOWN_DURATION_MS - elapsed;
-      if (remaining > 0) {
-        setIsCooldownActive(true);
-        setCooldownSecondsLeft(Math.ceil(remaining / 1000));
-        startCooldownTicker(remaining);
-      }
+      const remaining = COOLDOWN_DURATION_MS - (Date.now() - saved.cooldownStartedAt);
+      if (remaining > 0) { setIsCooldownActive(true); setCooldownSecondsLeft(Math.ceil(remaining / 1000)); startCooldownTicker(remaining); }
     }
     return () => { if (cooldownIntervalRef.current) clearInterval(cooldownIntervalRef.current); };
   }, []);
@@ -155,25 +125,14 @@ export default function App() {
     const endTime = Date.now() + durationMs;
     setCooldownSecondsLeft(Math.ceil(durationMs / 1000));
     setIsCooldownActive(true);
-
     cooldownIntervalRef.current = setInterval(() => {
       const remaining = endTime - Date.now();
-      if (remaining <= 0) {
-        clearInterval(cooldownIntervalRef.current!);
-        cooldownIntervalRef.current = null;
-        setIsCooldownActive(false);
-        setCooldownSecondsLeft(0);
-        clearCooldownState();
-      } else {
-        setCooldownSecondsLeft(Math.ceil(remaining / 1000));
-      }
+      if (remaining <= 0) { clearInterval(cooldownIntervalRef.current!); cooldownIntervalRef.current = null; setIsCooldownActive(false); setCooldownSecondsLeft(0); clearCooldownState(); }
+      else { setCooldownSecondsLeft(Math.ceil(remaining / 1000)); }
     }, 1000);
   }
 
-  function activateCooldown(level: number) {
-    saveCooldownState(level);
-    startCooldownTicker(COOLDOWN_DURATION_MS);
-  }
+  function activateCooldown(level: number) { saveCooldownState(level); startCooldownTicker(COOLDOWN_DURATION_MS); }
 
   // Country filter
   const [selectedCountry, setSelectedCountry] = useState<string>(() => localStorage.getItem('rewardhub_country') || 'All Countries');
@@ -182,10 +141,28 @@ export default function App() {
   // Auth
   useEffect(() => { const u = firebaseService.onAuthChange(f => { setFirebaseUser(f); if (!f) setIsAuthLoading(false); }); return () => u(); }, []);
 
-  // Push notifications — init after auth
+  // ═══════════════════════════════════════════════════════════════════
+  // Push notifications — CRASH-SAFE initialization
+  // Wrapped in try/catch AND uses dynamic import inside notificationService.
+  // If ANYTHING fails, the app continues normally without push.
+  // ═══════════════════════════════════════════════════════════════════
   useEffect(() => {
     if (!firebaseUser?.uid) return;
-    notificationService.initialize((token) => { firebaseService.saveFcmToken(firebaseUser.uid, token); });
+    const uid = firebaseUser.uid;
+
+    // Delayed init — don't interfere with app startup
+    const timer = setTimeout(async () => {
+      try {
+        const { notificationService } = await import('./services/notifications');
+        await notificationService.initialize((token: string) => {
+          firebaseService.saveFcmToken(uid, token);
+        });
+      } catch (err) {
+        console.log('[App] Push notifications not available:', err instanceof Error ? err.message : err);
+      }
+    }, 3000); // Wait 3 seconds after auth before initializing push
+
+    return () => clearTimeout(timer);
   }, [firebaseUser?.uid]);
 
   const [firestoreClaims, setFirestoreClaims] = useState<Transaction[]>([]);
@@ -217,15 +194,11 @@ export default function App() {
   const { offers, isLoading, onOffersChange, showRewardedAdAndWait, recordAdWatch, claimBoostReward, showBanner, hideBanner, showAppOpenAd, isNative } = useAds(firebaseUser?.uid);
   useEffect(() => { const u = onOffersChange(); return () => u(); }, [onOffersChange]);
 
-  // Filtered offers — category → country → search
   const filteredOffers = useMemo(() => offers.filter(o => {
     const sel = selectedCategory.toLowerCase();
     const matchCat = sel === 'all' || (Array.isArray(o.category) ? o.category.some(c => String(c).toLowerCase() === sel) : String(o.category || '').toLowerCase() === sel);
     if (!matchCat) return false;
-    if (selectedCountry !== 'All Countries') {
-      const oc = (o.country || '').trim();
-      if (oc && oc !== 'Global' && oc !== selectedCountry) return false;
-    }
+    if (selectedCountry !== 'All Countries') { const oc = (o.country || '').trim(); if (oc && oc !== 'Global' && oc !== selectedCountry) return false; }
     const s = searchQuery.toLowerCase();
     return o.brand.toLowerCase().includes(s) || o.description.toLowerCase().includes(s);
   }), [offers, searchQuery, selectedCategory, selectedCountry]);
@@ -241,77 +214,34 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', handler);
   }, [showAppOpenAd]);
 
-  // Banner
   useEffect(() => { if (isNative && activeTab === 'offers' && !isAdRunning) showBanner(); else if (isNative) hideBanner(); }, [activeTab, isAdRunning, isNative, showBanner, hideBanner]);
 
-  // Web simulator
   const showWebSimulatorAndWait = useCallback((num: number, total: number): Promise<boolean> => new Promise(r => { webAdResolveRef.current = r; setWebAdNumber(num); setWebAdTotal(total); setIsWebAdModalOpen(true); }), []);
   const handleWebAdComplete = useCallback(() => { setIsWebAdModalOpen(false); webAdResolveRef.current?.(true); webAdResolveRef.current = null; }, []);
   const handleWebAdCancel = useCallback(() => { setIsWebAdModalOpen(false); webAdResolveRef.current?.(false); webAdResolveRef.current = null; }, []);
 
-  // ═══════════════════════════════════════════════════════════════════
-  // AD FLOW — with level-based cooldown
-  //
-  // Flow:
-  //   1. User taps "Watch Ad (1/3)" → plays ad → records in Firestore
-  //   2. Repeats until all N ads are watched (N = boost level)
-  //   3. Auto-claims +100 points
-  //   4. Activates 2-minute cooldown (saved to localStorage)
-  //   5. During cooldown: button disabled, timer shown
-  //   6. After cooldown: user is now level N+1, can watch N+1 ads
-  //
-  // The cooldown does NOT start between individual ads — only AFTER
-  // the full quota for the current level is exhausted and claimed.
-  // ═══════════════════════════════════════════════════════════════════
   const handleWatchAd = async () => {
     if (isAdRunning || !user || isCooldownActive) return;
     setIsAdRunning(true);
     if (isNative) await hideBanner();
-
     const boostLevel = Number(user.boostLevel) || 1;
     const currentProgress = Number(user.currentLevelAdCounter) || 0;
-    const adsNeeded = boostLevel;
-    const remaining = adsNeeded - currentProgress;
-
-    if (remaining <= 0) {
-      await handleClaimBoostReward();
-      // Activate cooldown after claiming
-      activateCooldown(boostLevel);
-      setIsAdRunning(false);
-      if (isNative) showBanner();
-      return;
-    }
-
+    const remaining = boostLevel - currentProgress;
+    if (remaining <= 0) { await handleClaimBoostReward(); activateCooldown(boostLevel); setIsAdRunning(false); if (isNative) showBanner(); return; }
     let completed = 0;
     for (let i = 0; i < remaining; i++) {
       const adNum = currentProgress + i + 1;
-      const ok = isNative ? await showRewardedAdAndWait() : await showWebSimulatorAndWait(adNum, adsNeeded);
+      const ok = isNative ? await showRewardedAdAndWait() : await showWebSimulatorAndWait(adNum, boostLevel);
       if (!ok) { Toast.show({ text: 'Ad not completed.', duration: 'short' }); break; }
       const r = await recordAdWatch();
-      if (r) {
-        completed++;
-        if (adNum < adsNeeded) {
-          Toast.show({ text: `Ad ${adNum}/${adsNeeded} done!`, duration: 'short' });
-          await new Promise(r => setTimeout(r, 800));
-        }
-      }
+      if (r) { completed++; if (adNum < boostLevel) { Toast.show({ text: `Ad ${adNum}/${boostLevel} done!`, duration: 'short' }); await new Promise(r => setTimeout(r, 800)); } }
     }
-
-    if (completed === remaining) {
-      await handleClaimBoostReward();
-      // All ads watched + claimed → START cooldown
-      activateCooldown(boostLevel);
-    }
-
+    if (completed === remaining) { await handleClaimBoostReward(); activateCooldown(boostLevel); }
     setIsAdRunning(false);
     if (isNative && activeTab === 'offers') showBanner();
   };
 
-  const handleClaimBoostReward = async () => {
-    try { const r = await claimBoostReward(); if (r) Toast.show({ text: `Boost Complete! +100 pts`, duration: 'long' }); }
-    catch { Toast.show({ text: "Claim failed.", duration: 'short' }); }
-  };
-
+  const handleClaimBoostReward = async () => { try { const r = await claimBoostReward(); if (r) Toast.show({ text: `Boost Complete! +100 pts`, duration: 'long' }); } catch { Toast.show({ text: "Claim failed.", duration: 'short' }); } };
   const handleClaimOffer = async (offer: Offer, cost: number) => {
     if (!user) return;
     if (user.points < cost) { setConfirmConfig({ title: 'Not Enough Points', message: `Need ${cost - user.points} more pts.`, onConfirm: handleWatchAd }); setIsConfirmModalOpen(true); return; }
@@ -319,7 +249,6 @@ export default function App() {
     catch { Toast.show({ text: "Claim failed.", duration: 'long' }); }
   };
 
-  // Auth handlers — UNCHANGED
   const handleSignIn = async () => {
     setIsAuthLoading(true);
     try { const u = await firebaseService.signInWithGoogle(); if (u) { setFirebaseUser(u); Toast.show({ text: "Signed in!", duration: 'short' }); } }
