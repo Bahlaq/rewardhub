@@ -1,87 +1,79 @@
 // ═══════════════════════════════════════════════════════════════════════
-// Push Notifications — CRASH-SAFE, Promise-based
-//
-// ROOT CAUSE OF CRASH: On some Android devices, calling
-//   PushNotifications.register() immediately after permission grant
-//   triggers native code that conflicts with other native activities
-//   (like App Open Ads). The native stack overflow crashes the app.
-//
-// FIX: 
-//   1. ALL imports are dynamic (never crash on load)
-//   2. register() is wrapped in try/catch with a delay
-//   3. Returns a Promise<boolean> so App.tsx can WAIT for permission
-//      to complete before showing any ads
+// Push Notifications — CRASH-SAFE
+// Returns a Promise<boolean> that resolves when the permission flow
+// is 100% complete (granted, denied, or failed). App.tsx AWAITS this
+// before initializing ANY ads.
 // ═══════════════════════════════════════════════════════════════════════
 
-let initialized = false;
-let permissionResolved = false;
+let completed = false;
 
 export const notificationService = {
-  /** Returns true when permission flow is complete (granted or denied) */
   async initialize(onToken: (token: string) => void): Promise<boolean> {
-    if (initialized) return permissionResolved;
+    if (completed) return true;
 
     try {
       const { Capacitor } = await import('@capacitor/core');
-      if (!Capacitor.isNativePlatform()) return true;
+      if (!Capacitor.isNativePlatform()) {
+        completed = true;
+        return true;
+      }
 
       const { PushNotifications } = await import('@capacitor/push-notifications');
 
-      // Check permission
+      // Step 1: Check / request permission
       let perm = await PushNotifications.checkPermissions();
+      console.log('[Push] Current permission:', perm.receive);
+
       if (perm.receive === 'prompt') {
+        console.log('[Push] Requesting permission...');
         perm = await PushNotifications.requestPermissions();
+        console.log('[Push] User chose:', perm.receive);
       }
 
-      permissionResolved = true;
+      // Mark as complete BEFORE any registration attempt
+      completed = true;
 
       if (perm.receive !== 'granted') {
-        console.log('[Push] Permission denied');
-        initialized = true;
-        return true; // Permission flow complete, just denied
+        console.log('[Push] Not granted — done');
+        return true;
       }
 
-      // Small delay after permission grant to let native stack settle
-      await new Promise(r => setTimeout(r, 1500));
+      // Step 2: Wait 2 seconds after permission grant for native stack to settle
+      console.log('[Push] Permission granted, waiting 2s before register...');
+      await new Promise(r => setTimeout(r, 2000));
 
-      // Register listeners
+      // Step 3: Register listeners and FCM
       try {
         await PushNotifications.addListener('registration', (token: any) => {
-          console.log('[Push] Token received');
-          onToken(token.value);
+          console.log('[Push] FCM token received:', token.value?.slice(0, 20) + '...');
+          try { onToken(token.value); } catch (e) { console.error('[Push] onToken callback error:', e); }
         });
 
         await PushNotifications.addListener('registrationError', (err: any) => {
-          console.error('[Push] Registration error:', err);
+          console.error('[Push] Registration error:', JSON.stringify(err));
         });
 
-        await PushNotifications.addListener('pushNotificationReceived', async (notification: any) => {
+        await PushNotifications.addListener('pushNotificationReceived', async (n: any) => {
           try {
             const { Toast } = await import('@capacitor/toast');
-            Toast.show({ text: notification.title || 'New notification', duration: 'long' });
+            Toast.show({ text: n.title || n.body || 'Notification', duration: 'long' });
           } catch {}
         });
 
         await PushNotifications.addListener('pushNotificationActionPerformed', () => {});
 
+        console.log('[Push] Calling register()...');
         await PushNotifications.register();
-        initialized = true;
-        console.log('[Push] Registered');
+        console.log('[Push] Register complete');
       } catch (regErr) {
-        console.log('[Push] Register failed (non-fatal):', regErr);
-        initialized = true;
+        console.error('[Push] Register failed (non-fatal):', regErr);
       }
 
       return true;
     } catch (err) {
-      console.log('[Push] Not available:', err instanceof Error ? err.message : err);
-      permissionResolved = true;
-      initialized = true;
+      console.error('[Push] Init failed (non-fatal):', err);
+      completed = true;
       return true;
     }
   },
-
-  isReady(): boolean {
-    return permissionResolved;
-  }
 };
