@@ -11,7 +11,7 @@ let admobInitPromise: Promise<boolean> | null = null;
 const AD_IDS = {
   banner:   import.meta.env.VITE_ADMOB_BANNER_ID   || 'ca-app-pub-3940256099942544/6300978111',
   rewarded: import.meta.env.VITE_ADMOB_REWARDED_ID  || 'ca-app-pub-3940256099942544/5224354917',
-  appOpen:  import.meta.env.VITE_ADMOB_APP_OPEN_ID  || 'ca-app-pub-1560161047680443/4621280288',
+  appOpen:  import.meta.env.VITE_ADMOB_APP_OPEN_ID  || 'ca-app-pub-1560161047680443/6918582002',
 };
 
 async function initAdMob(): Promise<boolean> {
@@ -25,7 +25,6 @@ async function initAdMob(): Promise<boolean> {
       RewardAdEvents = mod.RewardAdPluginEvents;
       await AdMobPlugin.initialize({ initializeForTesting: false });
       admobReady = true;
-      console.log('[AdMob] Initialized');
       return true;
     } catch (err) { console.error('[AdMob] Init failed:', err); return false; }
   })();
@@ -43,7 +42,7 @@ export function useAds(uid?: string) {
     return firebaseService.onOffersChange(data => { setOffers(data); setIsLoading(false); });
   }, []);
 
-  // ─── NATIVE BANNER ───────────────────────────────────────────────
+  // Banner
   const showBanner = useCallback(async () => {
     if (!isNative) return;
     const ready = await initAdMob();
@@ -53,7 +52,7 @@ export function useAds(uid?: string) {
         await AdMobPlugin.showBanner({ adId: AD_IDS.banner, adSize: 'ADAPTIVE_BANNER', position: 'BOTTOM_CENTER', margin: 100, isTesting: !import.meta.env.VITE_ADMOB_BANNER_ID });
         bannerShownRef.current = true;
       } else { await AdMobPlugin.resumeBanner(); }
-    } catch (err) { console.error('[AdMob] Banner error:', err); }
+    } catch (err) { console.error('[AdMob] Banner:', err); }
   }, [isNative]);
 
   const hideBanner = useCallback(async () => {
@@ -61,66 +60,50 @@ export function useAds(uid?: string) {
     try { await AdMobPlugin.hideBanner(); } catch {}
   }, [isNative]);
 
-  // ─── REWARDED AD — resolves on dismiss ───────────────────────────
+  // Rewarded Ad
   const showRewardedAdAndWait = useCallback(async (): Promise<boolean> => {
     if (!isNative) return false;
     const ready = await initAdMob();
     if (!ready || !AdMobPlugin || !RewardAdEvents) return false;
-
     return new Promise(async (resolve) => {
       let wasRewarded = false;
       const listeners: any[] = [];
       const cleanup = () => { listeners.forEach(l => { try { l.remove(); } catch {} }); };
-
       try {
         listeners.push(await AdMobPlugin.addListener(RewardAdEvents.Rewarded, () => { wasRewarded = true; }));
         listeners.push(await AdMobPlugin.addListener(RewardAdEvents.Dismissed, () => { cleanup(); resolve(wasRewarded); }));
         listeners.push(await AdMobPlugin.addListener(RewardAdEvents.FailedToShow, () => { cleanup(); resolve(false); }));
         listeners.push(await AdMobPlugin.addListener(RewardAdEvents.FailedToLoad, () => { cleanup(); resolve(false); }));
-
         await AdMobPlugin.prepareRewardVideoAd({ adId: AD_IDS.rewarded, isTesting: !import.meta.env.VITE_ADMOB_REWARDED_ID });
         await AdMobPlugin.showRewardVideoAd();
         setTimeout(() => { cleanup(); resolve(wasRewarded); }, 120000);
-      } catch (err) { console.error('[AdMob] Rewarded error:', err); cleanup(); resolve(false); }
+      } catch (err) { cleanup(); resolve(false); }
     });
   }, [isNative]);
 
   // ═══════════════════════════════════════════════════════════════════
-  // APP OPEN AD — Shows on cold start and app resume
-  //
-  // Uses the correct @capacitor-community/admob App Open Ad API:
-  //   prepareAppOpenAd() → loads the ad from AdMob servers
-  //   showAppOpenAd()    → displays the fullscreen ad
-  //
-  // Fails silently if the ad isn't available (no fill, network error).
-  // The app continues normally regardless of ad load outcome.
+  // App Open Ad — NEW ID: ca-app-pub-1560161047680443/6918582002
+  // SAFETY: Accepts a "ready check" function that must return true
+  // before the ad will show. This prevents showing ads while the
+  // notification permission dialog is active.
   // ═══════════════════════════════════════════════════════════════════
-  const showAppOpenAd = useCallback(async (): Promise<void> => {
+  const showAppOpenAd = useCallback(async (safetyCheck?: () => boolean): Promise<void> => {
     if (!isNative) return;
-
+    // If a safety check is provided, wait for it
+    if (safetyCheck && !safetyCheck()) {
+      console.log('[AppOpen] Safety check failed — skipping');
+      return;
+    }
     const ready = await initAdMob();
     if (!ready || !AdMobPlugin) return;
-
     try {
-      console.log('[AppOpenAd] Preparing ad:', AD_IDS.appOpen);
-
-      await AdMobPlugin.prepareAppOpenAd({
-        adId: AD_IDS.appOpen,
-        isTesting: !import.meta.env.VITE_ADMOB_APP_OPEN_ID,
-      });
-
-      console.log('[AppOpenAd] Ad loaded, showing...');
+      await AdMobPlugin.prepareAppOpenAd({ adId: AD_IDS.appOpen, isTesting: !import.meta.env.VITE_ADMOB_APP_OPEN_ID });
       await AdMobPlugin.showAppOpenAd();
-      console.log('[AppOpenAd] Ad displayed successfully');
-
     } catch (err: any) {
-      // Common failures: no fill, network error, ad already showing.
-      // All are non-fatal — app continues normally.
-      console.warn('[AppOpenAd] Failed (non-fatal):', err?.message || err);
+      console.warn('[AppOpen] Failed:', err?.message || err);
     }
   }, [isNative]);
 
-  // ─── FIRESTORE OPS ───────────────────────────────────────────────
   const recordAdWatch = useCallback(async () => {
     if (!uid) return null;
     try { return await firebaseService.recordAdWatch(uid); }
