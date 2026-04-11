@@ -6,10 +6,10 @@ export interface Offer {
   url: string;
   code?: string;
   points: number;
-  category: ('Fashion' | 'Delivery apps' | 'TV\'s' | 'Travel' | 'Food' | 'Shopping' | 'General')[];
+  category: string | string[];
   type: 'discount' | 'giftcard' | 'coupon' | 'subscription';
   expiryDate: string;
-  country?: string; // 'Jordan', 'Saudi Arabia', 'UAE', 'Global', etc.
+  countries?: string | string[] | null; // 'Jordan', ['UAE','Kuwait'], null = Global
 }
 
 export interface Transaction {
