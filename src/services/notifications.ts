@@ -1,83 +1,87 @@
-import { Capacitor } from '@capacitor/core';
-import { PushNotifications } from '@capacitor/push-notifications';
-import { Toast } from '@capacitor/toast';
-
 // ═══════════════════════════════════════════════════════════════════════
-// Push Notification Service
+// Push Notifications — CRASH-SAFE, Promise-based
 //
-// Architecture:
-//   1. App requests notification permission after user signs in
-//   2. FCM assigns a device token → stored in Firestore /fcm_tokens
-//   3. Cloud Functions use these tokens to send:
-//      - Daily reminders (scheduled at 9 AM via Cloud Scheduler)
-//      - New offer alerts (Firestore onCreate trigger on /offers)
-//   4. Manual campaigns sent via Firebase Console → FCM topics
+// ROOT CAUSE OF CRASH: On some Android devices, calling
+//   PushNotifications.register() immediately after permission grant
+//   triggers native code that conflicts with other native activities
+//   (like App Open Ads). The native stack overflow crashes the app.
 //
-// Safety:
-//   - Web is a no-op (PushNotifications is native-only)
-//   - Permission denied → silent continue
-//   - Token storage failure → silent continue
-//   - Does NOT interfere with Google Sign-In or AdMob
+// FIX: 
+//   1. ALL imports are dynamic (never crash on load)
+//   2. register() is wrapped in try/catch with a delay
+//   3. Returns a Promise<boolean> so App.tsx can WAIT for permission
+//      to complete before showing any ads
 // ═══════════════════════════════════════════════════════════════════════
 
-type TokenCallback = (token: string) => void;
 let initialized = false;
+let permissionResolved = false;
 
 export const notificationService = {
-  /**
-   * Initialize push notifications after user authentication.
-   * @param onToken — Called with the FCM token for Firestore storage
-   */
-  async initialize(onToken: TokenCallback): Promise<void> {
-    if (!Capacitor.isNativePlatform() || initialized) return;
+  /** Returns true when permission flow is complete (granted or denied) */
+  async initialize(onToken: (token: string) => void): Promise<boolean> {
+    if (initialized) return permissionResolved;
 
     try {
-      // 1. Check / request permission
+      const { Capacitor } = await import('@capacitor/core');
+      if (!Capacitor.isNativePlatform()) return true;
+
+      const { PushNotifications } = await import('@capacitor/push-notifications');
+
+      // Check permission
       let perm = await PushNotifications.checkPermissions();
       if (perm.receive === 'prompt') {
         perm = await PushNotifications.requestPermissions();
       }
+
+      permissionResolved = true;
+
       if (perm.receive !== 'granted') {
-        console.log('[Push] Permission denied — skipping');
-        return;
+        console.log('[Push] Permission denied');
+        initialized = true;
+        return true; // Permission flow complete, just denied
       }
 
-      // 2. Register listeners BEFORE calling register()
+      // Small delay after permission grant to let native stack settle
+      await new Promise(r => setTimeout(r, 1500));
 
-      // FCM token received
-      await PushNotifications.addListener('registration', (token) => {
-        console.log('[Push] Token:', token.value.slice(0, 30) + '...');
-        onToken(token.value);
-      });
-
-      // Registration failed
-      await PushNotifications.addListener('registrationError', (err) => {
-        console.error('[Push] Registration error:', err);
-      });
-
-      // Notification received while app is in FOREGROUND
-      await PushNotifications.addListener('pushNotificationReceived', (notification) => {
-        console.log('[Push] Foreground:', notification.title);
-        Toast.show({
-          text: notification.title || notification.body || 'New notification',
-          duration: 'long',
+      // Register listeners
+      try {
+        await PushNotifications.addListener('registration', (token: any) => {
+          console.log('[Push] Token received');
+          onToken(token.value);
         });
-      });
 
-      // User TAPPED a notification (from background or killed state)
-      await PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
-        console.log('[Push] Tapped:', action.notification.title);
-        // App is opening — no routing needed for now.
-        // Future: use action.notification.data to navigate to specific screens.
-      });
+        await PushNotifications.addListener('registrationError', (err: any) => {
+          console.error('[Push] Registration error:', err);
+        });
 
-      // 3. Register with FCM
-      await PushNotifications.register();
-      initialized = true;
-      console.log('[Push] Initialized');
+        await PushNotifications.addListener('pushNotificationReceived', async (notification: any) => {
+          try {
+            const { Toast } = await import('@capacitor/toast');
+            Toast.show({ text: notification.title || 'New notification', duration: 'long' });
+          } catch {}
+        });
 
+        await PushNotifications.addListener('pushNotificationActionPerformed', () => {});
+
+        await PushNotifications.register();
+        initialized = true;
+        console.log('[Push] Registered');
+      } catch (regErr) {
+        console.log('[Push] Register failed (non-fatal):', regErr);
+        initialized = true;
+      }
+
+      return true;
     } catch (err) {
-      console.error('[Push] Init error (non-fatal):', err);
+      console.log('[Push] Not available:', err instanceof Error ? err.message : err);
+      permissionResolved = true;
+      initialized = true;
+      return true;
     }
   },
+
+  isReady(): boolean {
+    return permissionResolved;
+  }
 };
