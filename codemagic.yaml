@@ -42,6 +42,7 @@ workflows:
           fi
           npx @capacitor/assets generate --android --assetPath assets
           npx cap sync android
+          python3 write_manifest.py
           
           # google-services.json
           if [ ! -z "$GOOGLE_SERVICES_JSON" ]; then
