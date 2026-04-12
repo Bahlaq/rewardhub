@@ -21,13 +21,10 @@ async function initAdMob(): Promise<boolean> {
   admobInitPromise = (async () => {
     try {
       const mod = await import('@capacitor-community/admob');
-      AdMobPlugin = mod.AdMob;
-      RewardAdEvents = mod.RewardAdPluginEvents;
+      AdMobPlugin = mod.AdMob; RewardAdEvents = mod.RewardAdPluginEvents;
       await AdMobPlugin.initialize({ initializeForTesting: false });
-      admobReady = true;
-      console.log('[AdMob] Initialized');
-      return true;
-    } catch (err) { console.error('[AdMob] Init failed:', err); return false; }
+      admobReady = true; console.log('[AdMob] Ready'); return true;
+    } catch (err) { console.error('[AdMob] Init:', err); return false; }
   })();
   return admobInitPromise;
 }
@@ -35,7 +32,7 @@ async function initAdMob(): Promise<boolean> {
 export function useAds(uid?: string) {
   const [offers, setOffers] = useState<Offer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const bannerShownRef = useRef(false);
+  const bannerRef = useRef(false);
   const isNative = Capacitor.isNativePlatform();
 
   const onOffersChange = useCallback(() => {
@@ -44,29 +41,19 @@ export function useAds(uid?: string) {
   }, []);
 
   const showBanner = useCallback(async () => {
-    if (!isNative) return;
-    const ready = await initAdMob();
-    if (!ready || !AdMobPlugin) return;
-    try {
-      if (!bannerShownRef.current) {
-        await AdMobPlugin.showBanner({ adId: AD_IDS.banner, adSize: 'ADAPTIVE_BANNER', position: 'BOTTOM_CENTER', margin: 100, isTesting: !import.meta.env.VITE_ADMOB_BANNER_ID });
-        bannerShownRef.current = true;
-      } else { await AdMobPlugin.resumeBanner(); }
-    } catch (err) { console.error('[Banner]', err); }
+    if (!isNative) return; const ok = await initAdMob(); if (!ok || !AdMobPlugin) return;
+    try { if (!bannerRef.current) { await AdMobPlugin.showBanner({ adId: AD_IDS.banner, adSize: 'ADAPTIVE_BANNER', position: 'BOTTOM_CENTER', margin: 100, isTesting: !import.meta.env.VITE_ADMOB_BANNER_ID }); bannerRef.current = true; } else { await AdMobPlugin.resumeBanner(); } } catch {}
   }, [isNative]);
 
   const hideBanner = useCallback(async () => {
-    if (!isNative || !admobReady || !AdMobPlugin || !bannerShownRef.current) return;
+    if (!isNative || !admobReady || !AdMobPlugin || !bannerRef.current) return;
     try { await AdMobPlugin.hideBanner(); } catch {}
   }, [isNative]);
 
   const showRewardedAdAndWait = useCallback(async (): Promise<boolean> => {
-    if (!isNative) return false;
-    const ready = await initAdMob();
-    if (!ready || !AdMobPlugin || !RewardAdEvents) return false;
+    if (!isNative) return false; const ok = await initAdMob(); if (!ok || !AdMobPlugin || !RewardAdEvents) return false;
     return new Promise(async (resolve) => {
-      let rewarded = false;
-      const ls: any[] = [];
+      let rewarded = false; const ls: any[] = [];
       const clean = () => ls.forEach(l => { try { l.remove(); } catch {} });
       try {
         ls.push(await AdMobPlugin.addListener(RewardAdEvents.Rewarded, () => { rewarded = true; }));
@@ -80,31 +67,19 @@ export function useAds(uid?: string) {
     });
   }, [isNative]);
 
-  // App Open Ad — simple, no safety check (App.tsx controls when to call this)
   const showAppOpenAd = useCallback(async (): Promise<void> => {
-    if (!isNative) return;
-    const ready = await initAdMob();
-    if (!ready || !AdMobPlugin) return;
+    if (!isNative) return; const ok = await initAdMob(); if (!ok || !AdMobPlugin) return;
     try {
-      console.log('[AppOpen] Preparing ad...');
+      console.log('[AppOpen] Preparing...'); 
       await AdMobPlugin.prepareAppOpenAd({ adId: AD_IDS.appOpen, isTesting: !import.meta.env.VITE_ADMOB_APP_OPEN_ID });
       console.log('[AppOpen] Showing...');
       await AdMobPlugin.showAppOpenAd();
       console.log('[AppOpen] Done');
-    } catch (err: any) {
-      console.warn('[AppOpen] Failed (non-fatal):', err?.message || err);
-    }
+    } catch (err: any) { console.warn('[AppOpen]', err?.message || err); }
   }, [isNative]);
 
-  const recordAdWatch = useCallback(async () => {
-    if (!uid) return null;
-    try { return await firebaseService.recordAdWatch(uid); } catch (e) { console.error("recordAdWatch:", e); return null; }
-  }, [uid]);
-
-  const claimBoostReward = useCallback(async () => {
-    if (!uid) return null;
-    try { return await firebaseService.claimBoostReward(uid); } catch (e) { console.error("claimBoost:", e); return null; }
-  }, [uid]);
+  const recordAdWatch = useCallback(async () => { if (!uid) return null; try { return await firebaseService.recordAdWatch(uid); } catch { return null; } }, [uid]);
+  const claimBoostReward = useCallback(async () => { if (!uid) return null; try { return await firebaseService.claimBoostReward(uid); } catch { return null; } }, [uid]);
 
   return { offers, isLoading, onOffersChange, showRewardedAdAndWait, recordAdWatch, claimBoostReward, showBanner, hideBanner, showAppOpenAd, isNative };
 }
