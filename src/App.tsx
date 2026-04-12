@@ -18,17 +18,21 @@ function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 // ═══════════════════════════════════════════════════════════════════════
 // ARCHITECTURE: THREE FULLY DECOUPLED SYSTEMS
 //
-// 1. APP OPEN AD: Fires 3 seconds after component mount. No dependency
-//    on notifications. If it fails, it fails silently.
+// System 1 — App Open Ad:
+//   Fires 3 seconds after mount. Completely independent.
+//   No dependency on notifications.
 //
-// 2. NOTIFICATIONS: Fires 10+ seconds after auth via fire-and-forget.
-//    The initPushNotifications function has its OWN internal 10-second
-//    delay. Total: 10s (our delay) + 10s (internal) = 20s after auth.
-//    CANNOT interfere with ads because they're separated by 17+ seconds.
+// System 2 — Notifications:
+//   Fire-and-forget, runs 10+ seconds after auth via dynamic import.
+//   initPushNotifications() has its own internal 10-second delay.
+//   Total: 20+ seconds after auth. Every single operation wrapped
+//   in individual try/catch. Cannot crash the app.
 //
-// 3. COUNTRY FILTER: Client-side filtering using offerMatchesCountry()
-//    which checks BOTH 'countries' (array) and 'country' (string) fields
-//    with UPPERCASE comparison for case-insensitive matching.
+// System 3 — Country Filter:
+//   Client-side filtering. offerMatchesCountry() checks BOTH
+//   'countries' (array) AND 'country' (string) Firestore fields.
+//   ALL comparisons are UPPERCASE. Missing/null/empty/Global = 
+//   shows everywhere.
 //
 // NO system depends on any other system's success or failure.
 // ═══════════════════════════════════════════════════════════════════════
@@ -86,11 +90,11 @@ export default function App() {
   const bgRef = useRef(0);
 
   // Cooldown
-  const [cd, setCd] = useState(false);
+  const [cdActive, setCdActive] = useState(false);
   const [cdSec, setCdSec] = useState(0);
   const cdI = useRef<any>(null);
-  useEffect(() => { const s = loadCD(); if (s) { const r = CD_MS - (Date.now() - s.s); if (r > 0) { setCd(true); setCdSec(Math.ceil(r / 1000)); runCD(r); } } return () => { if (cdI.current) clearInterval(cdI.current); }; }, []);
-  function runCD(ms: number) { if (cdI.current) clearInterval(cdI.current); const e = Date.now() + ms; setCd(true); setCdSec(Math.ceil(ms / 1000)); cdI.current = setInterval(() => { const r = e - Date.now(); if (r <= 0) { clearInterval(cdI.current); cdI.current = null; setCd(false); setCdSec(0); localStorage.removeItem(CD_KEY); } else setCdSec(Math.ceil(r / 1000)); }, 1000); }
+  useEffect(() => { const s = loadCD(); if (s) { const r = CD_MS - (Date.now() - s.s); if (r > 0) { setCdActive(true); setCdSec(Math.ceil(r / 1000)); runCD(r); } } return () => { if (cdI.current) clearInterval(cdI.current); }; }, []);
+  function runCD(ms: number) { if (cdI.current) clearInterval(cdI.current); const e = Date.now() + ms; setCdActive(true); setCdSec(Math.ceil(ms / 1000)); cdI.current = setInterval(() => { const r = e - Date.now(); if (r <= 0) { clearInterval(cdI.current); cdI.current = null; setCdActive(false); setCdSec(0); localStorage.removeItem(CD_KEY); } else setCdSec(Math.ceil(r / 1000)); }, 1000); }
   function startCD() { localStorage.setItem(CD_KEY, JSON.stringify({ s: Date.now() })); runCD(CD_MS); }
 
   // Country
@@ -100,66 +104,58 @@ export default function App() {
   // Auth
   useEffect(() => { const u = firebaseService.onAuthChange(f => { setFbUser(f); if (!f) setAuthLoading(false); }); return () => u(); }, []);
 
-  // Ads hook
   const { offers, isLoading, onOffersChange, showRewardedAdAndWait, recordAdWatch, claimBoostReward, showBanner, hideBanner, showAppOpenAd, isNative } = useAds(fbUser?.uid);
 
   // ═══════════════════════════════════════════════════════════════════
-  // SYSTEM 1: APP OPEN AD — Cold start (3 second delay, independent)
+  // SYSTEM 1: APP OPEN AD — 3-second delay, completely independent
   // ═══════════════════════════════════════════════════════════════════
   useEffect(() => {
-    const timer = setTimeout(() => {
-      console.log('[App] Showing App Open Ad (cold start)');
-      showAppOpenAd();
-    }, 3000);
-    return () => clearTimeout(timer);
+    const t = setTimeout(() => showAppOpenAd(), 3000);
+    return () => clearTimeout(t);
   }, [showAppOpenAd]);
 
-  // Resume from background (5+ seconds)
+  // Resume from background (5+ seconds in background)
   useEffect(() => {
-    const handler = () => {
+    const h = () => {
       if (document.visibilityState === 'hidden') bgRef.current = Date.now();
-      else if (document.visibilityState === 'visible' && bgRef.current > 0 && Date.now() - bgRef.current >= 5000) {
-        console.log('[App] Showing App Open Ad (resume)');
-        showAppOpenAd();
-      }
+      else if (document.visibilityState === 'visible' && bgRef.current > 0 && Date.now() - bgRef.current >= 5000) showAppOpenAd();
     };
-    document.addEventListener('visibilitychange', handler);
-    return () => document.removeEventListener('visibilitychange', handler);
+    document.addEventListener('visibilitychange', h);
+    return () => document.removeEventListener('visibilitychange', h);
   }, [showAppOpenAd]);
 
   // ═══════════════════════════════════════════════════════════════════
-  // SYSTEM 2: NOTIFICATIONS — Fire-and-forget, 10+ second delay
-  // Completely independent. Cannot crash the app. Cannot block ads.
+  // SYSTEM 2: NOTIFICATIONS — Fire-and-forget, massive delay
+  // Dynamic import → initPushNotifications has 10s internal delay
+  // Every operation in its own try/catch. Cannot crash the app.
   // ═══════════════════════════════════════════════════════════════════
   useEffect(() => {
     if (!fbUser?.uid) return;
     const uid = fbUser.uid;
 
-    // Fire and forget — don't await, don't block anything
+    // Do NOT await — fire and forget
     import('./services/notifications').then(mod => {
       mod.initPushNotifications((token: string) => {
-        console.log('[App] Saving FCM token to Firestore...');
-        firebaseService.saveFcmToken(uid, token).then(() => {
-          console.log('[App] FCM token saved successfully');
-        }).catch(err => {
-          console.error('[App] FCM token save FAILED:', err);
-        });
+        console.log('[App] Got FCM token, saving...');
+        firebaseService.saveFcmToken(uid, token)
+          .then(() => console.log('[App] FCM token saved OK'))
+          .catch(err => console.error('[App] FCM token save FAILED:', err));
       });
     }).catch(err => {
-      console.error('[App] Notification module load failed (non-fatal):', err);
+      console.log('[App] Notification module failed (non-fatal):', err);
     });
   }, [fbUser?.uid]);
 
   // Firestore listeners
   const [fsClaims, setFsClaims] = useState<Transaction[]>([]);
-  const [fsHistory, setFsHistory] = useState<Transaction[]>([]);
+  const [fsHist, setFsHist] = useState<Transaction[]>([]);
   useEffect(() => {
-    if (!fbUser?.uid) { setUser(null); setFsClaims([]); setFsHistory([]); return; }
+    if (!fbUser?.uid) { setUser(null); setFsClaims([]); setFsHist([]); return; }
     const uid = fbUser.uid; setAuthLoading(true);
     firebaseService.checkDailyReset(uid);
     const u1 = firebaseService.onProfileChange(uid, p => { if (p) setUser(p); else firebaseService.saveUserProfile({ uid, email: fbUser.email || (uid.startsWith('local_guest_') ? 'Guest User' : 'Unknown'), points: 0, claimsToday: 0, lastClaimDate: null, totalEarned: 0, boostLevel: 1, adsWatchedToday: 0, currentLevelAdCounter: 0, lastBoostDate: new Date().toDateString() }); setAuthLoading(false); });
     const u2 = firebaseService.onClaimsChange(uid, setFsClaims);
-    const u3 = firebaseService.onHistoryChange(uid, setFsHistory);
+    const u3 = firebaseService.onHistoryChange(uid, setFsHist);
     return () => { u1(); u2(); u3(); };
   }, [fbUser?.uid]);
 
@@ -167,50 +163,57 @@ export default function App() {
   const [cat, setCat] = useState('all');
   const cats = ['all', 'Fashion', 'Delivery apps', 'Shopping', 'Travel', 'Food', 'General', 'Entertainment', 'Tech'];
   const [localTx, setLocalTx] = useState<Transaction[]>(() => { try { return JSON.parse(localStorage.getItem('local_transactions') || '[]'); } catch { return []; } });
-  const tx = useMemo(() => Array.from(new Map([...localTx, ...fsClaims, ...fsHistory].map(t => [t.id, t])).values()).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()), [localTx, fsClaims, fsHistory]);
+  const txAll = useMemo(() => Array.from(new Map([...localTx, ...fsClaims, ...fsHist].map(t => [t.id, t])).values()).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()), [localTx, fsClaims, fsHist]);
   useEffect(() => { localStorage.setItem('local_transactions', JSON.stringify(localTx.slice(0, 50))); }, [localTx]);
-  const pts = useMemo(() => Math.max(0, tx.reduce((a, t) => t.type === 'earn' ? a + t.amount : t.type === 'claim' ? a - t.amount : a, 0)), [tx]);
+  const pts = useMemo(() => Math.max(0, txAll.reduce((a, t) => t.type === 'earn' ? a + t.amount : t.type === 'claim' ? a - t.amount : a, 0)), [txAll]);
 
   useEffect(() => { const u = onOffersChange(); return () => u(); }, [onOffersChange]);
 
   // ═══════════════════════════════════════════════════════════════════
-  // SYSTEM 3: COUNTRY FILTER — Client-side, handles both field names
+  // SYSTEM 3: COUNTRY FILTER
+  // offerMatchesCountry() checks BOTH 'countries' AND 'country' fields
+  // ALL comparisons are UPPERCASE
+  // null/undefined/empty/"Global" → shows everywhere
   // ═══════════════════════════════════════════════════════════════════
-  const filtered = useMemo(() => offers.filter(o => {
-    // Category
-    const s = cat.toLowerCase();
-    const oCats = Array.isArray(o.category) ? o.category.map(c => String(c).toLowerCase()) : [String(o.category || '').toLowerCase()];
-    if (s !== 'all' && !oCats.includes(s)) return false;
-    // Country (uses bulletproof matcher that handles both field names + uppercase)
-    if (!offerMatchesCountry(o, country)) return false;
-    // Search
-    const q = search.toLowerCase();
-    return !q || o.brand.toLowerCase().includes(q) || o.description.toLowerCase().includes(q);
-  }), [offers, search, cat, country]);
+  const filtered = useMemo(() => {
+    const result = offers.filter(o => {
+      // Category
+      const s = cat.toLowerCase();
+      const oCats = Array.isArray(o.category) ? o.category.map(c => String(c).toLowerCase()) : [String(o.category || '').toLowerCase()];
+      if (s !== 'all' && !oCats.includes(s)) return false;
+      // Country
+      if (!offerMatchesCountry(o, country)) return false;
+      // Search
+      const q = search.toLowerCase();
+      return !q || o.brand.toLowerCase().includes(q) || o.description.toLowerCase().includes(q);
+    });
+    // Debug: log first filter run
+    console.log(`[Filter] ${offers.length} offers → ${result.length} after filter (country: ${country}, cat: ${cat})`);
+    return result;
+  }, [offers, search, cat, country]);
 
   // Banner
   useEffect(() => { if (isNative && tab === 'offers' && !adRunning) showBanner(); else if (isNative) hideBanner(); }, [tab, adRunning, isNative, showBanner, hideBanner]);
 
-  // Web ad
   const showWeb = useCallback((n: number, t: number): Promise<boolean> => new Promise(r => { webRef.current = r; setWebNum(n); setWebTotal(t); setWebOpen(true); }), []);
   const webDone = useCallback(() => { setWebOpen(false); webRef.current?.(true); webRef.current = null; }, []);
   const webSkip = useCallback(() => { setWebOpen(false); webRef.current?.(false); webRef.current = null; }, []);
 
   const watchAd = async () => {
-    if (adRunning || !user || cd) return;
+    if (adRunning || !user || cdActive) return;
     setAdRunning(true); if (isNative) await hideBanner();
     const bl = Number(user.boostLevel) || 1, cp = Number(user.currentLevelAdCounter) || 0, rem = bl - cp;
-    if (rem <= 0) { await claim(); startCD(); setAdRunning(false); if (isNative) showBanner(); return; }
+    if (rem <= 0) { await doClaim(); startCD(); setAdRunning(false); if (isNative) showBanner(); return; }
     let done = 0;
     for (let i = 0; i < rem; i++) {
       const n = cp + i + 1, ok = isNative ? await showRewardedAdAndWait() : await showWeb(n, bl);
       if (!ok) { Toast.show({ text: 'Ad not completed.', duration: 'short' }); break; }
       const r = await recordAdWatch(); if (r) { done++; if (n < bl) { Toast.show({ text: `Ad ${n}/${bl}!`, duration: 'short' }); await new Promise(r => setTimeout(r, 800)); } }
     }
-    if (done === rem) { await claim(); startCD(); }
+    if (done === rem) { await doClaim(); startCD(); }
     setAdRunning(false); if (isNative && tab === 'offers') showBanner();
   };
-  const claim = async () => { try { const r = await claimBoostReward(); if (r) Toast.show({ text: '+100 pts!', duration: 'long' }); } catch {} };
+  const doClaim = async () => { try { const r = await claimBoostReward(); if (r) Toast.show({ text: '+100 pts!', duration: 'long' }); } catch {} };
 
   const claimOffer = async (offer: Offer, cost: number) => {
     if (!user) return;
@@ -242,7 +245,7 @@ export default function App() {
         <Hdr user={{ ...user, points: pts }} />
         <main className="max-w-md mx-auto px-6 py-6 pb-[120px]">
           <AnimatePresence mode="wait">
-            {tab === 'offers' && <HomeScreen user={{ ...user, points: pts }} offers={offers} isLoading={isLoading} searchQuery={search} setSearchQuery={setSearch} selectedCategory={cat} setSelectedCategory={setCat} categories={cats} filteredOffers={filtered} transactions={tx} handleWatchAd={watchAd} handleClaimOffer={claimOffer} handleClaimBoostReward={claim} isAdRunning={adRunning} selectedCountry={country} setSelectedCountry={onCountry} isCooldownActive={cd} cooldownSecondsLeft={cdSec} />}
+            {tab === 'offers' && <HomeScreen user={{ ...user, points: pts }} offers={offers} isLoading={isLoading} searchQuery={search} setSearchQuery={setSearch} selectedCategory={cat} setSelectedCategory={setCat} categories={cats} filteredOffers={filtered} transactions={txAll} handleWatchAd={watchAd} handleClaimOffer={claimOffer} handleClaimBoostReward={doClaim} isAdRunning={adRunning} selectedCountry={country} setSelectedCountry={onCountry} isCooldownActive={cdActive} cooldownSecondsLeft={cdSec} />}
             {tab === 'profile' && (
               <motion.div key="profile" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
                 <div className="bg-white rounded-3xl p-6 border border-zinc-200 shadow-sm text-center">
@@ -250,7 +253,7 @@ export default function App() {
                   <h2 className="text-xl font-bold text-zinc-900">{user.email}</h2><p className="text-xs text-zinc-500 mt-1">v{APP_VERSION}</p>
                   <div className="grid grid-cols-2 gap-4 mt-8">
                     <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100"><span className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">Points</span><span className="text-lg font-bold text-zinc-900">{pts}</span></div>
-                    <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100"><span className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">Claims</span><span className="text-lg font-bold text-zinc-900">{tx.filter(t => t.type === 'claim').length}</span></div>
+                    <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100"><span className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">Claims</span><span className="text-lg font-bold text-zinc-900">{txAll.filter(t => t.type === 'claim').length}</span></div>
                   </div></div>
                 <div className="space-y-3">
                   <button onClick={() => setPrivacyOpen(true)} className="w-full flex items-center justify-between p-5 bg-white rounded-2xl border border-zinc-200 shadow-sm"><div className="flex items-center gap-3"><ShieldCheck size={20} className="text-indigo-600" /><span className="text-sm font-bold text-zinc-700">Privacy Policy</span></div><ChevronRight size={18} className="text-zinc-400" /></button>
@@ -258,8 +261,8 @@ export default function App() {
                   <button onClick={() => setDeleteOpen(true)} className="w-full flex items-center justify-between p-5 bg-white rounded-2xl border border-rose-200 shadow-sm"><div className="flex items-center gap-3"><Trash2 size={20} className="text-rose-500" /><span className="text-sm font-bold text-rose-600">Delete Account</span></div><ChevronRight size={18} className="text-rose-400" /></button>
                 </div>
                 <div className="space-y-3"><h2 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">History</h2>
-                  {tx.length === 0 ? <div className="bg-white rounded-2xl p-8 border border-dashed border-zinc-200 text-center"><History size={24} className="text-zinc-300 mx-auto mb-2" /><p className="text-xs text-zinc-500">No transactions</p></div>
-                  : tx.slice(0, 20).map(t => (
+                  {txAll.length === 0 ? <div className="bg-white rounded-2xl p-8 border border-dashed border-zinc-200 text-center"><History size={24} className="text-zinc-300 mx-auto mb-2" /><p className="text-xs text-zinc-500">No transactions</p></div>
+                  : txAll.slice(0, 20).map(t => (
                     <div key={t.id} className="bg-white rounded-2xl p-4 border border-zinc-200 shadow-sm flex justify-between items-center">
                       <div className="flex items-center gap-3"><div className={cn("w-8 h-8 rounded-xl flex items-center justify-center", t.type === 'earn' ? "bg-emerald-50" : "bg-indigo-50")}>{t.type === 'earn' ? <TrendingUp size={16} className="text-emerald-600" /> : <Gift size={16} className="text-indigo-600" />}</div>
                       <div><p className="text-xs font-bold text-zinc-900">{t.title}</p><p className="text-[10px] text-zinc-400">{new Date(t.timestamp).toLocaleDateString()}</p></div></div>
