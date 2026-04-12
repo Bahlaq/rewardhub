@@ -21,68 +21,94 @@ export const COUNTRIES = [
 ];
 
 // ═══════════════════════════════════════════════════════════════════════
-// Country Matching — BULLETPROOF
+// offerMatchesCountry — THE DEFINITIVE VERSION
 //
-// Handles ALL possible Firestore field names and formats:
-//   offer.countries = ["UAE", "JORDAN"]     → array (your current format)
-//   offer.countries = "Jordan"              → single string
-//   offer.country   = "Jordan"              → legacy singular field name
-//   offer.countries = "GLOBAL"              → global
-//   offer.countries = null/undefined/[]/""  → global (show everywhere)
+// Firestore data can come in ANY of these formats:
+//   { countries: ["UAE", "JORDAN"] }     — array of uppercase
+//   { countries: ["Jordan", "uae"] }     — array of mixed case
+//   { countries: "Jordan" }              — single string
+//   { countries: "GLOBAL" }              — global string
+//   { countries: null }                  — null
+//   { countries: [] }                    — empty array
+//   { country: "Jordan" }               — legacy singular field name
+//   (no country/countries field at all)  — missing
 //
-// ALL comparisons are UPPERCASE to handle any casing in Firestore.
+// Rule: If there's NO country data, OR it's empty, OR it says "Global",
+//       the offer shows EVERYWHERE. Otherwise, match against the user's
+//       selected country using UPPERCASE comparison.
 // ═══════════════════════════════════════════════════════════════════════
 export function offerMatchesCountry(offer: Offer, selectedCountry: string): boolean {
+  // "All Countries" → show everything
   if (selectedCountry === 'All Countries') return true;
 
-  const selected = selectedCountry.toUpperCase();
+  // Get country data from BOTH possible field names
+  // Use explicit property access, not just ??
+  const offerAny = offer as any;
+  const countriesField = offerAny.countries;
+  const countryField = offerAny.country;
 
-  // Get the country data — check BOTH field names
-  const raw = (offer as any).countries ?? (offer as any).country ?? null;
+  // Determine which field has data
+  let raw: any = undefined;
+  if (countriesField !== undefined && countriesField !== null) {
+    raw = countriesField;
+  } else if (countryField !== undefined && countryField !== null) {
+    raw = countryField;
+  }
 
-  // null, undefined, empty string → Global
-  if (raw == null || raw === '') return true;
+  // No country data at all → Global offer, show everywhere
+  if (raw === undefined || raw === null) return true;
 
-  // Array of strings
+  // Empty string → Global
+  if (typeof raw === 'string' && raw.trim() === '') return true;
+
+  // Empty array → Global
+  if (Array.isArray(raw) && raw.length === 0) return true;
+
+  // Convert selected country to uppercase for comparison
+  const selected = selectedCountry.toUpperCase().trim();
+
+  // Handle array: ["UAE", "JORDAN", "GLOBAL"]
   if (Array.isArray(raw)) {
-    if (raw.length === 0) return true; // empty array → Global
     return raw.some((item: any) => {
-      const upper = String(item).toUpperCase().trim();
-      return upper === selected || upper === 'GLOBAL' || upper === 'ALL';
+      const val = String(item || '').toUpperCase().trim();
+      return val === selected || val === 'GLOBAL' || val === 'ALL';
     });
   }
 
-  // Single string
+  // Handle string: "Jordan" or "GLOBAL"
   if (typeof raw === 'string') {
-    const upper = raw.toUpperCase().trim();
-    return upper === selected || upper === 'GLOBAL' || upper === 'ALL';
+    const val = raw.toUpperCase().trim();
+    return val === selected || val === 'GLOBAL' || val === 'ALL';
   }
 
-  // Unknown type → show everywhere
+  // Unknown type → show everywhere (safe default)
   return true;
 }
 
-// 48hr unlock
-const UNLOCK_KEY = 'rewardhub_unlocks';
-const UNLOCK_MS = 48 * 60 * 60 * 1000;
-function getUnlocks(): Record<string, number> { try { return JSON.parse(localStorage.getItem(UNLOCK_KEY) || '{}'); } catch { return {}; } }
-export function isOfferUnlocked(offerId: string, transactions: Transaction[], brand: string): boolean {
-  if (transactions.some(t => t.type === 'claim' && t.title === brand && new Date(t.timestamp).toDateString() === new Date().toDateString())) return true;
-  const ts = getUnlocks()[offerId]; return ts ? Date.now() - ts < UNLOCK_MS : false;
+// 48hr unlock tracking
+const UL_KEY = 'rh_unlocks';
+const UL_MS = 48 * 60 * 60 * 1000;
+function getUL(): Record<string, number> { try { return JSON.parse(localStorage.getItem(UL_KEY) || '{}'); } catch { return {}; } }
+
+export function isOfferUnlocked(offerId: string, tx: Transaction[], brand: string): boolean {
+  if (tx.some(t => t.type === 'claim' && t.title === brand && new Date(t.timestamp).toDateString() === new Date().toDateString())) return true;
+  const ts = getUL()[offerId]; return ts ? Date.now() - ts < UL_MS : false;
 }
-export function recordUnlock(offerId: string) {
-  const u = getUnlocks(); u[offerId] = Date.now(); const now = Date.now();
-  Object.keys(u).forEach(k => { if (now - u[k] >= UNLOCK_MS) delete u[k]; });
-  localStorage.setItem(UNLOCK_KEY, JSON.stringify(u));
+
+export function recordUnlock(id: string) {
+  const u = getUL(); u[id] = Date.now(); const n = Date.now();
+  Object.keys(u).forEach(k => { if (n - u[k] >= UL_MS) delete u[k]; });
+  localStorage.setItem(UL_KEY, JSON.stringify(u));
 }
-export function getUnlockTimeLeft(offerId: string): string | null {
-  const ts = getUnlocks()[offerId]; if (!ts) return null;
-  const r = UNLOCK_MS - (Date.now() - ts); if (r <= 0) return null;
+
+export function getTimeLeft(id: string): string | null {
+  const ts = getUL()[id]; if (!ts) return null;
+  const r = UL_MS - (Date.now() - ts); if (r <= 0) return null;
   return `${Math.floor(r / 3600000)}h ${Math.floor((r % 3600000) / 60000)}m`;
 }
 
-// Searchable Country Selector
-const CountrySelector = ({ value, onChange }: { value: string; onChange: (c: string) => void }) => {
+// Searchable country dropdown
+const CountryPicker = ({ value, onChange }: { value: string; onChange: (c: string) => void }) => {
   const [open, setOpen] = React.useState(false);
   const [q, setQ] = React.useState('');
   const list = COUNTRIES.filter(c => c.toLowerCase().includes(q.toLowerCase()));
@@ -160,23 +186,23 @@ interface Props {
   isCooldownActive: boolean; cooldownSecondsLeft: number;
 }
 
-export const HomeScreen = ({
-  user, offers, isLoading, searchQuery, setSearchQuery, selectedCategory, setSelectedCategory,
-  categories, filteredOffers, transactions, handleWatchAd, handleClaimOffer, handleClaimBoostReward,
-  isAdRunning = false, selectedCountry, setSelectedCountry, isCooldownActive, cooldownSecondsLeft
-}: Props) => {
+export const HomeScreen = (props: Props) => {
+  const { user, isLoading, searchQuery, setSearchQuery, selectedCategory, setSelectedCategory,
+    categories, filteredOffers, transactions, handleWatchAd, handleClaimOffer, handleClaimBoostReward,
+    isAdRunning = false, selectedCountry, setSelectedCountry, isCooldownActive, cooldownSecondsLeft } = props;
+
   const today = new Date().toDateString();
   const isNew = user.lastBoostDate !== today;
   const bl = isNew ? 1 : (Number(user.boostLevel) || 1);
   const cp = isNew ? 0 : (Number(user.currentLevelAdCounter) || 0);
-  const complete = cp >= bl;
+  const done = cp >= bl;
   const pct = Math.min((cp / Math.max(bl, 1)) * 100, 100);
   const title = bl === 1 ? 'First Boost' : bl === 2 ? 'Second Boost' : bl === 3 ? 'Third Boost' : `${bl}th Boost`;
-  const cd = `${Math.floor(cooldownSecondsLeft / 60)}:${String(cooldownSecondsLeft % 60).padStart(2, '0')}`;
+  const cdStr = `${Math.floor(cooldownSecondsLeft / 60)}:${String(cooldownSecondsLeft % 60).padStart(2, '0')}`;
 
   return (
     <motion.div key="offers" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} className="space-y-5">
-      <CountrySelector value={selectedCountry} onChange={setSelectedCountry} />
+      <CountryPicker value={selectedCountry} onChange={setSelectedCountry} />
       <div className="space-y-3">
         <div className="relative group"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 group-focus-within:text-indigo-600" size={18} />
           <input type="text" placeholder="Search coupons, brands..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
@@ -191,19 +217,19 @@ export const HomeScreen = ({
       <div className="bg-gradient-to-br from-indigo-600 to-violet-700 rounded-3xl p-6 text-white shadow-xl shadow-indigo-200 overflow-hidden relative">
         <div className="relative z-10">
           <div className="flex justify-between items-start mb-1"><h2 className="text-lg font-bold">Daily Boost</h2><span className="bg-white/20 px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase">{title}</span></div>
-          <p className="text-indigo-100 text-xs mb-4">{isCooldownActive ? `Next in ${cd}` : isAdRunning ? 'Playing...' : complete ? `Done! Claim 100 pts.` : `${cp}/${bl} ads (+100 pts)`}</p>
+          <p className="text-indigo-100 text-xs mb-4">{isCooldownActive ? `Next in ${cdStr}` : isAdRunning ? 'Playing...' : done ? 'Done! Claim 100 pts.' : `${cp}/${bl} ads (+100 pts)`}</p>
           <div className="flex items-center gap-3">
-            {isCooldownActive ? <div className="bg-white/10 border border-white/20 px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 text-white/70"><Timer size={16} className="animate-pulse" /> {cd}</div>
+            {isCooldownActive ? <div className="bg-white/10 border border-white/20 px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 text-white/70"><Timer size={16} className="animate-pulse" /> {cdStr}</div>
             : isAdRunning ? <div className="bg-white/20 px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Playing...</div>
-            : complete ? <button onClick={handleClaimBoostReward} className="bg-emerald-400 text-emerald-900 px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 active:scale-95 animate-pulse"><Award size={16} /> Claim +100!</button>
+            : done ? <button onClick={handleClaimBoostReward} className="bg-emerald-400 text-emerald-900 px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 active:scale-95 animate-pulse"><Award size={16} /> Claim +100!</button>
             : <button onClick={handleWatchAd} className="bg-white text-indigo-600 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 active:scale-95"><PlayCircle size={16} /> Watch ({cp}/{bl})</button>}
-            <div className="flex-1 h-1.5 bg-white/20 rounded-full overflow-hidden"><motion.div initial={{ width: 0 }} animate={{ width: `${isCooldownActive ? 100 : pct}%` }} className={cn("h-full", isCooldownActive ? "bg-amber-400" : complete ? "bg-emerald-400" : "bg-white")} /></div>
+            <div className="flex-1 h-1.5 bg-white/20 rounded-full overflow-hidden"><motion.div initial={{ width: 0 }} animate={{ width: `${isCooldownActive ? 100 : pct}%` }} className={cn("h-full", isCooldownActive ? "bg-amber-400" : done ? "bg-emerald-400" : "bg-white")} /></div>
           </div>
         </div><TrendingUp className="absolute -bottom-4 -right-4 text-white/10 w-32 h-32" />
       </div>
 
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">{searchQuery ? `Results` : 'Available Rewards'}</h2>
+        <h2 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">{searchQuery ? 'Results' : 'Available Rewards'}</h2>
         <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">{filteredOffers.length}</span>
       </div>
 
@@ -213,8 +239,8 @@ export const HomeScreen = ({
           <OfferCard key={o.id} offer={o} onClaim={handleClaimOffer} user={user}
             unlocked={isOfferUnlocked(o.id, transactions, o.brand)}
             code={transactions.find(t => t.title === o.brand)?.code}
-            timeLeft={getUnlockTimeLeft(o.id)} />
-        )) : <div className="bg-white rounded-3xl p-12 border border-dashed border-zinc-200 text-center"><Gift size={32} className="text-zinc-300 mx-auto mb-3" /><h3 className="text-sm font-bold text-zinc-900 mb-1">No rewards found</h3><p className="text-xs text-zinc-500">Try a different country or category.</p></div>}
+            timeLeft={getTimeLeft(o.id)} />
+        )) : <div className="bg-white rounded-3xl p-12 border border-dashed border-zinc-200 text-center"><Gift size={32} className="text-zinc-300 mx-auto mb-3" /><h3 className="text-sm font-bold text-zinc-900 mb-1">No rewards in {selectedCountry}</h3><p className="text-xs text-zinc-500">Try "All Countries" or another selection.</p></div>}
       </div>
       <div className="h-[100px]" />
     </motion.div>
