@@ -92,4 +92,4 @@ export function useAds(uid?: string) {
   const recordAdWatch = useCallback(async () => { if (!uid) return null; try { return await firebaseService.recordAdWatch(uid); } catch { return null; } }, [uid]);
   const claimBoostReward = useCallback(async () => { if (!uid) return null; try { return await firebaseService.claimBoostReward(uid); } catch { return null; } }, [uid]);
 
-  return { offers, isLoading, onOffersChange, showRewardedAdAndWait, recordAdWatch, claimBoostReward, 
+  return { offers, isLoading, onOffersChange, showRewardedAdAndWait, recordAdWatch, claimBoostReward };
