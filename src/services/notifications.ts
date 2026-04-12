@@ -1,16 +1,18 @@
 // ═══════════════════════════════════════════════════════════════════════
-// Push Notifications — TOTAL ISOLATION
+// Push Notifications — NUCLEAR SAFE
 //
-// This module is COMPLETELY INDEPENDENT from the rest of the app.
-// It CANNOT crash the app because:
-//   1. ALL imports are dynamic (import() inside try/catch)
-//   2. EVERY operation is wrapped in its own try/catch
-//   3. register() has a 2-second delay after permission grant
-//   4. The entire flow runs on a 10-second delay after being called
-//   5. NO other system depends on this module's success or failure
+// WHY PREVIOUS VERSIONS CRASHED:
+//   Even with dynamic import(), the Capacitor native bridge registers
+//   ALL plugins at app startup. If PushNotifications' native module
+//   has initialization issues on certain Android devices, calling ANY
+//   method on it causes a native crash that kills the WebView.
 //
-// If ANY step fails, it logs to console and returns silently.
-// The app works perfectly without push notifications.
+// THE FIX:
+//   1. Check Capacitor.isPluginAvailable('PushNotifications') FIRST
+//      This returns false if the native module isn't properly registered
+//   2. Every single operation in its own try/catch
+//   3. 10-second internal delay before doing anything
+//   4. 2-second delay after permission grant before register()
 // ═══════════════════════════════════════════════════════════════════════
 
 let hasRun = false;
@@ -21,94 +23,122 @@ export async function initPushNotifications(
   if (hasRun) return;
   hasRun = true;
 
-  // Wait 10 seconds to ensure app is fully loaded, ads are done, etc.
+  // Internal delay — let the app fully load first
   await new Promise(r => setTimeout(r, 10000));
 
+  // Step 1: Check if we're on a native platform
+  let Capacitor: any;
   try {
-    // Step 1: Check platform
-    const capacitorModule = await import('@capacitor/core');
-    if (!capacitorModule.Capacitor.isNativePlatform()) {
-      console.log('[Push] Web platform — skipping');
+    const mod = await import('@capacitor/core');
+    Capacitor = mod.Capacitor;
+  } catch (e) {
+    console.log('[Push] Capacitor not available');
+    return;
+  }
+
+  if (!Capacitor.isNativePlatform()) {
+    console.log('[Push] Not native — skip');
+    return;
+  }
+
+  // Step 2: Check if the native plugin is actually registered
+  // THIS IS THE KEY CHECK that prevents the crash
+  try {
+    const available = Capacitor.isPluginAvailable('PushNotifications');
+    console.log('[Push] Plugin available:', available);
+    if (!available) {
+      console.log('[Push] Native plugin not registered — skip');
       return;
     }
+  } catch (e) {
+    console.log('[Push] isPluginAvailable check failed:', e);
+    return;
+  }
 
-    // Step 2: Import plugin
-    let PushPlugin: any;
+  // Step 3: Dynamic import of the plugin
+  let PushPlugin: any;
+  try {
+    const mod = await import('@capacitor/push-notifications');
+    PushPlugin = mod.PushNotifications;
+    console.log('[Push] Module imported');
+  } catch (e) {
+    console.log('[Push] Import failed:', e);
+    return;
+  }
+
+  // Step 4: Check permissions
+  let permResult: string = 'denied';
+  try {
+    const status = await PushPlugin.checkPermissions();
+    permResult = status.receive;
+    console.log('[Push] Check:', permResult);
+  } catch (e) {
+    console.log('[Push] checkPermissions error:', e);
+    return;
+  }
+
+  // Step 5: Request if needed
+  if (permResult === 'prompt') {
     try {
-      const mod = await import('@capacitor/push-notifications');
-      PushPlugin = mod.PushNotifications;
-    } catch (importErr) {
-      console.log('[Push] Plugin not available:', importErr);
+      const result = await PushPlugin.requestPermissions();
+      permResult = result.receive;
+      console.log('[Push] User chose:', permResult);
+    } catch (e) {
+      console.log('[Push] requestPermissions error:', e);
       return;
     }
+  }
 
-    // Step 3: Check permission
-    let permStatus: any;
-    try {
-      permStatus = await PushPlugin.checkPermissions();
-      console.log('[Push] Permission status:', permStatus.receive);
-    } catch (permErr) {
-      console.log('[Push] checkPermissions failed:', permErr);
-      return;
-    }
+  if (permResult !== 'granted') {
+    console.log('[Push] Not granted');
+    return;
+  }
 
-    // Step 4: Request permission if needed
-    if (permStatus.receive === 'prompt') {
+  // Step 6: Wait for native stack to settle after permission dialog
+  await new Promise(r => setTimeout(r, 2000));
+
+  // Step 7: Add registration listener
+  try {
+    await PushPlugin.addListener('registration', (token: any) => {
+      console.log('[Push] Token:', token?.value?.slice(0, 20) + '...');
       try {
-        permStatus = await PushPlugin.requestPermissions();
-        console.log('[Push] User chose:', permStatus.receive);
-      } catch (reqErr) {
-        console.log('[Push] requestPermissions failed:', reqErr);
-        return;
+        onToken(token.value);
+      } catch (cbErr) {
+        console.error('[Push] Token callback error:', cbErr);
       }
-    }
+    });
+  } catch (e) {
+    console.log('[Push] registration listener failed:', e);
+  }
 
-    if (permStatus.receive !== 'granted') {
-      console.log('[Push] Not granted — done');
-      return;
-    }
+  // Step 8: Add error listener
+  try {
+    await PushPlugin.addListener('registrationError', (err: any) => {
+      console.error('[Push] FCM error:', JSON.stringify(err));
+    });
+  } catch (e) { /* silent */ }
 
-    // Step 5: Wait 2 seconds after permission for native stack to settle
-    await new Promise(r => setTimeout(r, 2000));
+  // Step 9: Add foreground listener
+  try {
+    await PushPlugin.addListener('pushNotificationReceived', async (n: any) => {
+      try {
+        const { Toast } = await import('@capacitor/toast');
+        Toast.show({ text: n?.title || 'Notification', duration: 'long' });
+      } catch {}
+    });
+  } catch (e) { /* silent */ }
 
-    // Step 6: Add listeners (each in its own try/catch)
-    try {
-      await PushPlugin.addListener('registration', (token: any) => {
-        console.log('[Push] Token received:', token?.value?.slice(0, 20));
-        try { onToken(token.value); } catch (e) { console.error('[Push] onToken error:', e); }
-      });
-    } catch (e) { console.log('[Push] addListener(registration) failed:', e); }
+  // Step 10: Add action listener
+  try {
+    await PushPlugin.addListener('pushNotificationActionPerformed', () => {});
+  } catch (e) { /* silent */ }
 
-    try {
-      await PushPlugin.addListener('registrationError', (err: any) => {
-        console.error('[Push] FCM registration error:', JSON.stringify(err));
-      });
-    } catch (e) { console.log('[Push] addListener(registrationError) failed:', e); }
-
-    try {
-      await PushPlugin.addListener('pushNotificationReceived', async (n: any) => {
-        try {
-          const { Toast } = await import('@capacitor/toast');
-          Toast.show({ text: n?.title || n?.body || 'Notification', duration: 'long' });
-        } catch {}
-      });
-    } catch (e) { console.log('[Push] addListener(received) failed:', e); }
-
-    try {
-      await PushPlugin.addListener('pushNotificationActionPerformed', () => {});
-    } catch (e) { /* silent */ }
-
-    // Step 7: Register with FCM
-    try {
-      console.log('[Push] Calling register()...');
-      await PushPlugin.register();
-      console.log('[Push] register() success');
-    } catch (regErr) {
-      console.error('[Push] register() failed:', regErr);
-      // Still non-fatal — app works without push
-    }
-
-  } catch (outerErr) {
-    console.error('[Push] Unexpected error (non-fatal):', outerErr);
+  // Step 11: Register with FCM
+  try {
+    console.log('[Push] Registering...');
+    await PushPlugin.register();
+    console.log('[Push] Registered OK');
+  } catch (e) {
+    console.error('[Push] register() failed:', e);
   }
 }
