@@ -9,7 +9,8 @@ export interface Offer {
   category: string | string[];
   type: 'discount' | 'giftcard' | 'coupon' | 'subscription';
   expiryDate: string;
-  countries?: string | string[] | null; // 'Jordan', ['UAE','Kuwait'], null = Global
+  countries?: string | string[] | null;
+  country?: string; // legacy field name support
 }
 
 export interface Transaction {
