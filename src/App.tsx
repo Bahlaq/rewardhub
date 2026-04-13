@@ -20,120 +20,116 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-// ─── Cooldown helpers ───────────────────────────────────────────
-const CD_MS = 2 * 60 * 1000;
-const CD_KEY = 'rh_cd';
+// ─── Cooldown ───────────────────────────────────────────────────
+var CD_MS = 2 * 60 * 1000;
+var CD_KEY = 'rh_cd';
 
 function loadCD(): { s: number } | null {
   try {
-    const raw = localStorage.getItem(CD_KEY);
+    var raw = localStorage.getItem(CD_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
+    var parsed = JSON.parse(raw);
     if (Date.now() - parsed.s >= CD_MS) {
       localStorage.removeItem(CD_KEY);
       return null;
     }
     return parsed;
-  } catch {
+  } catch (e) {
     return null;
   }
 }
 
-// ─── Small components ───────────────────────────────────────────
-const Logo = ({ className }: { className?: string }) => (
-  <div className={cn('relative w-full mx-auto', className)}>
-    <img
-      src={icon}
-      alt={APP_NAME}
-      className="w-full h-auto object-contain rounded-[2.5rem] shadow-2xl"
-      referrerPolicy="no-referrer"
-    />
-  </div>
-);
-
-const Navbar = ({
-  tab,
-  setTab,
-}: {
-  tab: string;
-  setTab: (t: string) => void;
-}) => (
-  <nav
-    className="fixed bottom-0 left-0 right-0 bg-white border-t border-zinc-200 px-6 pt-3 z-50"
-    style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.75rem)' }}
-  >
-    <div className="max-w-md mx-auto flex justify-between">
-      {[
-        { id: 'offers', icon: LayoutDashboard, label: 'Rewards' },
-        { id: 'profile', icon: User, label: 'Profile' },
-      ].map((t) => (
-        <button
-          key={t.id}
-          onClick={() => setTab(t.id)}
-          className={cn(
-            'flex flex-col items-center gap-1',
-            tab === t.id ? 'text-indigo-600' : 'text-zinc-400'
-          )}
-        >
-          <t.icon size={20} strokeWidth={tab === t.id ? 2.5 : 2} />
-          <span className="text-[10px] font-medium uppercase tracking-wider">
-            {t.label}
-          </span>
-        </button>
-      ))}
+// ─── Small Components ───────────────────────────────────────────
+var Logo = function(props: { className?: string }) {
+  return (
+    <div className={cn('relative w-full mx-auto', props.className)}>
+      <img
+        src={icon}
+        alt={APP_NAME}
+        className="w-full h-auto object-contain rounded-[2.5rem] shadow-2xl"
+        referrerPolicy="no-referrer"
+      />
     </div>
-  </nav>
-);
+  );
+};
 
-const Header = ({ user }: { user: UserProfile }) => (
-  <header
-    className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-zinc-100 px-5 pb-2 z-40"
-    style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.5rem)' }}
-  >
-    <div className="max-w-md mx-auto flex justify-between items-center">
-      <div className="flex items-center gap-3">
-        <Logo className="max-w-[36px]" />
-        <div>
-          <h1 className="text-base font-black text-zinc-900 leading-none">
-            {APP_NAME}
-          </h1>
-          <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mt-1">
-            Earn while you play
-          </p>
+var Navbar = function(props: { tab: string; setTab: (t: string) => void }) {
+  var tabs = [
+    { id: 'offers', Icon: LayoutDashboard, label: 'Rewards' },
+    { id: 'profile', Icon: User, label: 'Profile' },
+  ];
+
+  return (
+    <nav
+      className="fixed bottom-0 left-0 right-0 bg-white border-t border-zinc-200 px-6 pt-3 z-50"
+      style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.75rem)' }}
+    >
+      <div className="max-w-md mx-auto flex justify-between">
+        {tabs.map(function(t) {
+          return (
+            <button
+              key={t.id}
+              onClick={function() { props.setTab(t.id); }}
+              className={cn(
+                'flex flex-col items-center gap-1',
+                props.tab === t.id ? 'text-indigo-600' : 'text-zinc-400'
+              )}
+            >
+              <t.Icon size={20} strokeWidth={props.tab === t.id ? 2.5 : 2} />
+              <span className="text-[10px] font-medium uppercase tracking-wider">
+                {t.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+};
+
+var Header = function(props: { user: UserProfile }) {
+  return (
+    <header
+      className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-zinc-100 px-5 pb-2 z-40"
+      style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.5rem)' }}
+    >
+      <div className="max-w-md mx-auto flex justify-between items-center">
+        <div className="flex items-center gap-3">
+          <Logo className="max-w-[36px]" />
+          <div>
+            <h1 className="text-base font-black text-zinc-900 leading-none">{APP_NAME}</h1>
+            <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mt-1">
+              Earn while you play
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100">
+          <Zap size={14} className="text-indigo-600 fill-indigo-600" />
+          <span className="text-sm font-bold text-indigo-700">
+            {Math.max(0, Number(props.user.points || 0))} pts
+          </span>
         </div>
       </div>
-      <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100">
-        <Zap size={14} className="text-indigo-600 fill-indigo-600" />
-        <span className="text-sm font-bold text-indigo-700">
-          {Math.max(0, Number(user.points || 0))} pts
-        </span>
-      </div>
-    </div>
-  </header>
-);
+    </header>
+  );
+};
 
-const WebAdModal = ({
-  isOpen,
-  onDone,
-  onSkip,
-  num,
-  total,
-}: {
+var WebAdModal = function(props: {
   isOpen: boolean;
   onDone: () => void;
   onSkip: () => void;
   num: number;
   total: number;
-}) => {
-  const [t, setT] = useState(5);
-  const [fin, setFin] = useState(false);
+}) {
+  var [t, setT] = useState(5);
+  var [fin, setFin] = useState(false);
 
-  useEffect(() => {
-    if (!isOpen) return;
+  useEffect(function() {
+    if (!props.isOpen) return;
     setT(5);
     setFin(false);
-    const i = setInterval(() => {
-      setT((p) => {
+    var i = setInterval(function() {
+      setT(function(p) {
         if (p <= 1) {
           clearInterval(i);
           setFin(true);
@@ -142,10 +138,10 @@ const WebAdModal = ({
         return p - 1;
       });
     }, 1000);
-    return () => clearInterval(i);
-  }, [isOpen]);
+    return function() { clearInterval(i); };
+  }, [props.isOpen]);
 
-  if (!isOpen) return null;
+  if (!props.isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6 bg-black/90">
@@ -153,18 +149,16 @@ const WebAdModal = ({
         <div className="relative aspect-video bg-zinc-800 flex items-center justify-center">
           <PlayCircle size={48} className="text-zinc-600 animate-pulse" />
           <div className="absolute top-4 left-4 bg-indigo-500/80 px-3 py-1 rounded-full text-white text-xs font-bold">
-            {num}/{total}
+            {props.num}/{props.total}
           </div>
           <div className="absolute top-4 right-4 bg-black/50 px-3 py-1 rounded-full text-white text-xs font-bold">
-            {fin ? '✓' : `${t}s`}
+            {fin ? '✓' : t + 's'}
           </div>
         </div>
         <div className="p-6 text-center">
-          <h3 className="text-lg font-bold text-white mb-2">
-            Sponsored Content
-          </h3>
+          <h3 className="text-lg font-bold text-white mb-2">Sponsored Content</h3>
           <button
-            onClick={() => (fin ? onDone() : onSkip())}
+            onClick={function() { if (fin) { props.onDone(); } else { props.onSkip(); } }}
             className={cn(
               'w-full py-3 rounded-2xl font-bold mt-4',
               fin ? 'bg-emerald-500 text-white' : 'bg-zinc-800 text-zinc-500'
@@ -178,22 +172,18 @@ const WebAdModal = ({
   );
 };
 
-const SimpleModal = ({
-  open,
-  close,
-  children,
-}: {
+var SimpleModal = function(props: {
   open: boolean;
   close: () => void;
   children: React.ReactNode;
-}) => {
-  if (!open) return null;
+}) {
+  if (!props.open) return null;
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6">
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        onClick={close}
+        onClick={props.close}
         className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
       />
       <motion.div
@@ -201,7 +191,7 @@ const SimpleModal = ({
         animate={{ opacity: 1, scale: 1, y: 0 }}
         className="relative w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl overflow-hidden"
       >
-        <div className="p-8">{children}</div>
+        <div className="p-8">{props.children}</div>
       </motion.div>
     </div>
   );
@@ -211,52 +201,56 @@ const SimpleModal = ({
 // MAIN APP
 // ═════════════════════════════════════════════════════════════════
 export default function App() {
-  const [tab, setTab] = useState('offers');
-  const [fbUser, setFbUser] = useState<FirebaseUser | null>(null);
-  const [user, setUser] = useState<UserProfile | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [privacyOpen, setPrivacyOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmCfg, setConfirmCfg] = useState({
-    title: '',
-    msg: '',
-    fn: () => {},
-  });
-  const [adRunning, setAdRunning] = useState(false);
-  const [webOpen, setWebOpen] = useState(false);
-  const [webNum, setWebNum] = useState(1);
-  const [webTotal, setWebTotal] = useState(1);
-  const webRef = useRef<((v: boolean) => void) | null>(null);
-  const bgRef = useRef(0);
+  var [tab, setTab] = useState('offers');
+  var [fbUser, setFbUser] = useState<FirebaseUser | null>(null);
+  var [user, setUser] = useState<UserProfile | null>(null);
+  var [authLoading, setAuthLoading] = useState(true);
+  var [privacyOpen, setPrivacyOpen] = useState(false);
+  var [deleteOpen, setDeleteOpen] = useState(false);
+  var [confirmOpen, setConfirmOpen] = useState(false);
+  var [confirmCfg, setConfirmCfg] = useState({ title: '', msg: '', fn: function() {} });
+  var [adRunning, setAdRunning] = useState(false);
+  var [webOpen, setWebOpen] = useState(false);
+  var [webNum, setWebNum] = useState(1);
+  var [webTotal, setWebTotal] = useState(1);
+  var webRef = useRef<((v: boolean) => void) | null>(null);
+  var bgRef = useRef(0);
+
+  // ═══════════════════════════════════════════════════════════════
+  // STATE: notificationsDone — controls App Open Ad timing
+  // Starts false. Set to true when notification flow completes
+  // (whether succeeded, failed, or timed out).
+  // App Open Ad useEffect depends on this state.
+  // ═══════════════════════════════════════════════════════════════
+  var [notificationsDone, setNotificationsDone] = useState(false);
 
   // ─── Cooldown ─────────────────────────────────────────────────
-  const [cdActive, setCdActive] = useState(false);
-  const [cdSec, setCdSec] = useState(0);
-  const cdInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  var [cdActive, setCdActive] = useState(false);
+  var [cdSec, setCdSec] = useState(0);
+  var cdInterval = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    const saved = loadCD();
+  useEffect(function() {
+    var saved = loadCD();
     if (saved) {
-      const remaining = CD_MS - (Date.now() - saved.s);
+      var remaining = CD_MS - (Date.now() - saved.s);
       if (remaining > 0) {
         setCdActive(true);
         setCdSec(Math.ceil(remaining / 1000));
         runCooldown(remaining);
       }
     }
-    return () => {
+    return function() {
       if (cdInterval.current) clearInterval(cdInterval.current);
     };
   }, []);
 
   function runCooldown(ms: number) {
     if (cdInterval.current) clearInterval(cdInterval.current);
-    const endTime = Date.now() + ms;
+    var endTime = Date.now() + ms;
     setCdActive(true);
     setCdSec(Math.ceil(ms / 1000));
-    cdInterval.current = setInterval(() => {
-      const remaining = endTime - Date.now();
+    cdInterval.current = setInterval(function() {
+      var remaining = endTime - Date.now();
       if (remaining <= 0) {
         clearInterval(cdInterval.current!);
         cdInterval.current = null;
@@ -275,90 +269,139 @@ export default function App() {
   }
 
   // ─── Country ──────────────────────────────────────────────────
-  const [country, setCountry] = useState<string>(() => {
+  var [country, setCountry] = useState<string>(function() {
     return localStorage.getItem('rh_country') || 'All Countries';
   });
 
-  const onCountryChange = useCallback((c: string) => {
+  var onCountryChange = useCallback(function(c: string) {
     setCountry(c);
     localStorage.setItem('rh_country', c);
   }, []);
 
   // ─── Auth ─────────────────────────────────────────────────────
-  useEffect(() => {
-    const unsub = firebaseService.onAuthChange((f) => {
+  useEffect(function() {
+    var unsub = firebaseService.onAuthChange(function(f) {
       setFbUser(f);
       if (!f) setAuthLoading(false);
     });
-    return () => unsub();
+    return function() { unsub(); };
   }, []);
 
-  // ─── Ads hook ─────────────────────────────────────────────────
-  const {
-    offers,
-    isLoading,
-    onOffersChange,
-    showRewardedAdAndWait,
-    recordAdWatch,
-    claimBoostReward,
-    showBanner,
-    hideBanner,
-    showAppOpenAd,
-    isNative,
+  // ─── Ads Hook ─────────────────────────────────────────────────
+  var {
+    offers, isLoading, onOffersChange, showRewardedAdAndWait,
+    recordAdWatch, claimBoostReward, showBanner, hideBanner,
+    showAppOpenAd, isNative,
   } = useAds(fbUser?.uid);
 
-  // ─── App Open Ad — simple 3-second delay ──────────────────────
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      console.log('[App] Cold start — showing App Open Ad');
-      showAppOpenAd();
-    }, 3000);
-    return () => clearTimeout(timer);
-  }, [showAppOpenAd]);
+  // ═══════════════════════════════════════════════════════════════
+  // SEQUENCE: Notifications FIRST → then mark done → then Ad shows
+  //
+  // Flow:
+  //   1. fbUser.uid becomes available
+  //   2. This useEffect runs
+  //   3. Calls initPushNotifications (which handles permission dialog)
+  //   4. When done (success, fail, or after 15s timeout): notificationsDone = true
+  //   5. The App Open Ad useEffect (below) fires because it depends on notificationsDone
+  //   6. App Open Ad shows 1 second after notificationsDone becomes true
+  // ═══════════════════════════════════════════════════════════════
+  useEffect(function() {
+    if (!fbUser?.uid) {
+      // No user yet — mark notifications as done so ads can show for guests
+      setNotificationsDone(true);
+      return;
+    }
 
-  // ─── App Open Ad — resume from background (5s threshold) ─────
-  useEffect(() => {
-    const handler = () => {
+    var uid = fbUser.uid;
+    var timedOut = false;
+
+    // Safety timeout: if notifications take more than 15 seconds, move on
+    var timeout = setTimeout(function() {
+      timedOut = true;
+      console.log('[App] Notification timeout (15s) — moving to ads');
+      setNotificationsDone(true);
+    }, 15000);
+
+    // Start notification flow
+    import('./services/notifications').then(function(mod) {
+      return mod.initPushNotifications(function(token: string) {
+        console.log('[App] Got FCM token, saving to Firestore...');
+        firebaseService.saveFcmToken(uid, token)
+          .then(function() { console.log('[App] FCM token saved OK'); })
+          .catch(function(err) { console.error('[App] FCM token save FAILED:', err); });
+      });
+    }).then(function() {
+      if (!timedOut) {
+        clearTimeout(timeout);
+        console.log('[App] Notifications complete — enabling ads');
+        setNotificationsDone(true);
+      }
+    }).catch(function(err) {
+      console.error('[App] Notification error (non-fatal):', err);
+      if (!timedOut) {
+        clearTimeout(timeout);
+        setNotificationsDone(true);
+      }
+    });
+
+    return function() { clearTimeout(timeout); };
+  }, [fbUser?.uid]);
+
+  // ═══════════════════════════════════════════════════════════════
+  // APP OPEN AD — fires when notificationsDone becomes true
+  // This guarantees: Permissions → Ad Init → Ad Show (no deadlock)
+  // ═══════════════════════════════════════════════════════════════
+  useEffect(function() {
+    if (!notificationsDone) return;
+    console.log('[App] notificationsDone=true → showing App Open Ad in 1s');
+    var timer = setTimeout(function() {
+      showAppOpenAd();
+    }, 1000);
+    return function() { clearTimeout(timer); };
+  }, [notificationsDone, showAppOpenAd]);
+
+  // Resume from background (5s threshold, only if notifications done)
+  useEffect(function() {
+    function handler() {
       if (document.visibilityState === 'hidden') {
         bgRef.current = Date.now();
       } else if (
         document.visibilityState === 'visible' &&
+        notificationsDone &&
         bgRef.current > 0 &&
         Date.now() - bgRef.current >= 5000
       ) {
         console.log('[App] Resume — showing App Open Ad');
         showAppOpenAd();
       }
-    };
+    }
     document.addEventListener('visibilitychange', handler);
-    return () => document.removeEventListener('visibilitychange', handler);
-  }, [showAppOpenAd]);
+    return function() { document.removeEventListener('visibilitychange', handler); };
+  }, [showAppOpenAd, notificationsDone]);
 
-  // ─── Firestore listeners ─────────────────────────────────────
-  const [fsClaims, setFsClaims] = useState<Transaction[]>([]);
-  const [fsHistory, setFsHistory] = useState<Transaction[]>([]);
+  // ─── Firestore Listeners ──────────────────────────────────────
+  var [fsClaims, setFsClaims] = useState<Transaction[]>([]);
+  var [fsHistory, setFsHistory] = useState<Transaction[]>([]);
 
-  useEffect(() => {
+  useEffect(function() {
     if (!fbUser?.uid) {
       setUser(null);
       setFsClaims([]);
       setFsHistory([]);
       return;
     }
-    const uid = fbUser.uid;
-    setAuthLoading(true);
 
+    var uid = fbUser.uid;
+    setAuthLoading(true);
     firebaseService.checkDailyReset(uid);
 
-    const u1 = firebaseService.onProfileChange(uid, (p) => {
+    var u1 = firebaseService.onProfileChange(uid, function(p) {
       if (p) {
         setUser(p);
       } else {
         firebaseService.saveUserProfile({
-          uid,
-          email:
-            fbUser.email ||
-            (uid.startsWith('local_guest_') ? 'Guest User' : 'Unknown'),
+          uid: uid,
+          email: fbUser.email || (uid.startsWith('local_guest_') ? 'Guest User' : 'Unknown'),
           points: 0,
           claimsToday: 0,
           lastClaimDate: null,
@@ -372,110 +415,122 @@ export default function App() {
       setAuthLoading(false);
     });
 
-    const u2 = firebaseService.onClaimsChange(uid, setFsClaims);
-    const u3 = firebaseService.onHistoryChange(uid, setFsHistory);
+    var u2 = firebaseService.onClaimsChange(uid, setFsClaims);
+    var u3 = firebaseService.onHistoryChange(uid, setFsHistory);
 
-    return () => {
-      u1();
-      u2();
-      u3();
-    };
+    return function() { u1(); u2(); u3(); };
   }, [fbUser?.uid]);
 
-  // ─── Search, categories, transactions ────────────────────────
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  const categories = [
+  // ─── Search, Categories, Transactions ────────────────────────
+  var [searchQuery, setSearchQuery] = useState('');
+  var [selectedCategory, setSelectedCategory] = useState('all');
+  var categories = [
     'all', 'Fashion', 'Delivery apps', 'Shopping', 'Travel',
     'Food', 'General', 'Entertainment', 'Tech',
   ];
 
-  const [localTx, setLocalTx] = useState<Transaction[]>(() => {
+  var [localTx, setLocalTx] = useState<Transaction[]>(function() {
     try {
       return JSON.parse(localStorage.getItem('local_transactions') || '[]');
-    } catch {
+    } catch (e) {
       return [];
     }
   });
 
-  const transactions = useMemo(() => {
-    const all = [...localTx, ...fsClaims, ...fsHistory];
-    const unique = Array.from(new Map(all.map((t) => [t.id, t])).values());
-    return unique.sort(
-      (a, b) =>
-        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    );
+  var transactions = useMemo(function() {
+    var all = localTx.concat(fsClaims).concat(fsHistory);
+    var map = new Map<string, Transaction>();
+    for (var i = 0; i < all.length; i++) {
+      map.set(all[i].id, all[i]);
+    }
+    var unique = Array.from(map.values());
+    unique.sort(function(a, b) {
+      return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+    });
+    return unique;
   }, [localTx, fsClaims, fsHistory]);
 
-  useEffect(() => {
-    localStorage.setItem(
-      'local_transactions',
-      JSON.stringify(localTx.slice(0, 50))
-    );
+  useEffect(function() {
+    localStorage.setItem('local_transactions', JSON.stringify(localTx.slice(0, 50)));
   }, [localTx]);
 
-  const displayPoints = useMemo(() => {
-    return Math.max(
-      0,
-      transactions.reduce((acc, t) => {
-        if (t.type === 'earn') return acc + t.amount;
-        if (t.type === 'claim') return acc - t.amount;
-        return acc;
-      }, 0)
-    );
+  var displayPoints = useMemo(function() {
+    var total = 0;
+    for (var i = 0; i < transactions.length; i++) {
+      var t = transactions[i];
+      if (t.type === 'earn') total += t.amount;
+      else if (t.type === 'claim') total -= t.amount;
+    }
+    return Math.max(0, total);
   }, [transactions]);
 
-  // ─── Offers listener ─────────────────────────────────────────
-  useEffect(() => {
-    const unsub = onOffersChange();
-    return () => unsub();
+  // ─── Offers ───────────────────────────────────────────────────
+  useEffect(function() {
+    var unsub = onOffersChange();
+    return function() { unsub(); };
   }, [onOffersChange]);
 
-  // ─── Filtered offers (category → country → search) ──────────
-  const filteredOffers = useMemo(() => {
-    const result = offers.filter((o) => {
+  // DEBUG: Show first offer's raw country data once
+  var debugShownRef = useRef(false);
+
+  // ─── Filtered Offers ──────────────────────────────────────────
+  var filteredOffers = useMemo(function() {
+    // DEBUG: Alert first offer's country data for debugging
+    if (offers.length > 0 && !debugShownRef.current) {
+      debugShownRef.current = true;
+      var sample = offers[0] as any;
+      var debugMsg =
+        '[DEBUG] First offer: ' + sample.brand +
+        '\ncountries field: ' + JSON.stringify(sample.countries) +
+        '\ncountry field: ' + JSON.stringify(sample.country) +
+        '\nSelected: ' + country +
+        '\nTotal offers: ' + offers.length;
+      console.log(debugMsg);
+      // Show alert for first-time debugging
+      try {
+        window.alert(debugMsg);
+      } catch (e) {
+        // alert not available
+      }
+    }
+
+    var result: Offer[] = [];
+
+    for (var i = 0; i < offers.length; i++) {
+      var o = offers[i];
+
       // 1. Category filter
-      const sel = selectedCategory.toLowerCase();
+      var sel = selectedCategory.toLowerCase();
       if (sel !== 'all') {
-        const offerCats = Array.isArray(o.category)
-          ? o.category.map((c) => String(c).toLowerCase())
-          : [String(o.category || '').toLowerCase()];
-        if (!offerCats.includes(sel)) return false;
+        var offerCats: string[];
+        if (Array.isArray(o.category)) {
+          offerCats = o.category.map(function(c) { return String(c).toLowerCase(); });
+        } else {
+          offerCats = [String(o.category || '').toLowerCase()];
+        }
+        if (offerCats.indexOf(sel) === -1) continue;
       }
 
       // 2. Country filter
-      if (!offerMatchesCountry(o, country)) return false;
+      if (!offerMatchesCountry(o, country)) continue;
 
       // 3. Search filter
       if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        if (
-          !o.brand.toLowerCase().includes(q) &&
-          !o.description.toLowerCase().includes(q)
-        ) {
-          return false;
-        }
+        var q = searchQuery.toLowerCase();
+        var brandMatch = o.brand.toLowerCase().indexOf(q) !== -1;
+        var descMatch = o.description.toLowerCase().indexOf(q) !== -1;
+        if (!brandMatch && !descMatch) continue;
       }
 
-      return true;
-    });
-
-    // Debug log — remove this after confirming the filter works
-    if (offers.length > 0) {
-      const sample = offers[0] as any;
-      console.log(
-        `[Filter] ${offers.length} offers → ${result.length} shown | ` +
-        `country="${country}" | ` +
-        `sample offer countries=${JSON.stringify(sample.countries)} ` +
-        `country=${JSON.stringify(sample.country)}`
-      );
+      result.push(o);
     }
 
+    console.log('[Filter] ' + offers.length + ' → ' + result.length + ' (country=' + country + ', cat=' + selectedCategory + ')');
     return result;
   }, [offers, searchQuery, selectedCategory, country]);
 
-  // ─── Banner lifecycle ────────────────────────────────────────
-  useEffect(() => {
+  // ─── Banner ───────────────────────────────────────────────────
+  useEffect(function() {
     if (isNative && tab === 'offers' && !adRunning) {
       showBanner();
     } else if (isNative) {
@@ -483,41 +538,36 @@ export default function App() {
     }
   }, [tab, adRunning, isNative, showBanner, hideBanner]);
 
-  // ─── Web ad simulator ────────────────────────────────────────
-  const showWebAd = useCallback(
-    (num: number, total: number): Promise<boolean> => {
-      return new Promise((resolve) => {
-        webRef.current = resolve;
-        setWebNum(num);
-        setWebTotal(total);
-        setWebOpen(true);
-      });
-    },
-    []
-  );
-
-  const onWebDone = useCallback(() => {
-    setWebOpen(false);
-    webRef.current?.(true);
-    webRef.current = null;
+  // ─── Web Ad Simulator ────────────────────────────────────────
+  var showWebAd = useCallback(function(num: number, total: number): Promise<boolean> {
+    return new Promise(function(resolve) {
+      webRef.current = resolve;
+      setWebNum(num);
+      setWebTotal(total);
+      setWebOpen(true);
+    });
   }, []);
 
-  const onWebSkip = useCallback(() => {
+  var onWebDone = useCallback(function() {
     setWebOpen(false);
-    webRef.current?.(false);
-    webRef.current = null;
+    if (webRef.current) { webRef.current(true); webRef.current = null; }
   }, []);
 
-  // ─── Watch ad flow ───────────────────────────────────────────
-  const handleWatchAd = async () => {
+  var onWebSkip = useCallback(function() {
+    setWebOpen(false);
+    if (webRef.current) { webRef.current(false); webRef.current = null; }
+  }, []);
+
+  // ─── Watch Ad Flow ───────────────────────────────────────────
+  var handleWatchAd = async function() {
     if (adRunning || !user || cdActive) return;
     setAdRunning(true);
     if (isNative) await hideBanner();
 
-    const boostLevel = Number(user.boostLevel) || 1;
-    const currentProgress = Number(user.currentLevelAdCounter) || 0;
-    const adsNeeded = boostLevel;
-    const remaining = adsNeeded - currentProgress;
+    var boostLevel = Number(user.boostLevel) || 1;
+    var currentProgress = Number(user.currentLevelAdCounter) || 0;
+    var adsNeeded = boostLevel;
+    var remaining = adsNeeded - currentProgress;
 
     if (remaining <= 0) {
       await handleClaimBoost();
@@ -527,10 +577,10 @@ export default function App() {
       return;
     }
 
-    let completed = 0;
-    for (let i = 0; i < remaining; i++) {
-      const adNum = currentProgress + i + 1;
-      const ok = isNative
+    var completed = 0;
+    for (var i = 0; i < remaining; i++) {
+      var adNum = currentProgress + i + 1;
+      var ok = isNative
         ? await showRewardedAdAndWait()
         : await showWebAd(adNum, adsNeeded);
 
@@ -539,15 +589,12 @@ export default function App() {
         break;
       }
 
-      const result = await recordAdWatch();
+      var result = await recordAdWatch();
       if (result) {
         completed++;
         if (adNum < adsNeeded) {
-          Toast.show({
-            text: `Ad ${adNum}/${adsNeeded}!`,
-            duration: 'short',
-          });
-          await new Promise((r) => setTimeout(r, 800));
+          Toast.show({ text: 'Ad ' + adNum + '/' + adsNeeded + '!', duration: 'short' });
+          await new Promise(function(r) { setTimeout(r, 800); });
         }
       }
     }
@@ -561,25 +608,25 @@ export default function App() {
     if (isNative && tab === 'offers') showBanner();
   };
 
-  const handleClaimBoost = async () => {
+  var handleClaimBoost = async function() {
     try {
-      const result = await claimBoostReward();
+      var result = await claimBoostReward();
       if (result) {
         Toast.show({ text: '+100 pts!', duration: 'long' });
       }
-    } catch {
+    } catch (e) {
       Toast.show({ text: 'Claim failed.', duration: 'short' });
     }
   };
 
-  // ─── Claim offer ─────────────────────────────────────────────
-  const handleClaimOffer = async (offer: Offer, cost: number) => {
+  // ─── Claim Offer ─────────────────────────────────────────────
+  var handleClaimOffer = async function(offer: Offer, cost: number) {
     if (!user) return;
 
     if (user.points < cost) {
       setConfirmCfg({
         title: 'Not Enough Points',
-        msg: `Need ${cost - user.points} more.`,
+        msg: 'Need ' + (cost - user.points) + ' more.',
         fn: handleWatchAd,
       });
       setConfirmOpen(true);
@@ -595,43 +642,43 @@ export default function App() {
       } else {
         setConfirmCfg({
           title: 'Success!',
-          msg: `Code: ${offer.code}`,
-          fn: () => {
+          msg: 'Code: ' + offer.code,
+          fn: function() {
             Clipboard.write({ string: offer.code! });
             Toast.show({ text: 'Copied!', duration: 'short' });
           },
         });
         setConfirmOpen(true);
       }
-    } catch {
+    } catch (e) {
       Toast.show({ text: 'Failed.', duration: 'long' });
     }
   };
 
-  // ─── Auth handlers ───────────────────────────────────────────
-  const handleSignIn = async () => {
+  // ─── Auth Handlers ───────────────────────────────────────────
+  var handleSignIn = async function() {
     setAuthLoading(true);
     try {
-      const u = await firebaseService.signInWithGoogle();
+      var u = await firebaseService.signInWithGoogle();
       if (u) {
         setFbUser(u);
         Toast.show({ text: 'Signed in!', duration: 'short' });
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      var msg = e instanceof Error ? e.message : String(e);
       Toast.show({ text: msg.slice(0, 100), duration: 'long' });
     } finally {
       setAuthLoading(false);
     }
   };
 
-  const handleGuest = async () => {
+  var handleGuest = async function() {
     setAuthLoading(true);
     try {
-      const f = await firebaseService.signInAnonymously();
+      var f = await firebaseService.signInAnonymously();
       setFbUser(f);
-    } catch {
-      let id = localStorage.getItem('persistent_guest_id');
+    } catch (e) {
+      var id = localStorage.getItem('persistent_guest_id');
       if (!id) {
         id = 'local_guest_' + Math.random().toString(36).substr(2, 9);
         localStorage.setItem('persistent_guest_id', id);
@@ -650,18 +697,13 @@ export default function App() {
     }
   };
 
-  const handleSignOut = async () => {
-    try {
-      await firebaseService.logout();
-    } catch {
-      // silent
-    } finally {
-      setFbUser(null);
-      setUser(null);
-    }
+  var handleSignOut = async function() {
+    try { await firebaseService.logout(); } catch (e) { /* silent */ }
+    setFbUser(null);
+    setUser(null);
   };
 
-  const handleDelete = async () => {
+  var handleDelete = async function() {
     if (!user) return;
     setAuthLoading(true);
     try {
@@ -672,10 +714,7 @@ export default function App() {
       Toast.show({ text: 'Deleted', duration: 'long' });
     } catch (e: any) {
       Toast.show({
-        text:
-          e.code === 'auth/requires-recent-login'
-            ? 'Re-sign in first.'
-            : 'Failed.',
+        text: e && e.code === 'auth/requires-recent-login' ? 'Re-sign in first.' : 'Failed.',
         duration: 'long',
       });
     } finally {
@@ -713,9 +752,7 @@ export default function App() {
           <h1 className="text-3xl font-black text-zinc-900 mt-8 mb-3">
             Welcome to {APP_NAME}
           </h1>
-          <p className="text-sm text-zinc-500 mb-10">
-            Sign in to earn points.
-          </p>
+          <p className="text-sm text-zinc-500 mb-10">Sign in to earn points.</p>
           <div className="w-full space-y-4">
             <button
               onClick={handleSignIn}
@@ -751,7 +788,7 @@ export default function App() {
     );
   }
 
-  // ─── Main App ────────────────────────────────────────────────
+  // ─── Main Layout ─────────────────────────────────────────────
   return (
     <div className="h-screen flex flex-col bg-zinc-50 font-sans overflow-hidden">
       <div className="flex-1 overflow-y-auto scroll-smooth relative">
@@ -788,147 +825,83 @@ export default function App() {
                 animate={{ opacity: 1, x: 0 }}
                 className="space-y-6"
               >
+                {/* Profile Card */}
                 <div className="bg-white rounded-3xl p-6 border border-zinc-200 shadow-sm text-center">
                   <div className="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
                     <User size={40} className="text-indigo-600" />
                   </div>
-                  <h2 className="text-xl font-bold text-zinc-900">
-                    {user.email}
-                  </h2>
+                  <h2 className="text-xl font-bold text-zinc-900">{user.email}</h2>
                   <p className="text-xs text-zinc-500 mt-1">v{APP_VERSION}</p>
                   <div className="grid grid-cols-2 gap-4 mt-8">
                     <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100">
-                      <span className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">
-                        Points
-                      </span>
-                      <span className="text-lg font-bold text-zinc-900">
-                        {displayPoints}
-                      </span>
+                      <span className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">Points</span>
+                      <span className="text-lg font-bold text-zinc-900">{displayPoints}</span>
                     </div>
                     <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100">
-                      <span className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">
-                        Claims
-                      </span>
+                      <span className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">Claims</span>
                       <span className="text-lg font-bold text-zinc-900">
-                        {transactions.filter((t) => t.type === 'claim').length}
+                        {transactions.filter(function(t) { return t.type === 'claim'; }).length}
                       </span>
                     </div>
                   </div>
                 </div>
 
+                {/* Actions */}
                 <div className="space-y-3">
-                  <button
-                    onClick={() => setPrivacyOpen(true)}
-                    className="w-full flex items-center justify-between p-5 bg-white rounded-2xl border border-zinc-200 shadow-sm"
-                  >
-                    <div className="flex items-center gap-3">
-                      <ShieldCheck size={20} className="text-indigo-600" />
-                      <span className="text-sm font-bold text-zinc-700">
-                        Privacy Policy
-                      </span>
-                    </div>
+                  <button onClick={function() { setPrivacyOpen(true); }} className="w-full flex items-center justify-between p-5 bg-white rounded-2xl border border-zinc-200 shadow-sm">
+                    <div className="flex items-center gap-3"><ShieldCheck size={20} className="text-indigo-600" /><span className="text-sm font-bold text-zinc-700">Privacy Policy</span></div>
                     <ChevronRight size={18} className="text-zinc-400" />
                   </button>
-                  <button
-                    onClick={handleSignOut}
-                    className="w-full flex items-center justify-between p-5 bg-white rounded-2xl border border-zinc-200 shadow-sm"
-                  >
-                    <div className="flex items-center gap-3">
-                      <ExternalLink size={20} className="text-zinc-400" />
-                      <span className="text-sm font-bold text-zinc-700">
-                        Sign Out
-                      </span>
-                    </div>
+                  <button onClick={handleSignOut} className="w-full flex items-center justify-between p-5 bg-white rounded-2xl border border-zinc-200 shadow-sm">
+                    <div className="flex items-center gap-3"><ExternalLink size={20} className="text-zinc-400" /><span className="text-sm font-bold text-zinc-700">Sign Out</span></div>
                     <ChevronRight size={18} className="text-zinc-400" />
                   </button>
-                  <button
-                    onClick={() => setDeleteOpen(true)}
-                    className="w-full flex items-center justify-between p-5 bg-white rounded-2xl border border-rose-200 shadow-sm"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Trash2 size={20} className="text-rose-500" />
-                      <span className="text-sm font-bold text-rose-600">
-                        Delete Account
-                      </span>
-                    </div>
+                  <button onClick={function() { setDeleteOpen(true); }} className="w-full flex items-center justify-between p-5 bg-white rounded-2xl border border-rose-200 shadow-sm">
+                    <div className="flex items-center gap-3"><Trash2 size={20} className="text-rose-500" /><span className="text-sm font-bold text-rose-600">Delete Account</span></div>
                     <ChevronRight size={18} className="text-rose-400" />
                   </button>
                 </div>
 
+                {/* History */}
                 <div className="space-y-3">
-                  <h2 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">
-                    History
-                  </h2>
+                  <h2 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">History</h2>
                   {transactions.length === 0 ? (
                     <div className="bg-white rounded-2xl p-8 border border-dashed border-zinc-200 text-center">
-                      <History
-                        size={24}
-                        className="text-zinc-300 mx-auto mb-2"
-                      />
+                      <History size={24} className="text-zinc-300 mx-auto mb-2" />
                       <p className="text-xs text-zinc-500">No transactions</p>
                     </div>
                   ) : (
-                    transactions.slice(0, 20).map((tx) => (
-                      <div
-                        key={tx.id}
-                        className="bg-white rounded-2xl p-4 border border-zinc-200 shadow-sm flex justify-between items-center"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={cn(
-                              'w-8 h-8 rounded-xl flex items-center justify-center',
-                              tx.type === 'earn'
-                                ? 'bg-emerald-50'
-                                : 'bg-indigo-50'
-                            )}
-                          >
-                            {tx.type === 'earn' ? (
-                              <TrendingUp
-                                size={16}
-                                className="text-emerald-600"
-                              />
-                            ) : (
-                              <Gift size={16} className="text-indigo-600" />
+                    transactions.slice(0, 20).map(function(tx) {
+                      return (
+                        <div key={tx.id} className="bg-white rounded-2xl p-4 border border-zinc-200 shadow-sm flex justify-between items-center">
+                          <div className="flex items-center gap-3">
+                            <div className={cn('w-8 h-8 rounded-xl flex items-center justify-center', tx.type === 'earn' ? 'bg-emerald-50' : 'bg-indigo-50')}>
+                              {tx.type === 'earn' ? <TrendingUp size={16} className="text-emerald-600" /> : <Gift size={16} className="text-indigo-600" />}
+                            </div>
+                            <div>
+                              <p className="text-xs font-bold text-zinc-900">{tx.title}</p>
+                              <p className="text-[10px] text-zinc-400">{new Date(tx.timestamp).toLocaleDateString()}</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <span className={cn('text-sm font-bold', tx.type === 'earn' ? 'text-emerald-600' : 'text-indigo-600')}>
+                              {tx.type === 'earn' ? '+' : '-'}{Math.abs(tx.amount)} pts
+                            </span>
+                            {tx.code && (
+                              <button
+                                onClick={async function() {
+                                  await Clipboard.write({ string: tx.code! });
+                                  Toast.show({ text: 'Copied!', duration: 'short' });
+                                }}
+                                className="block text-[10px] font-mono bg-zinc-100 px-2 py-0.5 rounded text-zinc-600 border border-zinc-200 mt-1"
+                              >
+                                {tx.code}
+                              </button>
                             )}
                           </div>
-                          <div>
-                            <p className="text-xs font-bold text-zinc-900">
-                              {tx.title}
-                            </p>
-                            <p className="text-[10px] text-zinc-400">
-                              {new Date(tx.timestamp).toLocaleDateString()}
-                            </p>
-                          </div>
                         </div>
-                        <div className="text-right">
-                          <span
-                            className={cn(
-                              'text-sm font-bold',
-                              tx.type === 'earn'
-                                ? 'text-emerald-600'
-                                : 'text-indigo-600'
-                            )}
-                          >
-                            {tx.type === 'earn' ? '+' : '-'}
-                            {Math.abs(tx.amount)} pts
-                          </span>
-                          {tx.code && (
-                            <button
-                              onClick={async () => {
-                                await Clipboard.write({ string: tx.code! });
-                                Toast.show({
-                                  text: 'Copied!',
-                                  duration: 'short',
-                                });
-                              }}
-                              className="block text-[10px] font-mono bg-zinc-100 px-2 py-0.5 rounded text-zinc-600 border border-zinc-200 mt-1"
-                            >
-                              {tx.code}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                   <div className="h-40" />
                 </div>
@@ -940,15 +913,9 @@ export default function App() {
 
       <Navbar tab={tab} setTab={setTab} />
 
-      <WebAdModal
-        isOpen={webOpen}
-        onDone={onWebDone}
-        onSkip={onWebSkip}
-        num={webNum}
-        total={webTotal}
-      />
+      <WebAdModal isOpen={webOpen} onDone={onWebDone} onSkip={onWebSkip} num={webNum} total={webTotal} />
 
-      <SimpleModal open={privacyOpen} close={() => setPrivacyOpen(false)}>
+      <SimpleModal open={privacyOpen} close={function() { setPrivacyOpen(false); }}>
         <div className="flex items-center gap-3 mb-6">
           <ShieldCheck size={24} className="text-indigo-600" />
           <h3 className="text-xl font-black text-zinc-900">Privacy Policy</h3>
@@ -961,61 +928,27 @@ export default function App() {
           <p className="font-bold text-zinc-900">Ads:</p>
           <p>Google AdMob. We never sell your data.</p>
         </div>
-        <button
-          onClick={() => setPrivacyOpen(false)}
-          className="w-full mt-6 bg-indigo-600 text-white py-4 rounded-2xl font-bold active:scale-95"
-        >
-          Got it
-        </button>
+        <button onClick={function() { setPrivacyOpen(false); }} className="w-full mt-6 bg-indigo-600 text-white py-4 rounded-2xl font-bold active:scale-95">Got it</button>
       </SimpleModal>
 
-      <SimpleModal open={deleteOpen} close={() => setDeleteOpen(false)}>
+      <SimpleModal open={deleteOpen} close={function() { setDeleteOpen(false); }}>
         <div className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center mb-6">
           <AlertCircle size={24} className="text-rose-600" />
         </div>
-        <h3 className="text-xl font-black text-zinc-900 mb-2">
-          Delete Account?
-        </h3>
-        <p className="text-sm text-zinc-500 mb-6">
-          This is permanent. All your data will be lost.
-        </p>
-        <button
-          onClick={handleDelete}
-          className="w-full bg-rose-600 text-white py-4 rounded-2xl font-bold active:scale-95 mb-3"
-        >
-          Delete
-        </button>
-        <button
-          onClick={() => setDeleteOpen(false)}
-          className="w-full bg-zinc-100 text-zinc-600 py-4 rounded-2xl font-bold active:scale-95"
-        >
-          Cancel
-        </button>
+        <h3 className="text-xl font-black text-zinc-900 mb-2">Delete Account?</h3>
+        <p className="text-sm text-zinc-500 mb-6">This is permanent. All data will be lost.</p>
+        <button onClick={handleDelete} className="w-full bg-rose-600 text-white py-4 rounded-2xl font-bold active:scale-95 mb-3">Delete</button>
+        <button onClick={function() { setDeleteOpen(false); }} className="w-full bg-zinc-100 text-zinc-600 py-4 rounded-2xl font-bold active:scale-95">Cancel</button>
       </SimpleModal>
 
-      <SimpleModal open={confirmOpen} close={() => setConfirmOpen(false)}>
+      <SimpleModal open={confirmOpen} close={function() { setConfirmOpen(false); }}>
         <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center mb-6">
           <AlertCircle size={24} className="text-indigo-600" />
         </div>
-        <h3 className="text-xl font-black text-zinc-900 mb-2">
-          {confirmCfg.title}
-        </h3>
+        <h3 className="text-xl font-black text-zinc-900 mb-2">{confirmCfg.title}</h3>
         <p className="text-sm text-zinc-500 mb-6">{confirmCfg.msg}</p>
-        <button
-          onClick={() => {
-            confirmCfg.fn();
-            setConfirmOpen(false);
-          }}
-          className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold active:scale-95 mb-3"
-        >
-          Confirm
-        </button>
-        <button
-          onClick={() => setConfirmOpen(false)}
-          className="w-full bg-zinc-100 text-zinc-600 py-4 rounded-2xl font-bold active:scale-95"
-        >
-          Cancel
-        </button>
+        <button onClick={function() { confirmCfg.fn(); setConfirmOpen(false); }} className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold active:scale-95 mb-3">Confirm</button>
+        <button onClick={function() { setConfirmOpen(false); }} className="w-full bg-zinc-100 text-zinc-600 py-4 rounded-2xl font-bold active:scale-95">Cancel</button>
       </SimpleModal>
     </div>
   );
