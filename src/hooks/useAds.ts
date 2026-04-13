@@ -43,7 +43,6 @@ export function useAds(uid?: string) {
   const bannerRef = useRef(false);
   const isNative = Capacitor.isNativePlatform();
 
-  // ─── Offers listener ──────────────────────────────────────────
   const onOffersChange = useCallback(() => {
     setIsLoading(true);
     return firebaseService.onOffersChange((data) => {
@@ -52,7 +51,6 @@ export function useAds(uid?: string) {
     });
   }, []);
 
-  // ─── Banner ───────────────────────────────────────────────────
   const showBanner = useCallback(async () => {
     if (!isNative) return;
     const ok = await initAdMob();
@@ -84,7 +82,6 @@ export function useAds(uid?: string) {
     }
   }, [isNative]);
 
-  // ─── Rewarded Ad ──────────────────────────────────────────────
   const showRewardedAdAndWait = useCallback(async (): Promise<boolean> => {
     if (!isNative) return false;
     const ok = await initAdMob();
@@ -93,9 +90,14 @@ export function useAds(uid?: string) {
     return new Promise(async (resolve) => {
       let rewarded = false;
       const listeners: any[] = [];
+
       const cleanup = () => {
         listeners.forEach((l) => {
-          try { l.remove(); } catch (e) { /* silent */ }
+          try {
+            l.remove();
+          } catch (e) {
+            // silent
+          }
         });
       };
 
@@ -105,18 +107,21 @@ export function useAds(uid?: string) {
             rewarded = true;
           })
         );
+
         listeners.push(
           await AdMobPlugin.addListener(RewardAdEvents.Dismissed, () => {
             cleanup();
             resolve(rewarded);
           })
         );
+
         listeners.push(
           await AdMobPlugin.addListener(RewardAdEvents.FailedToShow, () => {
             cleanup();
             resolve(false);
           })
         );
+
         listeners.push(
           await AdMobPlugin.addListener(RewardAdEvents.FailedToLoad, () => {
             cleanup();
@@ -130,7 +135,6 @@ export function useAds(uid?: string) {
         });
         await AdMobPlugin.showRewardVideoAd();
 
-        // Safety timeout — resolve after 2 minutes no matter what
         setTimeout(() => {
           cleanup();
           resolve(rewarded);
@@ -143,14 +147,13 @@ export function useAds(uid?: string) {
     });
   }, [isNative]);
 
-  // ─── App Open Ad ──────────────────────────────────────────────
   const showAppOpenAd = useCallback(async (): Promise<void> => {
     if (!isNative) return;
     const ok = await initAdMob();
     if (!ok || !AdMobPlugin) return;
 
     try {
-      console.log('[AppOpen] Preparing...');
+      console.log('[AppOpen] Preparing ad:', AD_IDS.appOpen);
       await AdMobPlugin.prepareAppOpenAd({
         adId: AD_IDS.appOpen,
         isTesting: !import.meta.env.VITE_ADMOB_APP_OPEN_ID,
@@ -163,7 +166,6 @@ export function useAds(uid?: string) {
     }
   }, [isNative]);
 
-  // ─── Firestore operations ────────────────────────────────────
   const recordAdWatch = useCallback(async () => {
     if (!uid) return null;
     try {
@@ -184,7 +186,6 @@ export function useAds(uid?: string) {
     }
   }, [uid]);
 
-  // ─── Return ──────────────────────────────────────────────────
   return {
     offers,
     isLoading,
