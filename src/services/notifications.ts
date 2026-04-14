@@ -1,10 +1,18 @@
 // ═══════════════════════════════════════════════════════════════════════
-// Push Notifications — Robust with Retry + Debug Alert
+// Push Notifications — Crash-safe init (v13.1.1)
 //
-// Sequence: isPluginAvailable → checkPermissions → requestPermissions
-//           → wait 3s → register → retry token save up to 5 times
-//
-// Debug: Shows window.alert with token for manual verification
+// Fixes applied vs previous version:
+//  • Removed ALL window.alert() calls. alert() from inside a Capacitor
+//    plugin callback blocks the WebView JS thread and, combined with AdMob
+//    initializing in parallel, triggers ANR/native crash on Android 13+.
+//  • Creates the "rewardhub_default" notification channel BEFORE register()
+//    so the FirebaseMessagingService doesn't crash on OEMs (Samsung/Xiaomi)
+//    that require the channel referenced by the manifest meta-data to exist.
+//  • Wraps PushNotifications.register() in its own try/catch so a native
+//    FCM failure (bad google-services.json, missing Play Services) is
+//    downgraded to a logged warning instead of an unhandled rejection.
+//  • onToken callback failures no longer retry indefinitely — Promise
+//    rejections are captured properly.
 // ═══════════════════════════════════════════════════════════════════════
 
 let hasRun = false;
@@ -16,17 +24,15 @@ export async function initPushNotifications(
   hasRun = true;
 
   try {
-    // Step 1: Check platform
+    // Step 1: Platform check
     const { Capacitor } = await import('@capacitor/core');
     if (!Capacitor.isNativePlatform()) {
       console.log('[Push] Web — skip');
       return;
     }
 
-    // Step 2: Check if native plugin is registered (prevents crash)
-    const available = Capacitor.isPluginAvailable('PushNotifications');
-    console.log('[Push] Plugin available:', available);
-    if (!available) {
+    // Step 2: Plugin availability
+    if (!Capacitor.isPluginAvailable('PushNotifications')) {
       console.log('[Push] Plugin not registered — skip');
       return;
     }
@@ -34,96 +40,88 @@ export async function initPushNotifications(
     // Step 3: Import plugin
     const { PushNotifications } = await import('@capacitor/push-notifications');
 
-    // Step 4: Check permissions
+    // Step 4: Permissions
     let perm = await PushNotifications.checkPermissions();
-    console.log('[Push] Permission:', perm.receive);
+    console.log('[Push] Current permission:', perm.receive);
 
-    if (perm.receive === 'prompt') {
+    if (perm.receive === 'prompt' || perm.receive === 'prompt-with-rationale') {
       perm = await PushNotifications.requestPermissions();
       console.log('[Push] User chose:', perm.receive);
     }
 
     if (perm.receive !== 'granted') {
-      console.log('[Push] Denied');
+      console.log('[Push] Permission denied — exiting init');
       return;
     }
 
-    // Step 5: Wait 3s for native stack to settle
-    await new Promise(function(r) { setTimeout(r, 3000); });
+    // Step 5: Create the notification channel BEFORE register()
+    // Must match the id referenced by
+    // com.google.firebase.messaging.default_notification_channel_id in the manifest.
+    try {
+      await PushNotifications.createChannel({
+        id: 'rewardhub_default',
+        name: 'RewardHub Notifications',
+        description: 'Daily reminders and new offer alerts',
+        importance: 4,      // IMPORTANCE_HIGH
+        visibility: 1,      // VISIBILITY_PUBLIC
+        lights: true,
+        vibration: true,
+      });
+      console.log('[Push] Channel created');
+    } catch (chanErr) {
+      console.warn('[Push] createChannel non-fatal:', chanErr);
+    }
 
-    // Step 6: Register listeners
+    // Step 6: Attach listeners BEFORE register()
     await PushNotifications.addListener('registration', function(token: any) {
-      var tokenValue = token && token.value ? token.value : null;
-      console.log('[Push] Token:', tokenValue ? tokenValue.slice(0, 30) : 'NULL');
-
-      // DEBUG: Show token on screen
-      try {
-        window.alert('[DEBUG] FCM Token: ' + (tokenValue ? tokenValue.slice(0, 50) + '...' : 'NULL'));
-      } catch (e) {
-        // alert not available
-      }
-
+      const tokenValue = token && token.value ? String(token.value) : '';
       if (!tokenValue) {
-        console.error('[Push] Token is null/undefined!');
+        console.error('[Push] Empty token received');
         return;
       }
-
-      // Retry logic: try up to 5 times with 5s delay
-      var attempt = 0;
-      var maxRetries = 5;
-
-      function tryCallback() {
-        attempt++;
-        console.log('[Push] Token callback attempt ' + attempt + '/' + maxRetries);
-        try {
-          onToken(tokenValue);
-          console.log('[Push] Token callback succeeded on attempt ' + attempt);
-        } catch (err) {
-          console.error('[Push] Token callback failed attempt ' + attempt + ':', err);
-          if (attempt < maxRetries) {
-            setTimeout(tryCallback, 5000);
-          } else {
-            console.error('[Push] Token callback failed after ' + maxRetries + ' attempts');
-          }
-        }
+      console.log('[Push] Token received (len=' + tokenValue.length + ')');
+      // Fire-and-forget; callback itself must NOT throw synchronously.
+      try {
+        Promise.resolve(onToken(tokenValue)).catch(function(err) {
+          console.error('[Push] onToken promise rejected:', err);
+        });
+      } catch (err) {
+        console.error('[Push] onToken threw synchronously:', err);
       }
-
-      tryCallback();
     });
 
     await PushNotifications.addListener('registrationError', function(err: any) {
-      console.error('[Push] Registration error:', JSON.stringify(err));
-      try {
-        window.alert('[DEBUG] Push registration error: ' + JSON.stringify(err));
-      } catch (e) {
-        // alert not available
-      }
+      console.error('[Push] registrationError:', err && err.error ? err.error : err);
     });
 
     await PushNotifications.addListener('pushNotificationReceived', async function(n: any) {
       try {
-        var { Toast } = await import('@capacitor/toast');
-        Toast.show({ text: n && n.title ? n.title : 'Notification', duration: 'long' });
-      } catch (e) {
+        const { Toast } = await import('@capacitor/toast');
+        await Toast.show({
+          text: (n && n.title) ? String(n.title) : 'Notification',
+          duration: 'long',
+        });
+      } catch {
         // silent
       }
     });
 
     await PushNotifications.addListener('pushNotificationActionPerformed', function() {
-      // User tapped notification
+      // User tapped notification — handle deep-link here if needed
     });
 
-    // Step 7: Register
-    console.log('[Push] Calling register...');
-    await PushNotifications.register();
-    console.log('[Push] register() OK');
+    // Step 7: Register — isolated try/catch so a native FCM failure
+    // (bad google-services.json / missing Play Services / package mismatch)
+    // is logged instead of crashing the app.
+    try {
+      console.log('[Push] Calling register()…');
+      await PushNotifications.register();
+      console.log('[Push] register() OK');
+    } catch (regErr) {
+      console.error('[Push] register() failed (non-fatal):', regErr);
+    }
 
   } catch (err) {
-    console.error('[Push] Fatal error:', err);
-    try {
-      window.alert('[DEBUG] Push fatal error: ' + String(err));
-    } catch (e) {
-      // alert not available
-    }
+    console.error('[Push] Fatal init error (caught):', err);
   }
 }
