@@ -15,81 +15,136 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export const COUNTRIES = [
-  'All Countries',
-  'Jordan', 'Palestine', 'Saudi Arabia', 'UAE', 'Kuwait', 'Bahrain',
-  'Oman', 'Qatar', 'Egypt', 'Iraq', 'Lebanon', 'Syria', 'Yemen',
-  'Libya', 'Tunisia', 'Algeria', 'Morocco', 'Sudan', 'Somalia',
-  'Mauritania', 'Djibouti', 'Comoros',
-  'Turkey', 'USA', 'UK', 'Germany', 'France', 'Canada', 'Australia',
-  'India', 'Pakistan', 'Malaysia', 'Indonesia', 'South Korea',
-  'Japan', 'Brazil', 'South Africa', 'Nigeria',
-];
+// ═══════════════════════════════════════════════════════════════════════
+// Sentinels for the "show everything" options.
+// Keep these in sync with the defaults in App.tsx.
+// ═══════════════════════════════════════════════════════════════════════
+export const ALL_COUNTRIES = 'All Countries';
+export const ALL_CATEGORIES = 'All Categories';
 
-// ═══════════════════════════════════════════════════════════════
-// offerMatchesCountry
+// ═══════════════════════════════════════════════════════════════════════
+// buildCountriesList — derives a unique, sorted list of country names from
+// the offers collection received from Firestore.
 //
-// Checks BOTH 'countries' (plural) AND 'country' (singular) fields.
-// ALL comparisons converted to UPPERCASE before matching.
+// Reads from BOTH `countries` (array or string) and `country` (string).
+// The sentinels "GLOBAL" and "ALL" are treated as "no specific country"
+// and do not appear as dropdown entries.
+// Always prepends ALL_COUNTRIES so the user can reset the filter.
+// ═══════════════════════════════════════════════════════════════════════
+export function buildCountriesList(offers: Offer[]): string[] {
+  const set = new Set<string>();
+  for (let i = 0; i < offers.length; i++) {
+    const data = offers[i] as any;
+    const plural = data.countries;
+    const singular = data.country;
+
+    if (Array.isArray(plural)) {
+      for (let j = 0; j < plural.length; j++) {
+        const s = String(plural[j] || '').trim();
+        if (!s) continue;
+        const upper = s.toUpperCase();
+        if (upper === 'GLOBAL' || upper === 'ALL') continue;
+        set.add(s);
+      }
+    } else if (typeof plural === 'string' && plural.trim()) {
+      const s = plural.trim();
+      const upper = s.toUpperCase();
+      if (upper !== 'GLOBAL' && upper !== 'ALL') set.add(s);
+    }
+
+    if (typeof singular === 'string' && singular.trim()) {
+      const s = singular.trim();
+      const upper = s.toUpperCase();
+      if (upper !== 'GLOBAL' && upper !== 'ALL') set.add(s);
+    }
+  }
+  return [ALL_COUNTRIES, ...Array.from(set).sort(function(a, b) {
+    return a.localeCompare(b);
+  })];
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// buildCategoriesList — derives a unique, sorted list of category names.
+// Reads the `category` field which can be a string OR string[].
+// Always prepends ALL_CATEGORIES.
+// ═══════════════════════════════════════════════════════════════════════
+export function buildCategoriesList(offers: Offer[]): string[] {
+  const set = new Set<string>();
+  for (let i = 0; i < offers.length; i++) {
+    const cat = offers[i].category;
+    if (Array.isArray(cat)) {
+      for (let j = 0; j < cat.length; j++) {
+        const s = String(cat[j] || '').trim();
+        if (s) set.add(s);
+      }
+    } else if (typeof cat === 'string' && cat.trim()) {
+      set.add(cat.trim());
+    }
+  }
+  return [ALL_CATEGORIES, ...Array.from(set).sort(function(a, b) {
+    return a.localeCompare(b);
+  })];
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// offerMatchesCountry — STRICT matcher.
 //
-// Returns true (show offer) when:
-//   - User selected "All Countries"
-//   - Offer has no country data (null/undefined/empty = Global)
-//   - Offer country list includes "GLOBAL" or "ALL"
-//   - Offer country list includes the selected country
-// ═══════════════════════════════════════════════════════════════
+// • ALL_COUNTRIES → every offer matches.
+// • Specific country → ONLY offers whose `countries` array (or `country`
+//   string) contains that exact value (case-insensitive) match.
+//   Offers without any country data are hidden when a specific country
+//   is selected. "GLOBAL"/"ALL" entries in an offer's countries list
+//   also count as a match (so globally-available brands still appear).
+// ═══════════════════════════════════════════════════════════════════════
 export function offerMatchesCountry(
   offer: Offer,
   selectedCountry: string
 ): boolean {
-  // All Countries → show everything
-  if (selectedCountry === 'All Countries') return true;
+  if (selectedCountry === ALL_COUNTRIES) return true;
 
-  // Read from BOTH possible field names
   const offerData = offer as any;
-  const pluralField = offerData.countries;
-  const singularField = offerData.country;
-
-  // Determine which field has actual data
-  let raw: any = null;
-
-  if (pluralField !== undefined && pluralField !== null) {
-    raw = pluralField;
-  } else if (singularField !== undefined && singularField !== null) {
-    raw = singularField;
-  }
-
-  // No country data → Global offer → show everywhere
-  if (raw === null || raw === undefined) return true;
-
-  // Empty string → Global
-  if (typeof raw === 'string' && raw.trim() === '') return true;
-
-  // Empty array → Global
-  if (Array.isArray(raw) && raw.length === 0) return true;
-
-  // Convert selected country to uppercase
+  const plural = offerData.countries;
+  const singular = offerData.country;
   const sel = selectedCountry.toUpperCase().trim();
 
-  // Array check: ["UAE", "JORDAN"]
-  if (Array.isArray(raw)) {
-    for (let i = 0; i < raw.length; i++) {
-      const val = String(raw[i] || '').toUpperCase().trim();
-      if (val === sel || val === 'GLOBAL' || val === 'ALL') {
-        return true;
-      }
+  if (Array.isArray(plural)) {
+    for (let i = 0; i < plural.length; i++) {
+      const val = String(plural[i] || '').toUpperCase().trim();
+      if (val === sel || val === 'GLOBAL' || val === 'ALL') return true;
     }
     return false;
   }
 
-  // String check: "Jordan" or "GLOBAL"
-  if (typeof raw === 'string') {
-    const val = raw.toUpperCase().trim();
+  if (typeof plural === 'string' && plural.trim()) {
+    const val = plural.toUpperCase().trim();
     return val === sel || val === 'GLOBAL' || val === 'ALL';
   }
 
-  // Unknown type → show everywhere (safe fallback)
-  return true;
+  if (typeof singular === 'string' && singular.trim()) {
+    const val = singular.toUpperCase().trim();
+    return val === sel || val === 'GLOBAL' || val === 'ALL';
+  }
+
+  // No country data → hide when a specific country is selected.
+  return false;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// offerMatchesCategory — STRICT category matcher (shared with App.tsx).
+// ═══════════════════════════════════════════════════════════════════════
+export function offerMatchesCategory(
+  offer: Offer,
+  selectedCategory: string
+): boolean {
+  if (selectedCategory === ALL_CATEGORIES) return true;
+  const sel = selectedCategory.toLowerCase().trim();
+  if (Array.isArray(offer.category)) {
+    for (let i = 0; i < offer.category.length; i++) {
+      if (String(offer.category[i] || '').toLowerCase().trim() === sel) return true;
+    }
+    return false;
+  }
+  return String(offer.category || '').toLowerCase().trim() === sel;
 }
 
 // 48hr unlock tracking
@@ -124,7 +179,6 @@ export function isOfferUnlocked(
 export function recordUnlock(id: string): void {
   const u = getUnlocks();
   u[id] = Date.now();
-  // Clean expired
   const now = Date.now();
   for (const k of Object.keys(u)) {
     if (now - u[k] >= UL_MS) delete u[k];
@@ -142,17 +196,19 @@ export function getTimeLeft(id: string): string | null {
   return `${h}h ${m}m`;
 }
 
-// ─── Searchable Country Picker ──────────────────────────────────
+// ─── Searchable Country Picker (dynamic list) ───────────────────────────
 const CountryPicker = ({
   value,
   onChange,
+  options,
 }: {
   value: string;
   onChange: (c: string) => void;
+  options: string[];
 }) => {
   const [open, setOpen] = React.useState(false);
   const [q, setQ] = React.useState('');
-  const list = COUNTRIES.filter((c) =>
+  const list = options.filter((c) =>
     c.toLowerCase().includes(q.toLowerCase())
   );
 
@@ -376,6 +432,7 @@ interface HomeScreenProps {
   selectedCategory: string;
   setSelectedCategory: (c: string) => void;
   categories: string[];
+  countries: string[];
   filteredOffers: Offer[];
   transactions: Transaction[];
   handleWatchAd: () => void;
@@ -398,6 +455,7 @@ export const HomeScreen = (props: HomeScreenProps) => {
     selectedCategory,
     setSelectedCategory,
     categories,
+    countries,
     filteredOffers,
     transactions,
     handleWatchAd,
@@ -439,10 +497,14 @@ export const HomeScreen = (props: HomeScreenProps) => {
       exit={{ opacity: 0, x: 10 }}
       className="space-y-5"
     >
-      {/* Country Picker */}
-      <CountryPicker value={selectedCountry} onChange={setSelectedCountry} />
+      {/* Country Picker — populated dynamically from Firestore offers */}
+      <CountryPicker
+        value={selectedCountry}
+        onChange={setSelectedCountry}
+        options={countries}
+      />
 
-      {/* Search + Categories */}
+      {/* Search + Categories (dynamic) */}
       <div className="space-y-3">
         <div className="relative group">
           <Search
@@ -570,7 +632,7 @@ export const HomeScreen = (props: HomeScreenProps) => {
           <div className="bg-white rounded-3xl p-12 border border-dashed border-zinc-200 text-center">
             <Gift size={32} className="text-zinc-300 mx-auto mb-3" />
             <h3 className="text-sm font-bold text-zinc-900 mb-1">
-              No rewards in {selectedCountry}
+              No rewards{selectedCountry !== ALL_COUNTRIES ? ` in ${selectedCountry}` : ''}
             </h3>
             <p className="text-xs text-zinc-500">
               Try "All Countries" or another selection.
