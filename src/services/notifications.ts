@@ -1,21 +1,27 @@
 // ═══════════════════════════════════════════════════════════════════════
-// Push Notifications — Crash-safe init (v13.1.1)
+// Push Notifications — v13.2.0 crash-proof init.
 //
-// Fixes applied vs previous version:
-//  • Removed ALL window.alert() calls. alert() from inside a Capacitor
-//    plugin callback blocks the WebView JS thread and, combined with AdMob
-//    initializing in parallel, triggers ANR/native crash on Android 13+.
-//  • Creates the "rewardhub_default" notification channel BEFORE register()
-//    so the FirebaseMessagingService doesn't crash on OEMs (Samsung/Xiaomi)
-//    that require the channel referenced by the manifest meta-data to exist.
-//  • Wraps PushNotifications.register() in its own try/catch so a native
-//    FCM failure (bad google-services.json, missing Play Services) is
-//    downgraded to a logged warning instead of an unhandled rejection.
-//  • onToken callback failures no longer retry indefinitely — Promise
-//    rejections are captured properly.
+// Why every single plugin call is in its own try/catch:
+//   A single unhandled rejection from a plugin bridge can be surfaced to
+//   native code and contribute to an ANR on slow devices. Per-call wrapping
+//   means a failure in (e.g.) `createChannel` doesn't abort `register`,
+//   and a failure in `register` doesn't abort the listener setup.
+//
+// This function is invoked by App.tsx *8 seconds* after the user is
+// authenticated — well after the App Open Ad has shown and closed, so
+// the permission dialog is no longer racing AdMob on the main thread.
 // ═══════════════════════════════════════════════════════════════════════
 
 let hasRun = false;
+
+async function safe<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
+  try {
+    return await fn();
+  } catch (err) {
+    console.error('[Push] ' + label + ' failed:', err);
+    return null;
+  }
+}
 
 export async function initPushNotifications(
   onToken: (token: string) => void
@@ -24,104 +30,104 @@ export async function initPushNotifications(
   hasRun = true;
 
   try {
-    // Step 1: Platform check
     const { Capacitor } = await import('@capacitor/core');
     if (!Capacitor.isNativePlatform()) {
       console.log('[Push] Web — skip');
       return;
     }
-
-    // Step 2: Plugin availability
     if (!Capacitor.isPluginAvailable('PushNotifications')) {
       console.log('[Push] Plugin not registered — skip');
       return;
     }
 
-    // Step 3: Import plugin
     const { PushNotifications } = await import('@capacitor/push-notifications');
 
-    // Step 4: Permissions
-    let perm = await PushNotifications.checkPermissions();
-    console.log('[Push] Current permission:', perm.receive);
+    // ─── Permission check (individually wrapped) ────────────────────
+    let perm = await safe('checkPermissions', function() {
+      return PushNotifications.checkPermissions();
+    });
+    if (!perm) return;
 
     if (perm.receive === 'prompt' || perm.receive === 'prompt-with-rationale') {
-      perm = await PushNotifications.requestPermissions();
-      console.log('[Push] User chose:', perm.receive);
+      const reqResult = await safe('requestPermissions', function() {
+        return PushNotifications.requestPermissions();
+      });
+      if (!reqResult) return;
+      perm = reqResult;
     }
 
     if (perm.receive !== 'granted') {
-      console.log('[Push] Permission denied — exiting init');
+      console.log('[Push] Permission not granted — stopping init');
       return;
     }
 
-    // Step 5: Create the notification channel BEFORE register()
-    // Must match the id referenced by
-    // com.google.firebase.messaging.default_notification_channel_id in the manifest.
-    try {
-      await PushNotifications.createChannel({
+    // ─── Channel (must exist before register() on Android 13+ OEMs) ──
+    await safe('createChannel', function() {
+      return PushNotifications.createChannel({
         id: 'rewardhub_default',
         name: 'RewardHub Notifications',
         description: 'Daily reminders and new offer alerts',
-        importance: 4,      // IMPORTANCE_HIGH
-        visibility: 1,      // VISIBILITY_PUBLIC
+        importance: 4,    // IMPORTANCE_HIGH
+        visibility: 1,    // VISIBILITY_PUBLIC
         lights: true,
         vibration: true,
       });
-      console.log('[Push] Channel created');
-    } catch (chanErr) {
-      console.warn('[Push] createChannel non-fatal:', chanErr);
-    }
-
-    // Step 6: Attach listeners BEFORE register()
-    await PushNotifications.addListener('registration', function(token: any) {
-      const tokenValue = token && token.value ? String(token.value) : '';
-      if (!tokenValue) {
-        console.error('[Push] Empty token received');
-        return;
-      }
-      console.log('[Push] Token received (len=' + tokenValue.length + ')');
-      // Fire-and-forget; callback itself must NOT throw synchronously.
-      try {
-        Promise.resolve(onToken(tokenValue)).catch(function(err) {
-          console.error('[Push] onToken promise rejected:', err);
-        });
-      } catch (err) {
-        console.error('[Push] onToken threw synchronously:', err);
-      }
     });
 
-    await PushNotifications.addListener('registrationError', function(err: any) {
-      console.error('[Push] registrationError:', err && err.error ? err.error : err);
+    // ─── Listeners (each one isolated) ──────────────────────────────
+    await safe('addListener:registration', function() {
+      return PushNotifications.addListener('registration', function(token: any) {
+        try {
+          const tokenValue = token && token.value ? String(token.value) : '';
+          if (!tokenValue) {
+            console.error('[Push] Empty token');
+            return;
+          }
+          // Fire-and-forget — rejections can't escape.
+          Promise.resolve().then(function() { return onToken(tokenValue); })
+            .catch(function(e) { console.error('[Push] onToken rejected:', e); });
+        } catch (e) {
+          console.error('[Push] registration handler threw:', e);
+        }
+      });
     });
 
-    await PushNotifications.addListener('pushNotificationReceived', async function(n: any) {
-      try {
-        const { Toast } = await import('@capacitor/toast');
-        await Toast.show({
-          text: (n && n.title) ? String(n.title) : 'Notification',
-          duration: 'long',
-        });
-      } catch {
-        // silent
-      }
+    await safe('addListener:registrationError', function() {
+      return PushNotifications.addListener('registrationError', function(err: any) {
+        console.error('[Push] registrationError:', err && err.error ? err.error : err);
+      });
     });
 
-    await PushNotifications.addListener('pushNotificationActionPerformed', function() {
-      // User tapped notification — handle deep-link here if needed
+    await safe('addListener:received', function() {
+      return PushNotifications.addListener('pushNotificationReceived', async function(n: any) {
+        try {
+          const { Toast } = await import('@capacitor/toast');
+          await Toast.show({
+            text: (n && n.title) ? String(n.title) : 'Notification',
+            duration: 'long',
+          });
+        } catch {
+          // silent
+        }
+      });
     });
 
-    // Step 7: Register — isolated try/catch so a native FCM failure
-    // (bad google-services.json / missing Play Services / package mismatch)
-    // is logged instead of crashing the app.
-    try {
-      console.log('[Push] Calling register()…');
-      await PushNotifications.register();
-      console.log('[Push] register() OK');
-    } catch (regErr) {
-      console.error('[Push] register() failed (non-fatal):', regErr);
-    }
+    await safe('addListener:actionPerformed', function() {
+      return PushNotifications.addListener('pushNotificationActionPerformed', function() {
+        // User tapped notification
+      });
+    });
+
+    // ─── Let the JS/native bridge settle before calling register() ─
+    await new Promise(function(r) { setTimeout(r, 500); });
+
+    await safe('register', function() {
+      return PushNotifications.register();
+    });
+
+    console.log('[Push] init complete');
 
   } catch (err) {
-    console.error('[Push] Fatal init error (caught):', err);
+    console.error('[Push] Fatal init error (caught at top level):', err);
   }
 }
