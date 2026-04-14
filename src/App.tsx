@@ -13,7 +13,16 @@ import { Offer, UserProfile, Transaction } from './types';
 import { useAds } from './hooks/useAds';
 import { firebaseService, FirebaseUser, isConfigValid } from './services/firebase';
 import { APP_NAME, APP_VERSION } from './constants';
-import { HomeScreen, offerMatchesCountry, recordUnlock } from './components/HomeScreen';
+import {
+  HomeScreen,
+  offerMatchesCountry,
+  offerMatchesCategory,
+  recordUnlock,
+  buildCountriesList,
+  buildCategoriesList,
+  ALL_COUNTRIES,
+  ALL_CATEGORIES,
+} from './components/HomeScreen';
 import icon from '../assets/icon.png';
 
 function cn(...inputs: ClassValue[]) {
@@ -270,7 +279,7 @@ export default function App() {
 
   // ─── Country ──────────────────────────────────────────────────
   var [country, setCountry] = useState<string>(function() {
-    return localStorage.getItem('rh_country') || 'All Countries';
+    return localStorage.getItem('rh_country') || ALL_COUNTRIES;
   });
 
   var onCountryChange = useCallback(function(c: string) {
@@ -423,11 +432,38 @@ export default function App() {
 
   // ─── Search, Categories, Transactions ────────────────────────
   var [searchQuery, setSearchQuery] = useState('');
-  var [selectedCategory, setSelectedCategory] = useState('all');
-  var categories = [
-    'all', 'Fashion', 'Delivery apps', 'Shopping', 'Travel',
-    'Food', 'General', 'Entertainment', 'Tech',
-  ];
+  var [selectedCategory, setSelectedCategory] = useState<string>(ALL_CATEGORIES);
+
+  // ═══════════════════════════════════════════════════════════════
+  // DYNAMIC FILTER LISTS — derived from the offers snapshot.
+  // Updates automatically whenever Firestore pushes a new offers[]
+  // because offers is the only dep. Adding a new country or category
+  // value to any offer document in the `offers` collection causes the
+  // dropdown to reflect it on the next snapshot — no redeploy needed.
+  // ═══════════════════════════════════════════════════════════════
+  var categories = useMemo(function() {
+    return buildCategoriesList(offers);
+  }, [offers]);
+
+  var countries = useMemo(function() {
+    return buildCountriesList(offers);
+  }, [offers]);
+
+  // If the currently-selected country/category is no longer present in
+  // the list (e.g. the last offer tagged with it was removed in Firestore),
+  // gracefully reset to the "All" sentinel.
+  useEffect(function() {
+    if (countries.indexOf(country) === -1) {
+      setCountry(ALL_COUNTRIES);
+      localStorage.setItem('rh_country', ALL_COUNTRIES);
+    }
+  }, [countries, country]);
+
+  useEffect(function() {
+    if (categories.indexOf(selectedCategory) === -1) {
+      setSelectedCategory(ALL_CATEGORIES);
+    }
+  }, [categories, selectedCategory]);
 
   var [localTx, setLocalTx] = useState<Transaction[]>(function() {
     try {
@@ -470,48 +506,23 @@ export default function App() {
     return function() { unsub(); };
   }, [onOffersChange]);
 
-  // DEBUG: Show first offer's raw country data once
-  var debugShownRef = useRef(false);
-
   // ─── Filtered Offers ──────────────────────────────────────────
+  // Strict rules:
+  //   • ALL_CATEGORIES + ALL_COUNTRIES ⇒ everything passes the filter.
+  //   • Specific category  ⇒ offer's `category` (string or string[]) must include it.
+  //   • Specific country   ⇒ offer's `countries`/`country` must include it
+  //                           (or contain "GLOBAL"/"ALL" to match any country).
+  //     Offers with no country data are hidden when a specific country is picked.
   var filteredOffers = useMemo(function() {
-    // DEBUG: Alert first offer's country data for debugging
-    if (offers.length > 0 && !debugShownRef.current) {
-      debugShownRef.current = true;
-      var sample = offers[0] as any;
-      var debugMsg =
-        '[DEBUG] First offer: ' + sample.brand +
-        '\ncountries field: ' + JSON.stringify(sample.countries) +
-        '\ncountry field: ' + JSON.stringify(sample.country) +
-        '\nSelected: ' + country +
-        '\nTotal offers: ' + offers.length;
-      console.log(debugMsg);
-      // Show alert for first-time debugging
-      try {
-        window.alert(debugMsg);
-      } catch (e) {
-        // alert not available
-      }
-    }
-
     var result: Offer[] = [];
 
     for (var i = 0; i < offers.length; i++) {
       var o = offers[i];
 
-      // 1. Category filter
-      var sel = selectedCategory.toLowerCase();
-      if (sel !== 'all') {
-        var offerCats: string[];
-        if (Array.isArray(o.category)) {
-          offerCats = o.category.map(function(c) { return String(c).toLowerCase(); });
-        } else {
-          offerCats = [String(o.category || '').toLowerCase()];
-        }
-        if (offerCats.indexOf(sel) === -1) continue;
-      }
+      // 1. Category filter (strict)
+      if (!offerMatchesCategory(o, selectedCategory)) continue;
 
-      // 2. Country filter
+      // 2. Country filter (strict)
       if (!offerMatchesCountry(o, country)) continue;
 
       // 3. Search filter
@@ -805,6 +816,7 @@ export default function App() {
                 selectedCategory={selectedCategory}
                 setSelectedCategory={setSelectedCategory}
                 categories={categories}
+                countries={countries}
                 filteredOffers={filteredOffers}
                 transactions={transactions}
                 handleWatchAd={handleWatchAd}
