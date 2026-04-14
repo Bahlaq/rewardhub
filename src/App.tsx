@@ -10,7 +10,7 @@ import { Browser } from '@capacitor/browser';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { Offer, UserProfile, Transaction } from './types';
-import { useAds } from './hooks/useAds';
+import { useAds, initAdMobEarly } from './hooks/useAds';
 import { firebaseService, FirebaseUser, isConfigValid } from './services/firebase';
 import { APP_NAME, APP_VERSION } from './constants';
 import {
@@ -223,15 +223,34 @@ export default function App() {
   var [webNum, setWebNum] = useState(1);
   var [webTotal, setWebTotal] = useState(1);
   var webRef = useRef<((v: boolean) => void) | null>(null);
-  var bgRef = useRef(0);
 
   // ═══════════════════════════════════════════════════════════════
-  // STATE: notificationsDone — controls App Open Ad timing
-  // Starts false. Set to true when notification flow completes
-  // (whether succeeded, failed, or timed out).
-  // App Open Ad useEffect depends on this state.
+  // v13.2.0 — Crash-proof init refactor.
+  //
+  // Previous design coupled the App Open Ad to a `notificationsDone`
+  // flag. That created two fatal problems:
+  //   • If the permission dialog destroyed MainActivity (Cause #1 —
+  //     missing configChanges flags on Samsung/Xiaomi OEMs), the flag
+  //     was never set in the original instance, and the recreated
+  //     activity raced AdMob init against FCM registration.
+  //   • The App Open Ad was blocked waiting for a signal that could
+  //     never arrive, which is why users saw no ad at all.
+  //
+  // New design:
+  //   • Phase 1 (T+0):   install global error swallowers, warm up
+  //     AdMob SDK in the background.
+  //   • Phase 2 (T+2s):  show App Open Ad once, independent of any
+  //     notification state.
+  //   • Phase 3 (T+8s after auth): init push notifications.
+  //     By then the App Open Ad has already shown + closed, so FCM
+  //     registration no longer competes with ad activity on the main
+  //     thread.
+  //
+  // Each phase is wrapped in try/catch. A failure in one phase does
+  // not block the others.
   // ═══════════════════════════════════════════════════════════════
-  var [notificationsDone, setNotificationsDone] = useState(false);
+  var appOpenShownRef = useRef(false);
+  var notifInitStartedRef = useRef(false);
 
   // ─── Cooldown ─────────────────────────────────────────────────
   var [cdActive, setCdActive] = useState(false);
@@ -304,89 +323,91 @@ export default function App() {
   } = useAds(fbUser?.uid);
 
   // ═══════════════════════════════════════════════════════════════
-  // SEQUENCE: Notifications FIRST → then mark done → then Ad shows
-  //
-  // Flow:
-  //   1. fbUser.uid becomes available
-  //   2. This useEffect runs
-  //   3. Calls initPushNotifications (which handles permission dialog)
-  //   4. When done (success, fail, or after 15s timeout): notificationsDone = true
-  //   5. The App Open Ad useEffect (below) fires because it depends on notificationsDone
-  //   6. App Open Ad shows 1 second after notificationsDone becomes true
+  // PHASE 1 — mount: install global error swallowers + warm AdMob SDK.
+  // This runs exactly once, before auth, before notifications, before
+  // any ad attempt. Its only job is to make failure modes survivable
+  // and to have the AdMob SDK already initialised by the time we try
+  // to show the App Open Ad.
   // ═══════════════════════════════════════════════════════════════
   useEffect(function() {
-    if (!fbUser?.uid) {
-      // No user yet — mark notifications as done so ads can show for guests
-      setNotificationsDone(true);
-      return;
+    if (typeof window === 'undefined') return;
+
+    var onUncaught = function(ev: ErrorEvent) {
+      console.error('[Global] Uncaught:', ev.message, ev.filename, ev.lineno);
+      // Swallow so the Capacitor native bridge doesn't surface the
+      // error to Android as an unhandled exception.
+      ev.preventDefault();
+    };
+    var onRejection = function(ev: PromiseRejectionEvent) {
+      console.error('[Global] Unhandled rejection:', ev.reason);
+      ev.preventDefault();
+    };
+
+    window.addEventListener('error', onUncaught);
+    window.addEventListener('unhandledrejection', onRejection);
+
+    // Warm up AdMob SDK via the shared useAds singleton (non-blocking).
+    if (isNative) {
+      initAdMobEarly()
+        .then(function(ok) { console.log('[Init] AdMob pre-warm:', ok ? 'ok' : 'failed'); })
+        .catch(function(err) { console.warn('[Init] AdMob pre-warm threw:', err); });
     }
+
+    return function() {
+      window.removeEventListener('error', onUncaught);
+      window.removeEventListener('unhandledrejection', onRejection);
+    };
+  }, [isNative]);
+
+  // ═══════════════════════════════════════════════════════════════
+  // PHASE 2 — T+2s: show App Open Ad exactly once per process lifetime.
+  // Independent of notifications. Independent of auth. If AdMob
+  // wasn't ready, showAppOpenAd() no-ops and logs a warning.
+  // ═══════════════════════════════════════════════════════════════
+  useEffect(function() {
+    if (!isNative) return;
+    if (appOpenShownRef.current) return;
+
+    var t = setTimeout(function() {
+      if (appOpenShownRef.current) return;
+      appOpenShownRef.current = true;
+      console.log('[Init] Firing App Open Ad (T+2s)');
+      showAppOpenAd().catch(function(err) {
+        console.warn('[Init] App Open Ad non-fatal:', err);
+      });
+    }, 2000);
+
+    return function() { clearTimeout(t); };
+  }, [isNative, showAppOpenAd]);
+
+  // ═══════════════════════════════════════════════════════════════
+  // PHASE 3 — T+8s after auth: initialise push notifications.
+  // By now the App Open Ad has already shown and closed, so the
+  // permission dialog no longer competes with ad activity on the
+  // main thread. Every inner call is defensively wrapped.
+  // ═══════════════════════════════════════════════════════════════
+  useEffect(function() {
+    if (!fbUser?.uid || !isNative) return;
+    if (notifInitStartedRef.current) return;
 
     var uid = fbUser.uid;
-    var timedOut = false;
+    var t = setTimeout(function() {
+      if (notifInitStartedRef.current) return;
+      notifInitStartedRef.current = true;
 
-    // Safety timeout: if notifications take more than 15 seconds, move on
-    var timeout = setTimeout(function() {
-      timedOut = true;
-      console.log('[App] Notification timeout (15s) — moving to ads');
-      setNotificationsDone(true);
-    }, 15000);
-
-    // Start notification flow
-    import('./services/notifications').then(function(mod) {
-      return mod.initPushNotifications(function(token: string) {
-        console.log('[App] Got FCM token, saving to Firestore...');
-        firebaseService.saveFcmToken(uid, token)
-          .then(function() { console.log('[App] FCM token saved OK'); })
-          .catch(function(err) { console.error('[App] FCM token save FAILED:', err); });
+      import('./services/notifications').then(function(mod) {
+        return mod.initPushNotifications(function(token: string) {
+          firebaseService.saveFcmToken(uid, token).catch(function(err) {
+            console.error('[App] saveFcmToken failed:', err);
+          });
+        });
+      }).catch(function(err) {
+        console.error('[App] Notification module load failed:', err);
       });
-    }).then(function() {
-      if (!timedOut) {
-        clearTimeout(timeout);
-        console.log('[App] Notifications complete — enabling ads');
-        setNotificationsDone(true);
-      }
-    }).catch(function(err) {
-      console.error('[App] Notification error (non-fatal):', err);
-      if (!timedOut) {
-        clearTimeout(timeout);
-        setNotificationsDone(true);
-      }
-    });
+    }, 8000);
 
-    return function() { clearTimeout(timeout); };
-  }, [fbUser?.uid]);
-
-  // ═══════════════════════════════════════════════════════════════
-  // APP OPEN AD — fires when notificationsDone becomes true
-  // This guarantees: Permissions → Ad Init → Ad Show (no deadlock)
-  // ═══════════════════════════════════════════════════════════════
-  useEffect(function() {
-    if (!notificationsDone) return;
-    console.log('[App] notificationsDone=true → showing App Open Ad in 1s');
-    var timer = setTimeout(function() {
-      showAppOpenAd();
-    }, 1000);
-    return function() { clearTimeout(timer); };
-  }, [notificationsDone, showAppOpenAd]);
-
-  // Resume from background (5s threshold, only if notifications done)
-  useEffect(function() {
-    function handler() {
-      if (document.visibilityState === 'hidden') {
-        bgRef.current = Date.now();
-      } else if (
-        document.visibilityState === 'visible' &&
-        notificationsDone &&
-        bgRef.current > 0 &&
-        Date.now() - bgRef.current >= 5000
-      ) {
-        console.log('[App] Resume — showing App Open Ad');
-        showAppOpenAd();
-      }
-    }
-    document.addEventListener('visibilitychange', handler);
-    return function() { document.removeEventListener('visibilitychange', handler); };
-  }, [showAppOpenAd, notificationsDone]);
+    return function() { clearTimeout(t); };
+  }, [fbUser?.uid, isNative]);
 
   // ─── Firestore Listeners ──────────────────────────────────────
   var [fsClaims, setFsClaims] = useState<Transaction[]>([]);
