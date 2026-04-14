@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+# v13.2.0 — Crash-proof manifest.
+#
+# Root cause of the "app vanishes when notification dialog appears": on
+# Samsung OneUI 5/6 and Xiaomi HyperOS (Android 13+), showing the
+# POST_NOTIFICATIONS dialog triggers a `density` or `layoutDirection`
+# configuration change. When those are not listed in android:configChanges,
+# Android destroys MainActivity, which kills the WebView and wipes all JS
+# state — indistinguishable from a crash to the user.
+#
+# Fix: declare EVERY configChanges flag that Android may deliver, so the
+# activity handles them itself without being destroyed.
+# Also add largeHeap and hardwareAccelerated for AdMob full-screen stability.
 import os
 MANIFEST_PATH = "android/app/src/main/AndroidManifest.xml"
 MANIFEST = '''<?xml version="1.0" encoding="utf-8"?>
@@ -7,6 +19,8 @@ MANIFEST = '''<?xml version="1.0" encoding="utf-8"?>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -14,12 +28,17 @@ MANIFEST = '''<?xml version="1.0" encoding="utf-8"?>
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="true"
+        android:hardwareAccelerated="true"
+        android:largeHeap="true">
         <activity
             android:name=".MainActivity"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|density|fontScale|navigation|touchscreen|layoutDirection|mnc|mcc"
             android:exported="true"
             android:launchMode="singleTask"
+            android:alwaysRetainTaskState="true"
+            android:resizeableActivity="true"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/AppTheme.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -44,10 +63,14 @@ MANIFEST = '''<?xml version="1.0" encoding="utf-8"?>
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
             android:value="ca-app-pub-1560161047680443~4972275282" />
+        <meta-data
+            android:name="com.google.android.gms.ads.DELAY_APP_MEASUREMENT_INIT"
+            android:value="true" />
         <activity
             android:name="com.google.android.gms.ads.AdActivity"
-            android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|uiMode|screenSize|smallestScreenSize"
-            android:theme="@android:style/Theme.Translucent" />
+            android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|density|fontScale|layoutDirection"
+            android:theme="@android:style/Theme.Translucent"
+            android:exported="false" />
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="rewardhub_default" />
