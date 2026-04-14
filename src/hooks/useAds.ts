@@ -36,11 +36,21 @@ async function initAdMob(): Promise<boolean> {
       return true;
     } catch (err) {
       console.error('[AdMob] Init failed:', err);
+      admobInitPromise = null; // Allow a retry on the next call.
       return false;
     }
   })();
 
   return admobInitPromise;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// initAdMobEarly — exposed for App.tsx's mount pre-warm. Shares the
+// same singleton (admobReady / AdMobPlugin) used by every hook method
+// so a later showAppOpenAd() / showBanner() call is an instant cache hit.
+// ═══════════════════════════════════════════════════════════════════════
+export function initAdMobEarly(): Promise<boolean> {
+  return initAdMob();
 }
 
 export function useAds(uid?: string) {
