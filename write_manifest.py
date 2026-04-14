@@ -14,7 +14,8 @@
 import os
 MANIFEST_PATH = "android/app/src/main/AndroidManifest.xml"
 MANIFEST = '''<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
@@ -70,7 +71,8 @@ MANIFEST = '''<?xml version="1.0" encoding="utf-8"?>
             android:name="com.google.android.gms.ads.AdActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|density|fontScale|layoutDirection"
             android:theme="@android:style/Theme.Translucent"
-            android:exported="false" />
+            android:exported="false"
+            tools:replace="android:configChanges" />
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="rewardhub_default" />
