@@ -381,39 +381,49 @@ export default function App() {
   }, [isNative, showAppOpenAd]);
 
   // ═══════════════════════════════════════════════════════════════
-  // PHASE 3 — DISABLED in v13.2.1 to stop the "tap Allow → app dies"
-  // crash. The underlying cause is native: PushNotifications.register()
-  // invokes FirebaseMessaging which, if google-services.json or the
-  // FirebaseApp init on the Android side is not perfectly aligned with
-  // the package name `com.rewardhub.official.app`, throws a Java
-  // exception that bypasses every JS try/catch and kills the process.
+  // PHASE 3 — push-notification init. Fully DECOUPLED from Phase 1
+  // (AdMob warm) and Phase 2 (App Open Ad). No shared state with the
+  // ad pipeline.
   //
-  // We keep src/services/notifications.ts and the manifest permissions
-  // intact so re-enabling is a one-line change: uncomment the block
-  // below once google-services.json / MainActivity.java have been
-  // verified. Until then the app is stable with no FCM delivery.
+  // Timeline on a native device:
+  //   • T+0           — app mounts, AdMob starts warming (Phase 1)
+  //   • T+2s          — App Open Ad shows (Phase 2)
+  //   • T+~6s         — user closes / finishes App Open Ad
+  //   • T+8s after auth — this Phase 3 effect fires initPushNotifications
+  //                       which: checks native → creates channel →
+  //                       checks/requests permission → adds listeners
+  //                       → schedules register() 10s later via its own
+  //                       internal setTimeout
+  //   • T+~18s after auth — register() actually fires with the app,
+  //                         the Capacitor bridge, and AdMob all idle
   //
-  // Intentional silent no-op — DO NOT remove this comment.
+  // Guarded by isNative and by notifInitStartedRef so it runs at most
+  // once per process lifetime.
   // ═══════════════════════════════════════════════════════════════
-  // useEffect(function() {
-  //   if (!fbUser?.uid || !isNative) return;
-  //   if (notifInitStartedRef.current) return;
-  //   var uid = fbUser.uid;
-  //   var t = setTimeout(function() {
-  //     if (notifInitStartedRef.current) return;
-  //     notifInitStartedRef.current = true;
-  //     import('./services/notifications').then(function(mod) {
-  //       return mod.initPushNotifications(function(token: string) {
-  //         firebaseService.saveFcmToken(uid, token).catch(function(err) {
-  //           console.error('[App] saveFcmToken failed:', err);
-  //         });
-  //       });
-  //     }).catch(function(err) {
-  //       console.error('[App] Notification module load failed:', err);
-  //     });
-  //   }, 8000);
-  //   return function() { clearTimeout(t); };
-  // }, [fbUser?.uid, isNative]);
+  useEffect(function() {
+    if (!fbUser?.uid) return;
+    if (!isNative) return;
+    if (notifInitStartedRef.current) return;
+
+    var uid = fbUser.uid;
+    var t = setTimeout(function() {
+      if (notifInitStartedRef.current) return;
+      notifInitStartedRef.current = true;
+
+      import('./services/notifications').then(function(mod) {
+        return mod.initPushNotifications(function(token: string) {
+          // onToken: fire-and-forget, never throws synchronously.
+          firebaseService.saveFcmToken(uid, token).catch(function(err) {
+            console.error('[App] saveFcmToken failed:', err);
+          });
+        });
+      }).catch(function(err) {
+        console.error('[App] Notification module load failed:', err);
+      });
+    }, 8000);
+
+    return function() { clearTimeout(t); };
+  }, [fbUser?.uid, isNative]);
 
   // ─── Firestore Listeners ──────────────────────────────────────
   var [fsClaims, setFsClaims] = useState<Transaction[]>([]);
