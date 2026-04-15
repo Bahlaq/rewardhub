@@ -381,33 +381,39 @@ export default function App() {
   }, [isNative, showAppOpenAd]);
 
   // ═══════════════════════════════════════════════════════════════
-  // PHASE 3 — T+8s after auth: initialise push notifications.
-  // By now the App Open Ad has already shown and closed, so the
-  // permission dialog no longer competes with ad activity on the
-  // main thread. Every inner call is defensively wrapped.
+  // PHASE 3 — DISABLED in v13.2.1 to stop the "tap Allow → app dies"
+  // crash. The underlying cause is native: PushNotifications.register()
+  // invokes FirebaseMessaging which, if google-services.json or the
+  // FirebaseApp init on the Android side is not perfectly aligned with
+  // the package name `com.rewardhub.official.app`, throws a Java
+  // exception that bypasses every JS try/catch and kills the process.
+  //
+  // We keep src/services/notifications.ts and the manifest permissions
+  // intact so re-enabling is a one-line change: uncomment the block
+  // below once google-services.json / MainActivity.java have been
+  // verified. Until then the app is stable with no FCM delivery.
+  //
+  // Intentional silent no-op — DO NOT remove this comment.
   // ═══════════════════════════════════════════════════════════════
-  useEffect(function() {
-    if (!fbUser?.uid || !isNative) return;
-    if (notifInitStartedRef.current) return;
-
-    var uid = fbUser.uid;
-    var t = setTimeout(function() {
-      if (notifInitStartedRef.current) return;
-      notifInitStartedRef.current = true;
-
-      import('./services/notifications').then(function(mod) {
-        return mod.initPushNotifications(function(token: string) {
-          firebaseService.saveFcmToken(uid, token).catch(function(err) {
-            console.error('[App] saveFcmToken failed:', err);
-          });
-        });
-      }).catch(function(err) {
-        console.error('[App] Notification module load failed:', err);
-      });
-    }, 8000);
-
-    return function() { clearTimeout(t); };
-  }, [fbUser?.uid, isNative]);
+  // useEffect(function() {
+  //   if (!fbUser?.uid || !isNative) return;
+  //   if (notifInitStartedRef.current) return;
+  //   var uid = fbUser.uid;
+  //   var t = setTimeout(function() {
+  //     if (notifInitStartedRef.current) return;
+  //     notifInitStartedRef.current = true;
+  //     import('./services/notifications').then(function(mod) {
+  //       return mod.initPushNotifications(function(token: string) {
+  //         firebaseService.saveFcmToken(uid, token).catch(function(err) {
+  //           console.error('[App] saveFcmToken failed:', err);
+  //         });
+  //       });
+  //     }).catch(function(err) {
+  //       console.error('[App] Notification module load failed:', err);
+  //     });
+  //   }, 8000);
+  //   return function() { clearTimeout(t); };
+  // }, [fbUser?.uid, isNative]);
 
   // ─── Firestore Listeners ──────────────────────────────────────
   var [fsClaims, setFsClaims] = useState<Transaction[]>([]);
