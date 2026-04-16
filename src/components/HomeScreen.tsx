@@ -613,9 +613,26 @@ export const HomeScreen = (props: HomeScreenProps) => {
       {/* Offer cards */}
       <div className="grid gap-4">
         {isLoading ? (
-          <div className="flex justify-center py-12">
-            <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-          </div>
+          // Skeleton cards — visually lighter than a spinner, feel instant.
+          <>
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="bg-white rounded-2xl border border-zinc-200 overflow-hidden shadow-sm animate-pulse"
+              >
+                <div className="h-40 bg-zinc-100" />
+                <div className="p-4">
+                  <div className="h-4 w-24 bg-zinc-100 rounded mb-2" />
+                  <div className="h-3 w-48 bg-zinc-100 rounded mb-1" />
+                  <div className="h-3 w-32 bg-zinc-100 rounded mb-4" />
+                  <div className="flex items-center justify-between">
+                    <div className="h-6 w-16 bg-zinc-100 rounded" />
+                    <div className="h-8 w-20 bg-zinc-100 rounded-xl" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </>
         ) : filteredOffers.length > 0 ? (
           filteredOffers.map((o) => (
             <OfferCard
@@ -624,24 +641,4 @@ export const HomeScreen = (props: HomeScreenProps) => {
               onClaim={handleClaimOffer}
               user={user}
               unlocked={isOfferUnlocked(o.id, transactions, o.brand)}
-              code={transactions.find((t) => t.title === o.brand)?.code}
-              timeLeft={getTimeLeft(o.id)}
-            />
-          ))
-        ) : (
-          <div className="bg-white rounded-3xl p-12 border border-dashed border-zinc-200 text-center">
-            <Gift size={32} className="text-zinc-300 mx-auto mb-3" />
-            <h3 className="text-sm font-bold text-zinc-900 mb-1">
-              No rewards{selectedCountry !== ALL_COUNTRIES ? ` in ${selectedCountry}` : ''}
-            </h3>
-            <p className="text-xs text-zinc-500">
-              Try "All Countries" or another selection.
-            </p>
-          </div>
-        )}
-      </div>
-
-      <div className="h-[100px]" />
-    </motion.div>
-  );
-};
+       
