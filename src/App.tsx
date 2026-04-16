@@ -1,3 +1,4 @@
+// App.tsx — v13.4.0 (refreshed 2026-04-16). Push plugin removed for crash-free startup.
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
