@@ -1,3 +1,4 @@
+// useAds — v13.4.0 (refreshed 2026-04-16). initAdMobEarly + retry on failure.
 import { useState, useCallback, useRef } from 'react';
 import { Offer } from '../types';
 import { firebaseService } from '../services/firebase';
