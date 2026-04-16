@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-# v13.2.0 — Crash-proof manifest.
+# v13.4.0 — Stable manifest.
 #
-# Root cause of the "app vanishes when notification dialog appears": on
-# Samsung OneUI 5/6 and Xiaomi HyperOS (Android 13+), showing the
-# POST_NOTIFICATIONS dialog triggers a `density` or `layoutDirection`
-# configuration change. When those are not listed in android:configChanges,
-# Android destroys MainActivity, which kills the WebView and wipes all JS
-# state — indistinguishable from a crash to the user.
+# @capacitor/push-notifications has been removed from package.json so
+# the POST_NOTIFICATIONS / c2dm.RECEIVE permissions and the FCM
+# default_notification_channel_id meta-data are no longer relevant.
+# Stripping them prevents Samsung/Xiaomi OEM bloatware from ever
+# prompting the user on our behalf.
 #
-# Fix: declare EVERY configChanges flag that Android may deliver, so the
-# activity handles them itself without being destroyed.
-# Also add largeHeap and hardwareAccelerated for AdMob full-screen stability.
+# Kept: comprehensive configChanges on MainActivity and AdActivity to
+# prevent activity-destroy on density/fontScale/layoutDirection changes,
+# plus largeHeap / hardwareAccelerated for smooth AdMob fullscreen ads.
 import os
 MANIFEST_PATH = "android/app/src/main/AndroidManifest.xml"
 MANIFEST = '''<?xml version="1.0" encoding="utf-8"?>
@@ -19,9 +18,6 @@ MANIFEST = '''<?xml version="1.0" encoding="utf-8"?>
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -73,9 +69,6 @@ MANIFEST = '''<?xml version="1.0" encoding="utf-8"?>
             android:theme="@android:style/Theme.Translucent"
             android:exported="false"
             tools:replace="android:configChanges" />
-        <meta-data
-            android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="rewardhub_default" />
     </application>
 </manifest>
 '''
