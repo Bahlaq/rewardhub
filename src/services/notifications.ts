@@ -1,158 +1,48 @@
-// ═══════════════════════════════════════════════════════════════════════
-// Push Notifications — v13.3.0 Safety-First refactor.
-//
-// Executes in this exact order (matches the 5-point spec):
-//   1. DECOUPLE       — no AdMob call here, no shared state with the ad
-//                       pipeline. This module cannot affect AdMob init.
-//   2. NATIVE CHECK   — every call guarded behind Capacitor.isNativePlatform().
-//                       Web and unsupported platforms return immediately.
-//   3. CHANNEL FIRST  — createChannel('rewardhub_default') runs BEFORE
-//                       checkPermissions / requestPermissions, so any
-//                       incoming notification from a background path has
-//                       a valid channel to target even before the user
-//                       answers the dialog.
-//   4. ISOLATE LISTEN — every addListener is in its own try/catch.
-//                       Callbacks contain no blocking code (no alert, no
-//                       Toast, no network, no throw paths) — they only
-//                       schedule work as a microtask.
-//   5. DELAYED START  — PushNotifications.register() is wrapped in a
-//                       setTimeout(10_000) so the app, the Capacitor
-//                       bridge, and any ad activity are fully settled
-//                       before FCM registration is triggered.
-//
-// Throughout: every plugin call goes through safe(), so a failure in any
-// one step never cascades into the next.
-// ═══════════════════════════════════════════════════════════════════════
-
-let hasRun = false;
-
-async function safe<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
-  try {
-    return await fn();
-  } catch (err) {
-    console.error('[Push] ' + label + ' failed:', err);
-    return null;
+{
+  "name": "react-example",
+  "private": true,
+  "version": "13.4.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port=3000 --host=0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit",
+    "cap:add": "cap add android",
+    "cap:sync": "cap sync android",
+    "build:android": "npm run build && npx cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/browser": "^6.0.6",
+    "@capacitor/clipboard": "^6.0.3",
+    "@capacitor/core": "^6.0.0",
+    "@capacitor/toast": "^6.0.4",
+    "@capacitor-community/admob": "^6.0.0",
+    "@codetrix-studio/capacitor-google-auth": "^3.4.0-rc.4",
+    "@tailwindcss/vite": "^4.1.14",
+    "@vitejs/plugin-react": "^5.0.4",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "firebase": "^12.10.0",
+    "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^3.5.0",
+    "vite": "^6.2.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.0.0",
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "autoprefixer": "^10.4.21",
+    "tailwindcss": "^4.1.14",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
   }
-}
-
-export async function initPushNotifications(
-  onToken: (token: string) => void
-): Promise<void> {
-  if (hasRun) return;
-  hasRun = true;
-
-  // ─── (2) NATIVE CHECK ──────────────────────────────────────────
-  let Capacitor: any;
-  try {
-    const core = await import('@capacitor/core');
-    Capacitor = core.Capacitor;
-  } catch (err) {
-    console.error('[Push] @capacitor/core import failed:', err);
-    return;
-  }
-  if (!Capacitor || !Capacitor.isNativePlatform || !Capacitor.isNativePlatform()) {
-    console.log('[Push] not a native platform — skip');
-    return;
-  }
-  if (!Capacitor.isPluginAvailable('PushNotifications')) {
-    console.log('[Push] plugin not registered — skip');
-    return;
-  }
-
-  let PushNotifications: any;
-  try {
-    const mod = await import('@capacitor/push-notifications');
-    PushNotifications = mod.PushNotifications;
-  } catch (err) {
-    console.error('[Push] plugin import failed:', err);
-    return;
-  }
-
-  // ─── (3) CHANNEL FIRST — before any permission work ────────────
-  await safe('createChannel', function() {
-    return PushNotifications.createChannel({
-      id: 'rewardhub_default',
-      name: 'RewardHub Notifications',
-      description: 'Daily reminders and new offer alerts',
-      importance: 4,      // IMPORTANCE_HIGH
-      visibility: 1,      // VISIBILITY_PUBLIC
-      lights: true,
-      vibration: true,
-    });
-  });
-
-  // ─── Permission check + request ────────────────────────────────
-  let perm = await safe<{ receive: string }>('checkPermissions', function() {
-    return PushNotifications.checkPermissions();
-  });
-  if (!perm) return;
-
-  if (perm.receive === 'prompt' || perm.receive === 'prompt-with-rationale') {
-    const reqResult = await safe<{ receive: string }>('requestPermissions', function() {
-      return PushNotifications.requestPermissions();
-    });
-    if (!reqResult) return;
-    perm = reqResult;
-  }
-
-  if (perm.receive !== 'granted') {
-    console.log('[Push] permission not granted — stopping init');
-    return;
-  }
-
-  // ─── (4) ISOLATED LISTENERS — no blocking code inside callbacks ─
-  await safe('addListener:registration', function() {
-    return PushNotifications.addListener('registration', function(token: any) {
-      // No alert. No Toast. No sync network. Just schedule the callback
-      // as a microtask so this handler returns to the native bridge fast.
-      try {
-        const tv = token && token.value ? String(token.value) : '';
-        if (!tv) return;
-        Promise.resolve()
-          .then(function() { return onToken(tv); })
-          .catch(function(e) { console.error('[Push] onToken rejected:', e); });
-      } catch (handlerErr) {
-        console.error('[Push] registration handler threw:', handlerErr);
-      }
-    });
-  });
-
-  await safe('addListener:registrationError', function() {
-    return PushNotifications.addListener('registrationError', function(err: any) {
-      try {
-        console.error('[Push] registrationError:', err && err.error ? err.error : err);
-      } catch {}
-    });
-  });
-
-  await safe('addListener:pushNotificationReceived', function() {
-    return PushNotifications.addListener('pushNotificationReceived', function(n: any) {
-      // Intentionally minimal — no Toast, no dynamic imports.
-      try {
-        console.log('[Push] received:', n && n.title ? n.title : '(no title)');
-      } catch {}
-    });
-  });
-
-  await safe('addListener:pushNotificationActionPerformed', function() {
-    return PushNotifications.addListener('pushNotificationActionPerformed', function(evt: any) {
-      try {
-        console.log('[Push] tapped:', evt && evt.notification ? evt.notification.title : '');
-      } catch {}
-    });
-  });
-
-  // ─── (5) DELAYED START — register() on a 10-second timer ───────
-  // Using setTimeout (not await) so this function returns immediately
-  // and does not hold the caller. The register call itself is wrapped
-  // in safe() so a native rejection cannot leak.
-  setTimeout(function() {
-    safe('register', function() {
-      return PushNotifications.register();
-    }).then(function(ok) {
-      console.log('[Push] register() result:', ok === null ? 'failed' : 'ok');
-    });
-  }, 10000);
-
-  console.log('[Push] init queued — register() will fire in 10s');
 }
