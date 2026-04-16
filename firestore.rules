@@ -2,53 +2,9 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ═════════════════════════════════════════════════════════════════
-    // REWARDHUB — Production Firestore Security Rules v13.1
-    // NO EXPIRATION — permanent until manually changed
-    //
-    // Audited against firebase.ts write operations:
-    //
-    //  /users/{uid} & /guests/{uid}
-    //    saveUserProfile()   → setDoc(merge:true) full profile
-    //    recordAdWatch()     → tx.set(merge:true) {currentLevelAdCounter, lastBoostDate}
-    //                        → OR tx.set() full doc if user doesn't exist yet
-    //    claimBoostReward()  → tx.set(merge:true) {points, totalEarned, boostLevel,
-    //                          adsWatchedToday, currentLevelAdCounter, lastBoostDate}
-    //    claimOffer()        → tx.update {points, claimsToday, lastClaimDate}
-    //    checkDailyReset()   → setDoc(merge:true) {boostLevel, adsWatchedToday,
-    //                          currentLevelAdCounter, lastBoostDate}
-    //    deleteUserProfile() → deleteDoc
-    //
-    //  /history/{id}
-    //    claimBoostReward()  → tx.set {uid, type:'earn', points:100, message, timestamp}
-    //    claimOffer()        → tx.set {uid, type:'claim', points:-N, message, timestamp}
-    //
-    //  /claims/{id}
-    //    claimOffer()        → tx.set {uid, offerId, offerBrand, code, url,
-    //                          pointsSpent, timestamp}
-    //
-    //  /fcm_tokens/{id}
-    //    saveFcmToken()      → setDoc {token, uid, platform, updatedAt}
-    //
-    //  /offers/{id}
-    //    Read by all. Write by admin only.
-    //
-    //  /logs/{id}
-    //    Open create for diagnostics.
-    //
-    // AUTH TYPES:
-    //   Google auth    → request.auth.uid exists → writes to /users
-    //   Anonymous auth → request.auth.uid exists → writes to /users
-    //   local_guest_*  → request.auth is null    → writes to /guests
-    //
-    // NOTE on set-with-merge:
-    //   Firestore evaluates isValidUser() against the FULL MERGED
-    //   document, not just the fields being written. The merged doc
-    //   always has 'uid' and 'points' (set at creation, never deleted),
-    //   so the hasAll(['uid','points']) check passes on partial updates.
-    // ═════════════════════════════════════════════════════════════════
-
-    // ── Helpers ───────────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════
+    // Helper functions
+    // ═══════════════════════════════════════════════════════════════
 
     function isAuthenticated() {
       return request.auth != null;
@@ -64,7 +20,6 @@ service cloud.firestore {
           && request.auth.token.email_verified == true;
     }
 
-    // local_guest_* users are NOT Firebase-authenticated
     function isGuest(userId) {
       return userId is string && userId.matches('^local_guest_.*');
     }
@@ -74,48 +29,36 @@ service cloud.firestore {
           && email.matches('^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$');
     }
 
-    // ── Validators ────────────────────────────────────────────────────
+    // ─── Data validators ────────────────────────────────────────
 
-    // Validates the FULL MERGED user/guest document.
-    // Minimum required: uid (string) + points (number >= 0).
-    // All other fields are optional but type-checked if present.
-    // Email accepts: valid format, null, 'Guest User', 'Unknown', 'Google User'
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'points'])
           && data.uid is string
           && data.points is number
           && data.points >= 0
-          // email — all values firebase.ts can produce
           && (!('email' in data)
               || data.email == null
               || data.email == 'Guest User'
               || data.email == 'Unknown'
               || data.email == 'Google User'
               || isValidEmail(data.email))
-          // boost / ad counters (all numbers)
           && (!('boostLevel'            in data) || data.boostLevel            is number)
           && (!('adsWatchedToday'       in data) || data.adsWatchedToday       is number)
           && (!('currentLevelAdCounter' in data) || data.currentLevelAdCounter is number)
-          // totals
           && (!('totalEarned'           in data) || data.totalEarned           is number)
-          // claim tracking
           && (!('claimsToday'           in data) || data.claimsToday           is number)
           && (!('lastClaimDate'         in data)
               || data.lastClaimDate == null
               || data.lastClaimDate is string)
-          // date strings
           && (!('lastBoostDate'         in data) || data.lastBoostDate is string);
     }
 
-    // Validates a claim document from claimOffer()
     function isValidClaim(data) {
       return data.keys().hasAll(['uid', 'offerId', 'timestamp'])
           && data.uid is string
           && data.offerId is string;
     }
 
-    // Validates a history document from claimBoostReward() and claimOffer()
-    // Field names MUST be 'points' and 'message' (not 'amount'/'title')
     function isValidHistory(data) {
       return data.keys().hasAll(['uid', 'points', 'timestamp', 'type', 'message'])
           && data.uid is string
@@ -124,108 +67,114 @@ service cloud.firestore {
           && data.type in ['earn', 'boost', 'claim', 'referral'];
     }
 
-    // Validates an FCM token document from saveFcmToken()
+    // ─── v13.5.0 — tightened FCM token validation ───────────────
+    //
+    // Required fields: token, uid
+    // Optional fields: platform, updatedAt, appVersion
+    //
+    // Changes from previous version:
+    //   • `platform` validated against an allow-list
+    //   • `uid` inside the document must equal the document ID (tokenId),
+    //     enforced in the match rule below
+    //   • `updatedAt` allowed as a server timestamp (optional)
+    //   • `appVersion` allowed as a string (optional, for debugging)
     function isValidFcmToken(data) {
       return data.keys().hasAll(['token', 'uid'])
           && data.token is string
-          && data.uid is string;
+          && data.token.size() > 0
+          && data.uid is string
+          && data.uid.size() > 0
+          && (!('platform' in data)
+              || data.platform in ['android', 'ios', 'web'])
+          && (!('appVersion' in data) || data.appVersion is string);
     }
 
-    // ── /users/{userId} ──────────────────────────────────────────────
-    // For Google-signed-in users AND anonymous Firebase users.
-    // Both have a real request.auth.uid, so isOwner() covers them.
+    // ═══════════════════════════════════════════════════════════════
+    // Collection rules
+    // ═══════════════════════════════════════════════════════════════
 
+    // ─── Users (authenticated) ──────────────────────────────────
     match /users/{userId} {
       allow read:   if isOwner(userId) || isAdmin();
-
       allow create: if isOwner(userId)
                     && isValidUser(request.resource.data)
                     && request.resource.data.uid == userId;
-
       allow update: if (isOwner(userId) || isAdmin())
                     && isValidUser(request.resource.data);
-
       allow delete: if isOwner(userId) || isAdmin();
     }
 
-    // ── /guests/{userId} ─────────────────────────────────────────────
-    // For local_guest_* users who are NOT Firebase-authenticated.
-    // Security: path must start with 'local_guest_', uid field must match path.
-
+    // ─── Guests (local_guest_*) ─────────────────────────────────
     match /guests/{userId} {
       allow read:   if isGuest(userId) || isAdmin();
-
       allow create: if isGuest(userId)
                     && isValidUser(request.resource.data)
                     && request.resource.data.uid == userId;
-
       allow update: if (isGuest(userId) || isAdmin())
                     && isValidUser(request.resource.data);
-
       allow delete: if isGuest(userId) || isAdmin();
     }
 
-    // ── /offers/{offerId} ────────────────────────────────────────────
-    // Public read (anyone can browse offers). Admin write only.
-    // May contain: brand, description, logoUrl, url, code, points,
-    //   category, type, expiryDate, country, createdAt
-
+    // ─── Offers (public read, admin write) ──────────────────────
     match /offers/{offerId} {
       allow read:  if true;
       allow write: if isAdmin();
     }
 
-    // ── /claims/{claimId} ────────────────────────────────────────────
-    // Created by claimOffer() inside a transaction.
-    // Contains: uid, offerId, offerBrand, code, url, pointsSpent, timestamp
-
+    // ─── Claims ─────────────────────────────────────────────────
     match /claims/{claimId} {
       allow read: if isAdmin()
           || (isAuthenticated() && resource.data.uid == request.auth.uid)
           || isGuest(resource.data.uid);
-
       allow create: if isValidClaim(request.resource.data)
-          && (
-            (isAuthenticated() && request.resource.data.uid == request.auth.uid)
-            || isGuest(request.resource.data.uid)
-          );
-
+          && ((isAuthenticated() && request.resource.data.uid == request.auth.uid)
+              || isGuest(request.resource.data.uid));
       allow update, delete: if isAdmin();
     }
 
-    // ── /history/{historyId} ─────────────────────────────────────────
-    // Created by claimBoostReward() and claimOffer() inside transactions.
-    // Fields: { uid, type, points, message, timestamp }
-
+    // ─── History ────────────────────────────────────────────────
     match /history/{historyId} {
       allow read: if isAdmin()
           || (isAuthenticated() && resource.data.uid == request.auth.uid)
           || isGuest(resource.data.uid);
-
       allow create: if isValidHistory(request.resource.data)
-          && (
-            (isAuthenticated() && request.resource.data.uid == request.auth.uid)
-            || isGuest(request.resource.data.uid)
-          );
-
+          && ((isAuthenticated() && request.resource.data.uid == request.auth.uid)
+              || isGuest(request.resource.data.uid));
       allow update, delete: if isAdmin();
     }
 
-    // ── /fcm_tokens/{tokenId} ────────────────────────────────────────
-    // Created/updated by saveFcmToken() after push notification registration.
-    // Fields: { token, uid, platform, updatedAt }
-    // Allow create/update for any user (authenticated or guest).
-    // Cloud Functions (admin SDK) bypass rules to read all tokens.
-
+    // ─── FCM Tokens ─────────────────────────────────────────────
+    //
+    // v13.5.0 security tightening:
+    //
+    //   Document ID = user's uid (saveFcmToken uses doc(db, 'fcm_tokens', uid)).
+    //
+    //   Three enforcements:
+    //     1. OWNER-ONLY: request.auth.uid must match the document ID,
+    //        so one user can never overwrite another user's token.
+    //     2. UID-MATCH: data.uid inside the document must equal tokenId,
+    //        preventing a user from writing a mismatched uid field.
+    //     3. SCHEMA: isValidFcmToken checks token is non-empty string,
+    //        platform is one of android/ios/web, etc.
+    //
+    //   Guest users (local_guest_*) do not have request.auth and
+    //   cannot write to this collection — that is intentional; push
+    //   tokens are only useful for users we can reach server-side.
+    //
+    //   Admin can read all tokens (for sending push campaigns) and
+    //   delete stale ones.
     match /fcm_tokens/{tokenId} {
-      allow read:           if isAdmin();
-      allow create, update: if isValidFcmToken(request.resource.data);
-      allow delete:         if isAdmin();
+      allow read:   if isOwner(tokenId) || isAdmin();
+      allow create: if isOwner(tokenId)
+                    && isValidFcmToken(request.resource.data)
+                    && request.resource.data.uid == tokenId;
+      allow update: if isOwner(tokenId)
+                    && isValidFcmToken(request.resource.data)
+                    && request.resource.data.uid == tokenId;
+      allow delete: if isAdmin();
     }
 
-    // ── /logs/{logId} ────────────────────────────────────────────────
-    // Diagnostic logs — anyone can write, only admin reads.
-
+    // ─── Logs (write-only for telemetry) ────────────────────────
     match /logs/{logId} {
       allow create: if true;
       allow read:   if isAdmin();
