@@ -275,7 +275,7 @@ async function saveFcmToken(uid: string, token: string): Promise<boolean> {
 async function requestATTIfNeeded(): Promise<void> {
   if (Capacitor.getPlatform() !== 'ios') return;
   try {
-    const mod: any = await import('capacitor-plugin-app-tracking-transparency');
+    const mod: any = await import('@capacitor-community/app-tracking-transparency');
     const ATT = mod.AppTrackingTransparency || mod.default;
     if (!ATT) {
       console.log('[ATT] plugin shape unknown — skipping');
