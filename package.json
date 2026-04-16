@@ -1,7 +1,7 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "13.1.0",
+  "version": "13.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
@@ -19,7 +19,6 @@
     "@capacitor/browser": "^6.0.6",
     "@capacitor/clipboard": "^6.0.3",
     "@capacitor/core": "^6.0.0",
-    "@capacitor/push-notifications": "^6.0.0",
     "@capacitor/toast": "^6.0.4",
     "@capacitor-community/admob": "^6.0.0",
     "@codetrix-studio/capacitor-google-auth": "^3.4.0-rc.4",
