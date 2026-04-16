@@ -1,3 +1,4 @@
+// HomeScreen — v13.4.0 (refreshed 2026-04-16). Dynamic filters + skeleton loaders.
 import React from 'react';
 import { motion } from 'motion/react';
 import {
@@ -641,4 +642,24 @@ export const HomeScreen = (props: HomeScreenProps) => {
               onClaim={handleClaimOffer}
               user={user}
               unlocked={isOfferUnlocked(o.id, transactions, o.brand)}
-       
+              code={transactions.find((t) => t.title === o.brand)?.code}
+              timeLeft={getTimeLeft(o.id)}
+            />
+          ))
+        ) : (
+          <div className="bg-white rounded-3xl p-12 border border-dashed border-zinc-200 text-center">
+            <Gift size={32} className="text-zinc-300 mx-auto mb-3" />
+            <h3 className="text-sm font-bold text-zinc-900 mb-1">
+              No rewards{selectedCountry !== ALL_COUNTRIES ? ` in ${selectedCountry}` : ''}
+            </h3>
+            <p className="text-xs text-zinc-500">
+              Try "All Countries" or another selection.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="h-[100px]" />
+    </motion.div>
+  );
+};
