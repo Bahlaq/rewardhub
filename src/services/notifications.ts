@@ -1,48 +1,26 @@
-{
-  "name": "react-example",
-  "private": true,
-  "version": "13.4.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build",
-    "preview": "vite preview",
-    "clean": "rm -rf dist",
-    "lint": "tsc --noEmit",
-    "cap:add": "cap add android",
-    "cap:sync": "cap sync android",
-    "build:android": "npm run build && npx cap sync android"
-  },
-  "dependencies": {
-    "@capacitor/android": "^6.0.0",
-    "@capacitor/assets": "^3.0.5",
-    "@capacitor/browser": "^6.0.6",
-    "@capacitor/clipboard": "^6.0.3",
-    "@capacitor/core": "^6.0.0",
-    "@capacitor/toast": "^6.0.4",
-    "@capacitor-community/admob": "^6.0.0",
-    "@codetrix-studio/capacitor-google-auth": "^3.4.0-rc.4",
-    "@tailwindcss/vite": "^4.1.14",
-    "@vitejs/plugin-react": "^5.0.4",
-    "clsx": "^2.1.1",
-    "date-fns": "^4.1.0",
-    "firebase": "^12.10.0",
-    "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "tailwind-merge": "^3.5.0",
-    "vite": "^6.2.0"
-  },
-  "devDependencies": {
-    "@capacitor/cli": "^6.0.0",
-    "@types/node": "^22.14.0",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "autoprefixer": "^10.4.21",
-    "tailwindcss": "^4.1.14",
-    "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0"
-  }
+// ═══════════════════════════════════════════════════════════════════════
+// Push Notifications — v13.4.0 NO-OP STUB  (refreshed 2026-04-16).
+//
+// The @capacitor/push-notifications plugin has been removed from
+// package.json so its native Android code is no longer compiled into
+// the APK. This module is kept only to preserve the import signature
+// used elsewhere in the codebase without triggering TypeScript errors.
+//
+// Every call is a silent no-op. Calling initPushNotifications() does
+// nothing, so the crash path (native FCM register triggering a Java
+// exception that bypasses JS try/catch) cannot execute.
+//
+// To restore push notifications later:
+//   1. Add "@capacitor/push-notifications": "^6.0.0" back to package.json
+//   2. Restore the full implementation from git history (v13.3.0)
+//   3. Re-enable the Phase 3 useEffect in App.tsx
+//   4. Re-add POST_NOTIFICATIONS / c2dm.RECEIVE permissions to write_manifest.py
+//   5. Re-add the FCM default_notification_channel_id meta-data
+// ═══════════════════════════════════════════════════════════════════════
+
+export async function initPushNotifications(
+  _onToken: (token: string) => void
+): Promise<void> {
+  // Intentional no-op. Plugin removed in v13.4.0 for stability.
+  console.log('[Push] disabled — plugin removed from build');
 }
