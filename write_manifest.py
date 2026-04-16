@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# v13.4.0 — Stable manifest.
+# v13.4.0 — Stable manifest  (refreshed 2026-04-16).
 #
 # @capacitor/push-notifications has been removed from package.json so
 # the POST_NOTIFICATIONS / c2dm.RECEIVE permissions and the FCM
@@ -75,4 +75,4 @@ MANIFEST = '''<?xml version="1.0" encoding="utf-8"?>
 os.makedirs(os.path.dirname(MANIFEST_PATH), exist_ok=True)
 with open(MANIFEST_PATH, 'w') as f:
     f.write(MANIFEST)
-print("OK: " + MANIFEST_PATH)
+print(
