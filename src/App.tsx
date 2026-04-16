@@ -250,7 +250,6 @@ export default function App() {
   // not block the others.
   // ═══════════════════════════════════════════════════════════════
   var appOpenShownRef = useRef(false);
-  var notifInitStartedRef = useRef(false);
 
   // ─── Cooldown ─────────────────────────────────────────────────
   var [cdActive, setCdActive] = useState(false);
@@ -371,59 +370,26 @@ export default function App() {
     var t = setTimeout(function() {
       if (appOpenShownRef.current) return;
       appOpenShownRef.current = true;
-      console.log('[Init] Firing App Open Ad (T+2s)');
+      console.log('[Init] Firing App Open Ad (T+800ms)');
       showAppOpenAd().catch(function(err) {
         console.warn('[Init] App Open Ad non-fatal:', err);
       });
-    }, 2000);
+    }, 800);
 
     return function() { clearTimeout(t); };
   }, [isNative, showAppOpenAd]);
 
   // ═══════════════════════════════════════════════════════════════
-  // PHASE 3 — push-notification init. Fully DECOUPLED from Phase 1
-  // (AdMob warm) and Phase 2 (App Open Ad). No shared state with the
-  // ad pipeline.
+  // PHASE 3 — REMOVED in v13.4.0. @capacitor/push-notifications has
+  // been removed from package.json, so the plugin's native Android
+  // code is no longer in the APK. The crash path (native FCM
+  // register() triggering a Java exception that bypasses JS
+  // try/catch) cannot execute because the plugin doesn't exist.
   //
-  // Timeline on a native device:
-  //   • T+0           — app mounts, AdMob starts warming (Phase 1)
-  //   • T+2s          — App Open Ad shows (Phase 2)
-  //   • T+~6s         — user closes / finishes App Open Ad
-  //   • T+8s after auth — this Phase 3 effect fires initPushNotifications
-  //                       which: checks native → creates channel →
-  //                       checks/requests permission → adds listeners
-  //                       → schedules register() 10s later via its own
-  //                       internal setTimeout
-  //   • T+~18s after auth — register() actually fires with the app,
-  //                         the Capacitor bridge, and AdMob all idle
-  //
-  // Guarded by isNative and by notifInitStartedRef so it runs at most
-  // once per process lifetime.
+  // To restore push notifications later: re-add the plugin to
+  // package.json, restore src/services/notifications.ts from git
+  // history, and re-instate this useEffect. See ACTION_TABLE.md.
   // ═══════════════════════════════════════════════════════════════
-  useEffect(function() {
-    if (!fbUser?.uid) return;
-    if (!isNative) return;
-    if (notifInitStartedRef.current) return;
-
-    var uid = fbUser.uid;
-    var t = setTimeout(function() {
-      if (notifInitStartedRef.current) return;
-      notifInitStartedRef.current = true;
-
-      import('./services/notifications').then(function(mod) {
-        return mod.initPushNotifications(function(token: string) {
-          // onToken: fire-and-forget, never throws synchronously.
-          firebaseService.saveFcmToken(uid, token).catch(function(err) {
-            console.error('[App] saveFcmToken failed:', err);
-          });
-        });
-      }).catch(function(err) {
-        console.error('[App] Notification module load failed:', err);
-      });
-    }, 8000);
-
-    return function() { clearTimeout(t); };
-  }, [fbUser?.uid, isNative]);
 
   // ─── Firestore Listeners ──────────────────────────────────────
   var [fsClaims, setFsClaims] = useState<Transaction[]>([]);
@@ -784,10 +750,25 @@ export default function App() {
   }
 
   if (authLoading) {
+    // Splash-style loader — logo scales in, subtle bar instead of a raw
+    // spinner. Feels like a polished launch screen rather than a stall.
     return (
-      <div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center gap-6">
-        <Logo className="max-w-[120px]" />
-        <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-gradient-to-br from-zinc-50 to-indigo-50 flex flex-col items-center justify-center gap-8">
+        <motion.div
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ duration: 0.4, ease: 'easeOut' }}
+        >
+          <Logo className="max-w-[140px]" />
+        </motion.div>
+        <div className="w-32 h-1 bg-zinc-200 rounded-full overflow-hidden">
+          <motion.div
+            initial={{ x: '-100%' }}
+            animate={{ x: '100%' }}
+            transition={{ repeat: Infinity, duration: 1.1, ease: 'easeInOut' }}
+            className="h-full w-1/2 bg-indigo-600 rounded-full"
+          />
+        </div>
       </div>
     );
   }
@@ -829,9 +810,19 @@ export default function App() {
   }
 
   if (!user) {
+    // Match the splash look so the transition from auth→profile-load
+    // feels continuous rather than a flash of a different loader.
     return (
-      <div className="h-screen flex flex-col items-center justify-center bg-zinc-50">
-        <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-gradient-to-br from-zinc-50 to-indigo-50 flex flex-col items-center justify-center gap-8">
+        <Logo className="max-w-[140px]" />
+        <div className="w-32 h-1 bg-zinc-200 rounded-full overflow-hidden">
+          <motion.div
+            initial={{ x: '-100%' }}
+            animate={{ x: '100%' }}
+            transition={{ repeat: Infinity, duration: 1.1, ease: 'easeInOut' }}
+            className="h-full w-1/2 bg-indigo-600 rounded-full"
+          />
+        </div>
       </div>
     );
   }
