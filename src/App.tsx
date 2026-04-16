@@ -1,10 +1,12 @@
-// App.tsx — v13.4.0 (refreshed 2026-04-16). Push plugin removed for crash-free startup.
+// App.tsx — v13.5.0 (2026-04-16). Push restored with safety wrapper, splash
+// loader removed, iOS prep (ATT request + platform guards).
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Gift, User, LayoutDashboard, PlayCircle, TrendingUp, AlertCircle,
   X, ChevronRight, Zap, History, Copy, ExternalLink, ShieldCheck, Trash2
 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import { Clipboard } from '@capacitor/clipboard';
 import { Toast } from '@capacitor/toast';
 import { Browser } from '@capacitor/browser';
@@ -13,6 +15,7 @@ import { twMerge } from 'tailwind-merge';
 import { Offer, UserProfile, Transaction } from './types';
 import { useAds, initAdMobEarly } from './hooks/useAds';
 import { firebaseService, FirebaseUser, isConfigValid } from './services/firebase';
+import { initPushNotifications } from './services/notifications';
 import { APP_NAME, APP_VERSION } from './constants';
 import {
   HomeScreen,
@@ -208,6 +211,89 @@ var SimpleModal = function(props: {
 };
 
 // ═════════════════════════════════════════════════════════════════
+// saveFcmToken — persists an FCM token to Firestore with retries.
+//
+// Written as a module-level helper (not a hook) so it can be invoked
+// from inside the push listener callback without needing React state
+// or a ref. Calls `firebaseService.saveFcmToken(uid, token, platform)`
+// which is the canonical write path; if that method is missing on the
+// service layer, we log a clear error rather than crashing.
+//
+// Retry policy: 3 attempts with exponential backoff (1s, 2s, 4s) to
+// survive transient offline / Firestore rate-limit states. Anything
+// beyond attempt #3 is almost certainly a persistent quota or rules
+// issue — we surface it in the console for the dev to investigate.
+// ═════════════════════════════════════════════════════════════════
+async function saveFcmToken(uid: string, token: string): Promise<boolean> {
+  if (!uid || !token) {
+    console.warn('[FCM] saveFcmToken called with missing uid or token');
+    return false;
+  }
+
+  const platform = Capacitor.getPlatform(); // 'android' | 'ios' | 'web'
+  const svc = firebaseService as any;
+
+  if (typeof svc.saveFcmToken !== 'function') {
+    console.error(
+      '[FCM] firebaseService.saveFcmToken(uid, token, platform) is missing. ' +
+      'Add it to src/services/firebase.ts — it should setDoc(' +
+      'doc(db, "fcm_tokens", uid), { token, platform, updatedAt: serverTimestamp() }, ' +
+      '{ merge: true }).'
+    );
+    return false;
+  }
+
+  const delays = [1000, 2000, 4000]; // ms — attempts 1, 2, 3
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await svc.saveFcmToken(uid, token, platform);
+      console.log('[FCM] token saved on attempt ' + (attempt + 1));
+      return true;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('[FCM] save attempt ' + (attempt + 1) + ' failed: ' + msg);
+      if (attempt < 2) {
+        await new Promise(function (r) { setTimeout(r, delays[attempt]); });
+      }
+    }
+  }
+  console.error('[FCM] all 3 save attempts failed — giving up');
+  return false;
+}
+
+// ═════════════════════════════════════════════════════════════════
+// requestATTIfNeeded — iOS App Tracking Transparency prompt.
+//
+// Apple requires a user prompt before an app can access the IDFA. Not
+// calling this means AdMob falls back to non-personalized ads on iOS
+// 14.5+, which cuts eCPM significantly. No-op on Android / web.
+//
+// Uses a dynamic import so removing the plugin later doesn't break the
+// bundle. Fails silently if the plugin isn't installed; AdMob will
+// just serve non-personalized ads in that case.
+// ═════════════════════════════════════════════════════════════════
+async function requestATTIfNeeded(): Promise<void> {
+  if (Capacitor.getPlatform() !== 'ios') return;
+  try {
+    const mod: any = await import('capacitor-plugin-app-tracking-transparency');
+    const ATT = mod.AppTrackingTransparency || mod.default;
+    if (!ATT) {
+      console.log('[ATT] plugin shape unknown — skipping');
+      return;
+    }
+    const status = await ATT.getStatus();
+    if (status && status.status === 'notDetermined') {
+      const result = await ATT.requestPermission();
+      console.log('[ATT] permission result:', result && result.status);
+    } else {
+      console.log('[ATT] already resolved:', status && status.status);
+    }
+  } catch (e) {
+    console.warn('[ATT] request failed (non-fatal):', e);
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════
 // MAIN APP
 // ═════════════════════════════════════════════════════════════════
 export default function App() {
@@ -348,9 +434,17 @@ export default function App() {
 
     // Warm up AdMob SDK via the shared useAds singleton (non-blocking).
     if (isNative) {
-      initAdMobEarly()
-        .then(function(ok) { console.log('[Init] AdMob pre-warm:', ok ? 'ok' : 'failed'); })
-        .catch(function(err) { console.warn('[Init] AdMob pre-warm threw:', err); });
+      // On iOS, request App Tracking Transparency permission BEFORE
+      // initialising AdMob — IDFA availability is latched at SDK init,
+      // so prompting afterward means we'd ship non-personalized ads for
+      // the first session even if the user grants consent.
+      requestATTIfNeeded()
+        .catch(function(err) { console.warn('[ATT] pre-init threw:', err); })
+        .finally(function() {
+          initAdMobEarly()
+            .then(function(ok) { console.log('[Init] AdMob pre-warm:', ok ? 'ok' : 'failed'); })
+            .catch(function(err) { console.warn('[Init] AdMob pre-warm threw:', err); });
+        });
     }
 
     return function() {
@@ -381,16 +475,47 @@ export default function App() {
   }, [isNative, showAppOpenAd]);
 
   // ═══════════════════════════════════════════════════════════════
-  // PHASE 3 — REMOVED in v13.4.0. @capacitor/push-notifications has
-  // been removed from package.json, so the plugin's native Android
-  // code is no longer in the APK. The crash path (native FCM
-  // register() triggering a Java exception that bypasses JS
-  // try/catch) cannot execute because the plugin doesn't exist.
+  // PHASE 3 — T+10s after auth: init push notifications (Android+iOS).
   //
-  // To restore push notifications later: re-add the plugin to
-  // package.json, restore src/services/notifications.ts from git
-  // history, and re-instate this useEffect. See ACTION_TABLE.md.
+  // Restored in v13.5.0 with the safety-first wrapper. Fires only
+  // after the user is authenticated (so we have a uid to write the
+  // token against) and only once per process (pushInitRef).
+  //
+  // The 10-second delay is the central stability measure: by T+10s
+  // the App Open Ad has shown and closed, MainActivity is settled,
+  // and Samsung/Xiaomi OEM permission dialogs will no longer race
+  // AdMob init on the main thread.
+  //
+  // On token receipt, saveFcmToken() writes to Firestore with 3x
+  // exponential-backoff retries, so transient offline states don't
+  // silently drop the token.
   // ═══════════════════════════════════════════════════════════════
+  var pushInitRef = useRef(false);
+
+  useEffect(function() {
+    if (!isNative) return;
+    if (!fbUser?.uid) return;
+    if (pushInitRef.current) return;
+
+    var uid = fbUser.uid;
+    var t = setTimeout(function() {
+      if (pushInitRef.current) return;
+      pushInitRef.current = true;
+      console.log('[Init] Phase 3 — init push notifications (T+10s)');
+
+      initPushNotifications(function(token) {
+        // Listener callback — fire-and-forget save. saveFcmToken has
+        // its own retry loop and swallowed errors.
+        saveFcmToken(uid, token).catch(function(err) {
+          console.error('[FCM] saveFcmToken threw outside retry loop:', err);
+        });
+      }).catch(function(err) {
+        console.error('[Init] Phase 3 init push threw:', err);
+      });
+    }, 10000);
+
+    return function() { clearTimeout(t); };
+  }, [isNative, fbUser?.uid]);
 
   // ─── Firestore Listeners ──────────────────────────────────────
   var [fsClaims, setFsClaims] = useState<Transaction[]>([]);
@@ -750,28 +875,14 @@ export default function App() {
     );
   }
 
+  // v13.5.0 — Splash loader removed for faster, more direct entry.
+  // While auth is still resolving we render nothing, so the native
+  // Capacitor splash (controlled by capacitor.config.ts) stays visible
+  // for a beat before the main UI takes over. No JS-side loading bar
+  // between splash and content — this matches user expectation of an
+  // instant launch.
   if (authLoading) {
-    // Splash-style loader — logo scales in, subtle bar instead of a raw
-    // spinner. Feels like a polished launch screen rather than a stall.
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-zinc-50 to-indigo-50 flex flex-col items-center justify-center gap-8">
-        <motion.div
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.4, ease: 'easeOut' }}
-        >
-          <Logo className="max-w-[140px]" />
-        </motion.div>
-        <div className="w-32 h-1 bg-zinc-200 rounded-full overflow-hidden">
-          <motion.div
-            initial={{ x: '-100%' }}
-            animate={{ x: '100%' }}
-            transition={{ repeat: Infinity, duration: 1.1, ease: 'easeInOut' }}
-            className="h-full w-1/2 bg-indigo-600 rounded-full"
-          />
-        </div>
-      </div>
-    );
+    return null;
   }
 
   if (!fbUser) {
@@ -810,22 +921,12 @@ export default function App() {
     );
   }
 
+  // v13.5.0 — Profile-loading fallback is now a render-nothing so there's
+  // no flash of a secondary loader between auth and first Firestore
+  // snapshot. HomeScreen already handles the isLoading=true state with
+  // skeleton cards once the main tree mounts, so this null is safe.
   if (!user) {
-    // Match the splash look so the transition from auth→profile-load
-    // feels continuous rather than a flash of a different loader.
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-zinc-50 to-indigo-50 flex flex-col items-center justify-center gap-8">
-        <Logo className="max-w-[140px]" />
-        <div className="w-32 h-1 bg-zinc-200 rounded-full overflow-hidden">
-          <motion.div
-            initial={{ x: '-100%' }}
-            animate={{ x: '100%' }}
-            transition={{ repeat: Infinity, duration: 1.1, ease: 'easeInOut' }}
-            className="h-full w-1/2 bg-indigo-600 rounded-full"
-          />
-        </div>
-      </div>
-    );
+    return null;
   }
 
   // ─── Main Layout ─────────────────────────────────────────────
