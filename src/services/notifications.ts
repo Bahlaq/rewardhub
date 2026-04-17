@@ -1,94 +1,78 @@
 // ═══════════════════════════════════════════════════════════════════════
-// Push Notifications — v13.5.0 SAFETY-FIRST WRAPPER (iOS + Android).
+// Push Notifications — v13.5.1 SAFETY-FIRST WRAPPER + DIAGNOSTICS.
 //
-// Restored after v13.4.0 nuclear removal. The crash was isolated to
-// native FCM register() racing MainActivity recreation on Samsung/Xiaomi
-// OEMs when the system-generated permission dialog destroyed+recreated
-// the activity. This file now protects every touchpoint:
-//
-//   1. DECOUPLE     — every step is in its own try/catch. One failure
-//                     does not cascade; the app keeps running.
-//   2. DELAYED      — caller is expected to wait 10s after app mount
-//                     before invoking initPushNotifications(). By then
-//                     the App Open Ad has shown+closed and MainActivity
-//                     is settled, so OEM permission-dialog-driven
-//                     recreation is no longer racing AdMob.
-//   3. CHANNEL 1ST  — on Android we create the default channel BEFORE
-//                     calling register(). Missing channel = silent
-//                     Java NPE on some OEMs.
-//   4. ISOLATE      — listeners never await. Token arrives on its own
-//                     promise chain so it cannot block the caller.
-//   5. NATIVE CHECK — bails out on web and when the plugin isn't
-//                     actually installed, so dev/ci never explodes.
-//
-// Platform behavior:
-//   Android — POST_NOTIFICATIONS prompt (API 33+), FCM token returned.
-//   iOS     — system alert prompt, APNs token → Firebase auto-converts
-//             it to an FCM token and fires the 'registration' event.
-//             No channel work needed (iOS has no notification channels).
-//
-// The Firebase config file (google-services.json on Android,
-// GoogleService-Info.plist on iOS) must be present at build time for
-// the FCM token exchange to succeed. We don't touch those files here.
+// Every step logs to console so you can see exactly where the chain
+// breaks in Chrome DevTools → Remote Devices → your phone.
 // ═══════════════════════════════════════════════════════════════════════
 
 import { Capacitor } from '@capacitor/core';
 
 type TokenCallback = (token: string) => void;
 
-// Internal guard — we only ever call register() once per process.
 let registerCalled = false;
 
 // ─── Plugin loader ───────────────────────────────────────────────────
-// Dynamic import is critical: if the plugin is temporarily removed from
-// package.json for a hotfix build, a static import would fail the whole
-// bundle. Dynamic import + try/catch keeps this module loadable always.
 async function loadPushPlugin(): Promise<any | null> {
+  console.log('[Push][1] loadPushPlugin — attempting dynamic import...');
   try {
     const mod = await import('@capacitor/push-notifications');
-    return mod.PushNotifications || null;
+    const plugin = mod.PushNotifications || null;
+    console.log('[Push][1] loadPushPlugin — success, plugin:', plugin ? 'loaded' : 'null');
+    return plugin;
   } catch (e) {
-    console.warn('[Push] plugin unavailable:', e);
+    console.error('[Push][1] loadPushPlugin — FAILED:', e);
     return null;
   }
 }
 
 // ─── Permission helpers ─────────────────────────────────────────────
 async function ensurePermission(PushNotifications: any): Promise<boolean> {
+  console.log('[Push][2] ensurePermission — checking current status...');
   try {
     const current = await PushNotifications.checkPermissions();
-    if (current.receive === 'granted') return true;
+    console.log('[Push][2] checkPermissions result:', JSON.stringify(current));
+
+    if (current.receive === 'granted') {
+      console.log('[Push][2] already granted');
+      return true;
+    }
     if (current.receive === 'denied') {
-      console.log('[Push] permission previously denied — skipping register');
+      console.log('[Push][2] previously DENIED — cannot register');
       return false;
     }
+
+    console.log('[Push][2] status is "' + current.receive + '" — requesting...');
     const next = await PushNotifications.requestPermissions();
+    console.log('[Push][2] requestPermissions result:', JSON.stringify(next));
     return next.receive === 'granted';
   } catch (e) {
-    console.error('[Push] permission check/request failed:', e);
+    console.error('[Push][2] ensurePermission FAILED:', e);
     return false;
   }
 }
 
 // ─── Android channel bootstrap (noop on iOS) ────────────────────────
 async function ensureDefaultChannel(PushNotifications: any): Promise<void> {
-  if (Capacitor.getPlatform() !== 'android') return;
+  const platform = Capacitor.getPlatform();
+  console.log('[Push][3] ensureDefaultChannel — platform:', platform);
+  if (platform !== 'android') {
+    console.log('[Push][3] not Android — skipping channel');
+    return;
+  }
   try {
     await PushNotifications.createChannel({
       id: 'default',
       name: 'General Notifications',
       description: 'Reward updates and account activity',
-      importance: 3, // IMPORTANCE_DEFAULT
-      visibility: 1, // VISIBILITY_PUBLIC
+      importance: 3,
+      visibility: 1,
       sound: 'default',
       lights: true,
       vibration: true,
     });
-    console.log('[Push] Android default channel ensured');
+    console.log('[Push][3] createChannel OK');
   } catch (e) {
-    // Not fatal — register() will still succeed, channel just falls
-    // back to system default on some OEMs.
-    console.warn('[Push] createChannel failed (non-fatal):', e);
+    console.warn('[Push][3] createChannel failed (non-fatal):', e);
   }
 }
 
@@ -96,16 +80,22 @@ async function ensureDefaultChannel(PushNotifications: any): Promise<void> {
 export async function initPushNotifications(
   onToken: TokenCallback
 ): Promise<void> {
-  // Guard 1: native only. No-op on web/dev so `vite dev` in a browser
-  // never chokes on missing native bridge.
+  console.log('════════════════════════════════════════════');
+  console.log('[Push] initPushNotifications called');
+  console.log('[Push] isNativePlatform:', Capacitor.isNativePlatform());
+  console.log('[Push] getPlatform:', Capacitor.getPlatform());
+  console.log('[Push] registerCalled:', registerCalled);
+  console.log('════════════════════════════════════════════');
+
+  // Guard 1: native only
   if (!Capacitor.isNativePlatform()) {
-    console.log('[Push] web platform — skipping');
+    console.log('[Push] BAIL — not native platform');
     return;
   }
 
-  // Guard 2: only run register() once per process lifetime.
+  // Guard 2: once per process
   if (registerCalled) {
-    console.log('[Push] already registered — skipping duplicate call');
+    console.log('[Push] BAIL — already registered');
     return;
   }
   registerCalled = true;
@@ -113,48 +103,51 @@ export async function initPushNotifications(
   // Guard 3: plugin present?
   const PushNotifications = await loadPushPlugin();
   if (!PushNotifications) {
-    console.log('[Push] plugin not in bundle — skipping');
+    console.log('[Push] BAIL — plugin not in bundle');
     return;
   }
 
-  // Step 1: permission (system dialog fires here on first launch).
+  // Step 1: permission
   const ok = await ensurePermission(PushNotifications);
   if (!ok) {
-    console.log('[Push] permission not granted — not registering');
+    console.log('[Push] BAIL — permission not granted');
     return;
   }
+  console.log('[Push] permission granted ✓');
 
-  // Step 2: Android channel first (no-op on iOS).
+  // Step 2: Android channel
   await ensureDefaultChannel(PushNotifications);
 
-  // Step 3: attach listeners BEFORE register() so the first registration
-  // event cannot arrive before we're listening for it.
+  // Step 3: attach listeners BEFORE register()
+  console.log('[Push][4] attaching listeners...');
   try {
     PushNotifications.addListener('registration', function (token: any) {
-      // Fire-and-forget; caller decides what to do with the token.
-      // We catch our own failures so a throwing callback can never crash
-      // the plugin's listener chain.
+      console.log('[Push][5] ★ registration event fired!');
+      console.log('[Push][5] raw token object:', JSON.stringify(token));
       try {
         const raw = token && typeof token === 'object' ? token.value : token;
+        console.log('[Push][5] extracted token string (len=' + (raw ? raw.length : 0) + ')');
         if (typeof raw === 'string' && raw.length > 0) {
-          console.log('[Push] got token (len=' + raw.length + ')');
+          console.log('[Push][5] calling onToken callback...');
           onToken(raw);
+          console.log('[Push][5] onToken callback returned');
         } else {
-          console.warn('[Push] registration event fired with empty token');
+          console.warn('[Push][5] empty token — NOT calling onToken');
         }
       } catch (cbErr) {
-        console.error('[Push] onToken callback threw:', cbErr);
+        console.error('[Push][5] onToken callback threw:', cbErr);
       }
     });
 
     PushNotifications.addListener('registrationError', function (err: any) {
-      console.error('[Push] registrationError:', err);
+      console.error('[Push][5] ★ registrationError event fired!');
+      console.error('[Push][5] error:', JSON.stringify(err));
     });
 
     PushNotifications.addListener(
       'pushNotificationReceived',
       function (n: any) {
-        console.log('[Push] received while foregrounded:', n && n.title);
+        console.log('[Push] notification received while foregrounded:', n && n.title);
       }
     );
 
@@ -164,22 +157,23 @@ export async function initPushNotifications(
         console.log('[Push] action performed:', a && a.actionId);
       }
     );
+    console.log('[Push][4] all listeners attached ✓');
   } catch (e) {
-    console.error('[Push] addListener failed — aborting register:', e);
+    console.error('[Push][4] addListener FAILED:', e);
     return;
   }
 
-  // Step 4: register(). Wrapped in its own try/catch because on some
-  // OEMs this is where a native Java exception can surface.
+  // Step 4: register()
+  console.log('[Push][6] calling register()...');
   try {
     await PushNotifications.register();
-    console.log('[Push] register() ok — waiting for token event');
+    console.log('[Push][6] register() resolved ✓ — waiting for registration event...');
   } catch (e) {
-    console.error('[Push] register() threw:', e);
+    console.error('[Push][6] register() THREW:', e);
   }
 }
 
-// ─── Cleanup helper (rarely needed) ─────────────────────────────────
+// ─── Cleanup helper ─────────────────────────────────────────────────
 export async function removeAllPushListeners(): Promise<void> {
   try {
     const PushNotifications = await loadPushPlugin();
