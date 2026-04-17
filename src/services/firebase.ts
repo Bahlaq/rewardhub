@@ -1,9 +1,9 @@
-import { initializeApp, getApps, getApp, doc, setDoc, serverTimestamp } from 'firebase/app';
-import { 
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import {
   initializeFirestore, collection, query, where, doc, getDoc, setDoc,
   deleteDoc, onSnapshot, runTransaction, serverTimestamp
 } from 'firebase/firestore';
-import { 
+import {
   getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged,
   signOut, signInAnonymously, deleteUser, User as FirebaseUser, signInWithCredential
 } from 'firebase/auth';
@@ -57,14 +57,6 @@ function handleFsError(error: unknown, path: string | null, shouldThrow = true) 
   if (shouldThrow) throw error;
 }
 
-async function saveFcmToken(uid: string, token: string, platform: string): Promise<void> {
-  const ref = doc(db, 'fcm_tokens', uid);
-  await setDoc(ref, {
-uid: uid,
-    token, platform, updatedAt: serverTimestamp(), appVersion: '13.5.0',
-  }, { merge: true });
-}
-
 export const firebaseService = {
   // ─── AUTH (UNCHANGED from working v12.1) ─────────────────────────
   async signInWithGoogle() {
@@ -94,7 +86,6 @@ export const firebaseService = {
     const result = await signInWithPopup(auth, googleProvider);
     await this._ensureProfile(result.user);
     return result.user;
-    saveFcmToken,
   },
 
   async _ensureProfile(fbUser: FirebaseUser, fallbackEmail?: string) {
@@ -121,17 +112,29 @@ export const firebaseService = {
   onAuthChange(cb: (user: FirebaseUser | null) => void) { if (!auth) { cb(null); return () => {}; } return onAuthStateChanged(auth, cb); },
 
   // ═══════════════════════════════════════════════════════════════════
-  // NEW: Save FCM token for push notifications
-  // Stored in /fcm_tokens so Cloud Functions can query all tokens
+  // v13.5.0 — Save FCM token for push notifications.
+  //
+  // Document path: fcm_tokens/{uid}   (uid = document ID)
+  //
+  // This must match the Firestore security rules which enforce:
+  //   • request.auth.uid == tokenId  (owner-only writes)
+  //   • data.uid == tokenId          (uid field matches doc ID)
+  //   • data.token is non-empty string
+  //   • data.platform in ['android', 'ios', 'web']
+  //
+  // App.tsx wraps this in a 3x exponential-backoff retry loop, so
+  // this method does NOT retry — it throws on failure.
   // ═══════════════════════════════════════════════════════════════════
-  async saveFcmToken(uid: string, token: string) {
+  async saveFcmToken(uid: string, token: string, platform: string) {
     if (!db) return;
-    try {
-      const tokenDocId = token.slice(0, 40).replace(/[^a-zA-Z0-9]/g, '_');
-      await setDoc(doc(db, 'fcm_tokens', tokenDocId), {
-        token, uid, platform: Capacitor.getPlatform(), updatedAt: serverTimestamp(),
-      });
-    } catch (err) { console.error('[FCM] Token save failed:', err); }
+    const ref = doc(db, 'fcm_tokens', uid);
+    await setDoc(ref, {
+      uid: uid,
+      token: token,
+      platform: platform,
+      updatedAt: serverTimestamp(),
+      appVersion: '13.5.0',
+    }, { merge: true });
   },
 
   // ─── PROFILE (UNCHANGED) ────────────────────────────────────────
