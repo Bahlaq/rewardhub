@@ -1,5 +1,4 @@
-// App.tsx — v13.5.0 (2026-04-16). Push restored with safety wrapper, splash
-// loader removed, iOS prep (ATT request + platform guards).
+// App.tsx — v13.5.1 (2026-04-17). Push restored with safety wrapper + diagnostics.
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -225,39 +224,49 @@ var SimpleModal = function(props: {
 // issue — we surface it in the console for the dev to investigate.
 // ═════════════════════════════════════════════════════════════════
 async function saveFcmToken(uid: string, token: string): Promise<boolean> {
+  console.log('[FCM] ═══ saveFcmToken called ═══');
+  console.log('[FCM] uid:', uid ? uid.slice(0, 10) + '...' : 'MISSING');
+  console.log('[FCM] token length:', token ? token.length : 0);
+
   if (!uid || !token) {
-    console.warn('[FCM] saveFcmToken called with missing uid or token');
+    console.error('[FCM] BAIL — uid or token is empty!');
     return false;
   }
 
-  const platform = Capacitor.getPlatform(); // 'android' | 'ios' | 'web'
+  const platform = Capacitor.getPlatform();
+  console.log('[FCM] platform:', platform);
+
+  // Check if firebaseService has the method
   const svc = firebaseService as any;
+  const methods = Object.keys(svc).filter(function(k) { return typeof svc[k] === 'function'; });
+  console.log('[FCM] firebaseService methods:', methods.join(', '));
 
   if (typeof svc.saveFcmToken !== 'function') {
     console.error(
-      '[FCM] firebaseService.saveFcmToken(uid, token, platform) is missing. ' +
-      'Add it to src/services/firebase.ts — it should setDoc(' +
-      'doc(db, "fcm_tokens", uid), { token, platform, updatedAt: serverTimestamp() }, ' +
-      '{ merge: true }).'
+      '[FCM] ✗ firebaseService.saveFcmToken IS MISSING! ' +
+      'Available methods: ' + methods.join(', ')
     );
     return false;
   }
+  console.log('[FCM] ✓ firebaseService.saveFcmToken exists');
 
-  const delays = [1000, 2000, 4000]; // ms — attempts 1, 2, 3
+  const delays = [1000, 2000, 4000];
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
+      console.log('[FCM] attempt ' + (attempt + 1) + '/3 — calling firebaseService.saveFcmToken...');
       await svc.saveFcmToken(uid, token, platform);
-      console.log('[FCM] token saved on attempt ' + (attempt + 1));
+      console.log('[FCM] ★ SUCCESS on attempt ' + (attempt + 1) + '!');
       return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      console.warn('[FCM] save attempt ' + (attempt + 1) + ' failed: ' + msg);
+      console.error('[FCM] ✗ attempt ' + (attempt + 1) + ' FAILED:', msg);
       if (attempt < 2) {
+        console.log('[FCM] retrying in ' + delays[attempt] + 'ms...');
         await new Promise(function (r) { setTimeout(r, delays[attempt]); });
       }
     }
   }
-  console.error('[FCM] all 3 save attempts failed — giving up');
+  console.error('[FCM] ✗ ALL 3 ATTEMPTS FAILED');
   return false;
 }
 
@@ -275,7 +284,7 @@ async function saveFcmToken(uid: string, token: string): Promise<boolean> {
 async function requestATTIfNeeded(): Promise<void> {
   if (Capacitor.getPlatform() !== 'ios') return;
   try {
-    const { AppTrackingTransparency } = await import('capacitor-plugin-app-tracking-transparency');
+    const mod: any = await import('@capacitor-community/app-tracking-transparency');
     const ATT = mod.AppTrackingTransparency || mod.default;
     if (!ATT) {
       console.log('[ATT] plugin shape unknown — skipping');
@@ -493,24 +502,43 @@ export default function App() {
   var pushInitRef = useRef(false);
 
   useEffect(function() {
-    if (!isNative) return;
-    if (!fbUser?.uid) return;
-    if (pushInitRef.current) return;
+    console.log('[Phase3] useEffect fired — isNative:', isNative, 'uid:', fbUser?.uid ? fbUser.uid.slice(0, 10) + '...' : 'null', 'pushInitDone:', pushInitRef.current);
+
+    if (!isNative) {
+      console.log('[Phase3] BAIL — not native');
+      return;
+    }
+    if (!fbUser?.uid) {
+      console.log('[Phase3] BAIL — no uid (auth not ready yet)');
+      return;
+    }
+    if (pushInitRef.current) {
+      console.log('[Phase3] BAIL — already initialized');
+      return;
+    }
 
     var uid = fbUser.uid;
+    console.log('[Phase3] ✓ all guards passed — starting 10s timer for uid:', uid.slice(0, 10) + '...');
+
     var t = setTimeout(function() {
-      if (pushInitRef.current) return;
+      if (pushInitRef.current) {
+        console.log('[Phase3] timer fired but pushInitRef already true — skipping');
+        return;
+      }
       pushInitRef.current = true;
-      console.log('[Init] Phase 3 — init push notifications (T+10s)');
+      console.log('[Phase3] ★ Timer fired! Calling initPushNotifications...');
 
       initPushNotifications(function(token) {
-        // Listener callback — fire-and-forget save. saveFcmToken has
-        // its own retry loop and swallowed errors.
-        saveFcmToken(uid, token).catch(function(err) {
-          console.error('[FCM] saveFcmToken threw outside retry loop:', err);
+        console.log('[Phase3] ★ Token received in callback! Calling saveFcmToken...');
+        saveFcmToken(uid, token).then(function(ok) {
+          console.log('[Phase3] saveFcmToken returned:', ok);
+        }).catch(function(err) {
+          console.error('[Phase3] saveFcmToken threw:', err);
         });
+      }).then(function() {
+        console.log('[Phase3] initPushNotifications resolved');
       }).catch(function(err) {
-        console.error('[Init] Phase 3 init push threw:', err);
+        console.error('[Phase3] initPushNotifications threw:', err);
       });
     }, 10000);
 
