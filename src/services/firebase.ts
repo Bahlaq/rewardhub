@@ -126,15 +126,20 @@ export const firebaseService = {
   // this method does NOT retry — it throws on failure.
   // ═══════════════════════════════════════════════════════════════════
   async saveFcmToken(uid: string, token: string, platform: string) {
-    if (!db) return;
+    console.log('[firebase.ts] saveFcmToken called — uid:', uid ? uid.slice(0, 10) + '...' : 'EMPTY', 'token len:', token ? token.length : 0, 'platform:', platform, 'db:', db ? 'OK' : 'NULL');
+    if (!db) {
+      throw new Error('Firestore db is null — saveFcmToken cannot write');
+    }
     const ref = doc(db, 'fcm_tokens', uid);
+    console.log('[firebase.ts] writing to fcm_tokens/' + uid.slice(0, 10) + '...');
     await setDoc(ref, {
       uid: uid,
       token: token,
       platform: platform,
       updatedAt: serverTimestamp(),
-      appVersion: '13.5.0',
+      appVersion: '13.5.1',
     }, { merge: true });
+    console.log('[firebase.ts] ★ setDoc SUCCESS — token saved to Firestore!');
   },
 
   // ─── PROFILE (UNCHANGED) ────────────────────────────────────────
