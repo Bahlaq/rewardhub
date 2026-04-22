@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>563861371307-8emfj8kd3725lpj0mb9kkkf1r16100hu.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.563861371307-8emfj8kd3725lpj0mb9kkkf1r16100hu</string>
+	<key>ANDROID_CLIENT_ID</key>
+	<string>563861371307-3moj6n7qanfg0tgn1vrv8ok59rnh8pj2.apps.googleusercontent.com</string>
+	<key>API_KEY</key>
+	<string>AIzaSyDrb07qC5XhdR92m6QHPN0FxnmQveaztpc</string>
+	<key>GCM_SENDER_ID</key>
+	<string>563861371307</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.rewardhub.official.app</string>
+	<key>PROJECT_ID</key>
+	<string>rewardhub-1ea27</string>
+	<key>STORAGE_BUCKET</key>
+	<string>rewardhub-1ea27.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:563861371307:ios:4a2ed629cab5b99f247aee</string>
+</dict>
+</plist>
