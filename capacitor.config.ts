@@ -20,11 +20,11 @@ const config: CapacitorConfig = {
     // forceCodeForRefreshToken:true + grantOfflineAccess:true are what
     // made the picker appear. The token exchange is now handled differently
     // in firebase.ts (using accessToken instead of idToken).
-    GoogleAuth: {
-      scopes: ["profile", "email"],
-      serverClientId: "563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com",
-      forceCodeForRefreshToken: true
-    }
+GoogleAuth: {
+  scopes: ['profile', 'email'],
+  serverClientId: '563861371307-8emfj8kd3725lpj0mb9kkkf1r16100hu.apps.googleusercontent.com',
+  forceCodeForRefreshToken: true,
+},
   }
 };
 
