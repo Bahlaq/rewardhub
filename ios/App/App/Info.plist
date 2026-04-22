@@ -26,9 +26,10 @@
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+	<!-- iOS 14.0 is 64-bit only, so arm64 replaces the old armv7 value. -->
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
-		<string>armv7</string>
+		<string>arm64</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
@@ -52,13 +53,14 @@
 	<key>GADApplicationIdentifier</key>
 	<string>ca-app-pub-1560161047680443~7734676516</string>
 
-	<!-- Required by App Tracking Transparency (capacitor-plugin-app-tracking-transparency) -->
-	<!-- Shown to the user when ATT prompt appears. Edit the text to match your app. -->
+	<!-- Required by App Tracking Transparency                        -->
+	<!-- (capacitor-plugin-app-tracking-transparency). Edit the copy   -->
+	<!-- below to match the wording approved by App Store Review.     -->
 	<key>NSUserTrackingUsageDescription</key>
 	<string>We use your data to show you more relevant ads and improve your experience in RewardHub.</string>
 
-	<!-- SKAdNetwork identifiers required by AdMob on iOS 14.5+ -->
-	<!-- Source: https://developers.google.com/admob/ios/ios14 (keep in sync with Google's list) -->
+	<!-- SKAdNetwork identifiers required by AdMob on iOS 14.5+.      -->
+	<!-- Source: https://developers.google.com/admob/ios/ios14        -->
 	<key>SKAdNetworkItems</key>
 	<array>
 		<dict><key>SKAdNetworkIdentifier</key><string>cstr6suwn9.skadnetwork</string></dict>
