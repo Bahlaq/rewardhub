@@ -1,6 +1,6 @@
 require_relative '../../node_modules/@capacitor/ios/scripts/pods_helpers'
 
-platform :ios, '13.0'
+platform :ios, '14.0'
 use_frameworks!
 
 # workaround to avoid Xcode caching of Pods that requires
@@ -24,17 +24,20 @@ target 'App' do
   capacitor_pods
 
   # ------------------------------------------------------------------
-  # AdMob SDK pin — DO NOT REMOVE
+  # AdMob SDK pin — REQUIRED for @capacitor-community/admob 6.2.0
   # ------------------------------------------------------------------
-  # Google-Mobile-Ads-SDK v12+ introduced breaking API renames that
-  # @capacitor-community/admob has not yet caught up with (e.g.
-  # UMPConsentStatus -> ConsentStatus). Pinning to 11.13.0 keeps the
-  # plugin source compiling until the upstream plugin is updated.
-  pod 'Google-Mobile-Ads-SDK', '11.13.0'
+  # The plugin's native Swift source references symbols from
+  # Google-Mobile-Ads-SDK 11.3.0. v11.4+ and all of v12.x introduce
+  # breaking renames (e.g. UMPConsentStatus -> ConsentStatus) that the
+  # plugin has not been updated for. Do not bump this without first
+  # upgrading @capacitor-community/admob to a compatible release.
+  pod 'Google-Mobile-Ads-SDK', '11.3.0'
 
-  # The UMP SDK is a separate pod pulled in transitively by AdMob.
-  # v3.x performed the UMPConsentStatus -> ConsentStatus rename, so we
-  # explicitly pin it to the v2.x line that matches 11.13.0's API.
+  # The UMP (User Messaging Platform) SDK is a separate pod, pulled in
+  # transitively by AdMob. Its v3.x line performed the
+  # UMPConsentStatus -> ConsentStatus rename, so we explicitly pin it
+  # to v2.7.x. The `~> 2.7.0` operator allows 2.7.x patch updates but
+  # blocks 2.8.0+ and all of 3.x.
   pod 'GoogleUserMessagingPlatform', '~> 2.7.0'
 end
 
