@@ -1,0 +1,43 @@
+require_relative '../../node_modules/@capacitor/ios/scripts/pods_helpers'
+
+platform :ios, '13.0'
+use_frameworks!
+
+# workaround to avoid Xcode caching of Pods that requires
+# Product -> Clean Build Folder after new Cordova plugins installed
+# Requires CocoaPods 1.6 or newer
+install! 'cocoapods', :disable_input_output_paths => true
+
+def capacitor_pods
+  pod 'Capacitor', :path => '../../node_modules/@capacitor/ios'
+  pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios'
+  pod 'CapacitorCommunityAdmob', :path => '../../node_modules/@capacitor-community/admob'
+  pod 'CapacitorBrowser', :path => '../../node_modules/@capacitor/browser'
+  pod 'CapacitorClipboard', :path => '../../node_modules/@capacitor/clipboard'
+  pod 'CapacitorPushNotifications', :path => '../../node_modules/@capacitor/push-notifications'
+  pod 'CapacitorToast', :path => '../../node_modules/@capacitor/toast'
+  pod 'CodetrixStudioCapacitorGoogleAuth', :path => '../../node_modules/@codetrix-studio/capacitor-google-auth'
+  pod 'CapacitorPluginAppTrackingTransparency', :path => '../../node_modules/capacitor-plugin-app-tracking-transparency'
+end
+
+target 'App' do
+  capacitor_pods
+
+  # ------------------------------------------------------------------
+  # AdMob SDK pin — DO NOT REMOVE
+  # ------------------------------------------------------------------
+  # Google-Mobile-Ads-SDK v12+ introduced breaking API renames that
+  # @capacitor-community/admob has not yet caught up with (e.g.
+  # UMPConsentStatus -> ConsentStatus). Pinning to 11.13.0 keeps the
+  # plugin source compiling until the upstream plugin is updated.
+  pod 'Google-Mobile-Ads-SDK', '11.13.0'
+
+  # The UMP SDK is a separate pod pulled in transitively by AdMob.
+  # v3.x performed the UMPConsentStatus -> ConsentStatus rename, so we
+  # explicitly pin it to the v2.x line that matches 11.13.0's API.
+  pod 'GoogleUserMessagingPlatform', '~> 2.7.0'
+end
+
+post_install do |installer|
+  assertDeploymentTarget(installer)
+end
