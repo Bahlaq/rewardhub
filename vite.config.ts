@@ -1,12 +1,40 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
-export default defineConfig({
-  plugins: [react(), tailwindcss()],
+// ════════════════════════════════════════════════════════════════════
+// capacitorHtmlFixes
+// --------------------------------------------------------------------
+// On iOS, Capacitor loads the app from `capacitor://localhost/`. Vite
+// emits `<script type="module" crossorigin ...>` by default, which
+// triggers WKWebView's cross-origin error scrubbing — every runtime
+// error becomes "Script error." with no stack, no filename, no line.
+// Removing the `crossorigin` attribute restores full error visibility
+// and also fixes silent script-load failures on older iOS versions.
+//
+// This plugin also strips `type="module"` import of `modulepreload`
+// link tags for the same reason.
+// ════════════════════════════════════════════════════════════════════
+function capacitorHtmlFixes(): Plugin {
+  return {
+    name: 'capacitor-html-fixes',
+    apply: 'build',
+    transformIndexHtml(html) {
+      return html
+        // Strip crossorigin from every tag that has it
+        .replace(/\s+crossorigin(="[^"]*")?/g, '')
+        // Also strip crossorigin from preload links
+        .replace(/<link\s+rel="modulepreload"([^>]*)>/g, (_m, rest) =>
+          `<link rel="modulepreload"${rest.replace(/\s+crossorigin(="[^"]*")?/g, '')}>`
+        );
+    },
+  };
+}
 
-  // Relative base is required for Capacitor iOS builds loaded via
-  // capacitor://localhost. Keeps asset references portable.
+export default defineConfig({
+  plugins: [react(), tailwindcss(), capacitorHtmlFixes()],
+
+  // Relative paths are mandatory for the `capacitor://` iOS scheme.
   base: './',
 
   server: {
@@ -15,15 +43,28 @@ export default defineConfig({
   },
 
   build: {
-    // ------------------------------------------------------------------
-    // IMPORTANT: Appflow's iOS pipeline hard-checks for a `www/` folder
-    // at project root (inherited from Ionic CLI conventions), regardless
-    // of what capacitor.config.ts declares as webDir. To keep Appflow
-    // happy AND stay consistent with Capacitor, we build to `www/` and
-    // point webDir at the same folder.
-    // ------------------------------------------------------------------
+    // Must be `www` for Appflow's iOS pipeline — see earlier fix.
     outDir: 'www',
     emptyOutDir: true,
     sourcemap: true,
+
+    // ------------------------------------------------------------------
+    // Target older Safari so the bundle doesn't use syntax that fails
+    // silently on the WKWebView shipped with iOS 14–15. Any syntax the
+    // WebView can't parse ALSO produces "Script error." with no detail.
+    // ------------------------------------------------------------------
+    target: ['es2020', 'safari14'],
+
+    // Keep modulepreload polyfill disabled — the polyfill injects its
+    // own fetch calls that fail under capacitor:// without CORS headers.
+    modulePreload: { polyfill: false },
+
+    rollupOptions: {
+      output: {
+        // Disable manualChunks optimizations that can break relative
+        // resolution under capacitor://. Let Vite chunk normally.
+        manualChunks: undefined,
+      },
+    },
   },
 });
