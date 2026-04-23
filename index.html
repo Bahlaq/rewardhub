@@ -2,10 +2,6 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <!--
-      viewport-fit=cover + initial-scale=1 is the correct combination
-      for Capacitor iOS (safe-area insets work, no pinch-zoom).
-    -->
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
@@ -13,23 +9,134 @@
     <meta name="format-detection" content="telephone=no" />
     <meta name="msapplication-tap-highlight" content="no" />
 
-    <!--
-      DO NOT add a <meta http-equiv="Content-Security-Policy"> tag.
-      Any CSP here will block Capacitor's injected bridge JS on iOS
-      and produce a silent "Script error." with no stack.
-      Capacitor doesn't need a CSP at this layer.
-    -->
+    <!-- DO NOT add a Content-Security-Policy meta tag. -->
 
     <title>RewardHub</title>
     <link rel="icon" type="image/png" href="./favicon.png" />
+
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; background: #fff; }
+      #rh-loader {
+        position: fixed; inset: 0;
+        display: flex; align-items: center; justify-content: center;
+        font: 14px -apple-system, system-ui, sans-serif; color: #888;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="rh-loader">Loading RewardHub…</div>
+    </div>
+
     <!--
-      Do NOT add `crossorigin` to this script tag. Vite adds it by
-      default at build time; the capacitorHtmlFixes plugin in
-      vite.config.ts strips it back out before the HTML is written
-      to `www/`. See vite.config.ts for the full explanation.
+      ═══════════════════════════════════════════════════════════════
+      INLINE ERROR HANDLER — runs synchronously before any module
+      script. This catches parse errors, network errors, and early
+      crashes that the previous in-main.tsx handler would miss
+      because main.tsx never got to register it.
+      ═══════════════════════════════════════════════════════════════
+    -->
+    <script>
+      (function () {
+        function show(title, body) {
+          try {
+            var root = document.getElementById('root') || document.body;
+            root.innerHTML =
+              '<div style="padding:16px;font:13px/1.4 ui-monospace,Menlo,monospace;background:#fff;color:#111;position:fixed;inset:0;overflow:auto;">' +
+                '<div style="color:#b00020;font-weight:700;margin-bottom:8px;font-size:15px;">' +
+                  title +
+                '</div>' +
+                '<pre style="white-space:pre-wrap;word-break:break-word;background:#f5f5f5;padding:12px;border-radius:8px;margin:0;">' +
+                  String(body).replace(/</g, '&lt;') +
+                '</pre>' +
+              '</div>';
+          } catch (_) {
+            console.error(title, body);
+          }
+        }
+
+        // Top-level script/asset load failures (capture phase required).
+        window.addEventListener(
+          'error',
+          function (e) {
+            var t = e.target;
+            if (t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK' || t.tagName === 'IMG')) {
+              show(
+                'Asset failed to load',
+                t.tagName + ': ' + (t.src || t.href || '(no src)') +
+                '\n\nThis usually means a file is missing from the www/ ' +
+                'bundle or a relative path is wrong. Check that vite.config.ts ' +
+                'has base:"./" and build.outDir:"www".'
+              );
+              return;
+            }
+
+            var msg = e.message || '';
+            var detail;
+            if (!e.filename && msg.indexOf('Script error') === 0) {
+              detail =
+                'The WebView still returned an opaque "Script error." ' +
+                'AFTER crossorigin stripping. This means the cause is no ' +
+                'longer CORS — it is a real runtime failure inside one of ' +
+                'the JS chunks, but WKWebView cannot surface details ' +
+                'because the module failed before any error-reporting ' +
+                'machinery was attached.\n\n' +
+                'Most likely culprits in this project:\n' +
+                '  1. Firebase config: apiKey/projectId does not match the ' +
+                'iOS bundle ID\n' +
+                '  2. A plugin module that calls a native method not ' +
+                'available on iOS\n' +
+                '  3. A syntax the iOS WebView cannot parse (update Vite ' +
+                'target to safari13 if that happens)';
+            } else {
+              detail =
+                ((e.error && e.error.stack) ||
+                  (e.error && e.error.message) ||
+                  msg) +
+                '\n\nFile: ' +
+                (e.filename || '(unknown)') +
+                ':' +
+                (e.lineno || 0) +
+                ':' +
+                (e.colno || 0);
+            }
+            show('JS error', detail);
+          },
+          true
+        );
+
+        // Unhandled promise rejections (e.g. Firebase init).
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e.reason;
+          show(
+            'Unhandled promise rejection',
+            (r && r.stack) ||
+              (r && r.message) ||
+              (typeof r === 'string' ? r : JSON.stringify(r))
+          );
+        });
+
+        // Sentinel: if #rh-loader is still visible after 15s, React
+        // never mounted. Tell the user what to check.
+        setTimeout(function () {
+          var loader = document.getElementById('rh-loader');
+          if (loader && loader.parentNode) {
+            show(
+              'App never mounted (15s timeout)',
+              'The bundle loaded but React did not render. Likely causes:\n' +
+              '  • A top-level await that never resolves (Firebase, auth)\n' +
+              '  • An infinite loop during module evaluation\n' +
+              '  • A network request during init blocking the first render'
+            );
+          }
+        }, 15000);
+      })();
+    </script>
+
+    <!--
+      Main bundle. The capacitorIosFixes plugin in vite.config.ts
+      guarantees that no `crossorigin` attribute is present on this
+      tag in the built www/index.html.
     -->
     <script type="module" src="/src/main.tsx"></script>
   </body>
