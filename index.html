@@ -1,13 +1,36 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="google-signin-client_id" content="563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com" />
+    <!--
+      viewport-fit=cover + initial-scale=1 is the correct combination
+      for Capacitor iOS (safe-area insets work, no pinch-zoom).
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="msapplication-tap-highlight" content="no" />
+
+    <!--
+      DO NOT add a <meta http-equiv="Content-Security-Policy"> tag.
+      Any CSP here will block Capacitor's injected bridge JS on iOS
+      and produce a silent "Script error." with no stack.
+      Capacitor doesn't need a CSP at this layer.
+    -->
+
     <title>RewardHub</title>
+    <link rel="icon" type="image/png" href="./favicon.png" />
   </head>
   <body>
     <div id="root"></div>
+    <!--
+      Do NOT add `crossorigin` to this script tag. Vite adds it by
+      default at build time; the capacitorHtmlFixes plugin in
+      vite.config.ts strips it back out before the HTML is written
+      to `www/`. See vite.config.ts for the full explanation.
+    -->
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
