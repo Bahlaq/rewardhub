@@ -1,13 +1,3 @@
-// ════════════════════════════════════════════════════════════════════
-//  Paste this block at the VERY TOP of src/main.tsx — before any other
-//  imports that might throw. It catches any uncaught error or promise
-//  rejection and renders it visibly to the screen so you can read it
-//  directly on the phone instead of a white void.
-//
-//  Once the white screen is fixed, you can leave this in place or
-//  wrap it in `if (import.meta.env.DEV)` for dev-only visibility.
-// ════════════════════════════════════════════════════════════════════
-
 function renderFatal(title: string, detail: string) {
   try {
     const root = document.getElementById('root') || document.body;
@@ -25,16 +15,41 @@ ${detail.replace(/</g, '&lt;')}
         </pre>
       </div>`;
   } catch {
-    // If even this fails, the console is all we have.
     console.error(title, detail);
   }
 }
 
 window.addEventListener('error', (e) => {
   const err = e.error || e.message;
+  const isOpaque =
+    (typeof e.message === 'string' && e.message === 'Script error.') ||
+    (!e.filename && !e.lineno && !e.error);
+
+  if (isOpaque) {
+    renderFatal(
+      'Script error (details hidden by WebView)',
+      [
+        'The WebView scrubbed the error details because the script was',
+        'marked with the `crossorigin` attribute.',
+        '',
+        'Fix: remove `crossorigin` from the <script> tags in the built',
+        'index.html. In vite.config.ts, use the `capacitorHtmlFixes`',
+        'plugin that strips it at build time.',
+        '',
+        'If you see this AFTER applying that fix, the real cause is',
+        'usually one of:',
+        '  • A syntax error in a chunk the current WebView cannot parse',
+        '  • A dynamic import() resolving to a path that does not exist',
+        '  • A <script src> in index.html that 404s',
+      ].join('\n')
+    );
+    return;
+  }
+
   renderFatal(
     'Uncaught JS error',
-    (err && err.stack) || String(err) + '\n' + (e.filename || '') + ':' + (e.lineno || '')
+    (err && err.stack) ||
+      String(err) + '\n' + (e.filename || '') + ':' + (e.lineno || '')
   );
 });
 
@@ -46,11 +61,23 @@ window.addEventListener('unhandledrejection', (e) => {
   );
 });
 
-// ════════════════════════════════════════════════════════════════════
-// ...after this block, your existing main.tsx imports and ReactDOM
-// render call continue normally. Do NOT wrap them in try/catch — the
-// listeners above catch everything.
-// ════════════════════════════════════════════════════════════════════
+// Extra: listen for script load failures (these do NOT fire `error` on
+// window — they fire on the script element in capture phase).
+window.addEventListener(
+  'error',
+  (e: any) => {
+    if (e.target && (e.target.tagName === 'SCRIPT' || e.target.tagName === 'LINK')) {
+      renderFatal(
+        'Asset failed to load',
+        `${e.target.tagName}: ${e.target.src || e.target.href || '(no src)'}\n` +
+          'This usually means a file is missing from the `www/` bundle or\n' +
+          'a relative path is wrong. Check that vite.config.ts has\n' +
+          '  base: "./"  and  build.outDir: "www"'
+      );
+    }
+  },
+  true // capture — required to see resource-load errors
+);
 import './index.css';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
