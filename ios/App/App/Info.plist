@@ -16,8 +16,21 @@
 	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<!--
+	  Hardcoded version strings so the number you see here is the number
+	  TestFlight receives — no dependency on Xcode build settings.
+
+	  App Store Connect requires:
+	    * CFBundleShortVersionString to be >= the last-accepted version
+	      (and typically bumped when you change what users see)
+	    * CFBundleVersion to be STRICTLY GREATER than every previous
+	      CFBundleVersion uploaded for the same CFBundleShortVersionString
+
+	  Bump CFBundleVersion on every new upload, even if the user-facing
+	  version hasn't changed.
+	-->
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.1</string>
+	<string>13.5.3</string>
 	<key>CFBundleVersion</key>
 	<string>2</string>
 	<key>LSRequiresIPhoneOS</key>
