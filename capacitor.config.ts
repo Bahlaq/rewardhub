@@ -5,39 +5,35 @@ const config: CapacitorConfig = {
   appName: 'RewardHub',
   webDir: 'dist',
 
-  // iOS platform settings
+  // Note: `bundledWebRuntime` was REMOVED in Capacitor 3.x and is not a
+  // valid key in Capacitor 6. Do not add it — it will be ignored at best
+  // and rejected by the CLI at worst.
+
+  // ---- iOS ---------------------------------------------------------
   ios: {
     contentInset: 'automatic',
-    // Uncomment the next line only if you also want to override in native code:
-    // scheme: 'RewardHub',
+    // Default scheme is `capacitor`. Keeping it explicit so the URL the
+    // WebView loads is deterministic and matches what the plugins expect.
+    scheme: 'RewardHub',
   },
 
-  // Android platform settings — untouched, shown here for completeness.
+  // ---- Android (untouched, listed for completeness) ----------------
   android: {
     allowMixedContent: false,
   },
 
-  plugins: {
-    // ------------------------------------------------------------------
-    // Google Sign-In (@codetrix-studio/capacitor-google-auth)
-    // ------------------------------------------------------------------
-    // serverClientId must be the WEB client ID (not the iOS one),
-    // because the plugin exchanges the iOS ID token for a server-side
-    // token verified against this client.
-    GoogleAuth: {
-      scopes: ['profile', 'email'],
-      serverClientId:
-        '563861371307-8emfj8kd3725lpj0mb9kkkf1r16100hu.apps.googleusercontent.com',
-      forceCodeForRefreshToken: true,
-    },
-
-    // ------------------------------------------------------------------
-    // Push Notifications (@capacitor/push-notifications)
-    // ------------------------------------------------------------------
-    PushNotifications: {
-      presentationOptions: ['badge', 'sound', 'alert'],
-    },
-  },
-};
-
-export default config;
+  // ---- WebView server configuration --------------------------------
+  // androidScheme 'https' is the Capacitor default and is required for
+  // service workers / secure cookies. iOS uses `capacitor://` scheme
+  // by default, which is fine — do NOT set server.url unless you want
+  // the app to load from a remote origin.
+  server: {
+    androidScheme: 'https',
+    iosScheme: 'capacitor',
+    // Allow redirects to these hosts during in-app navigation (e.g.
+    // Google Sign-In and Firebase Auth popups). Extend as needed.
+    allowNavigation: [
+      'accounts.google.com',
+      '*.firebaseapp.com',
+      '*.googleapis.com',
+     
