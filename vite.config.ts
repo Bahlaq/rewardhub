@@ -3,38 +3,43 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 // ════════════════════════════════════════════════════════════════════
-// capacitorHtmlFixes
+// capacitorIosFixes
 // --------------------------------------------------------------------
-// On iOS, Capacitor loads the app from `capacitor://localhost/`. Vite
-// emits `<script type="module" crossorigin ...>` by default, which
-// triggers WKWebView's cross-origin error scrubbing — every runtime
-// error becomes "Script error." with no stack, no filename, no line.
-// Removing the `crossorigin` attribute restores full error visibility
-// and also fixes silent script-load failures on older iOS versions.
-//
-// This plugin also strips `type="module"` import of `modulepreload`
-// link tags for the same reason.
+// Uses the `generateBundle` hook (NOT `transformIndexHtml`) because
+// Vite's core adds the `crossorigin` attribute during bundling, AFTER
+// all `transformIndexHtml` hooks have run. `generateBundle` fires
+// right before files are written to disk — it's the only reliable
+// place to guarantee the attribute is removed from the final HTML.
 // ════════════════════════════════════════════════════════════════════
-function capacitorHtmlFixes(): Plugin {
+function capacitorIosFixes(): Plugin {
   return {
-    name: 'capacitor-html-fixes',
+    name: 'capacitor-ios-fixes',
     apply: 'build',
-    transformIndexHtml(html) {
-      return html
-        // Strip crossorigin from every tag that has it
-        .replace(/\s+crossorigin(="[^"]*")?/g, '')
-        // Also strip crossorigin from preload links
-        .replace(/<link\s+rel="modulepreload"([^>]*)>/g, (_m, rest) =>
-          `<link rel="modulepreload"${rest.replace(/\s+crossorigin(="[^"]*")?/g, '')}>`
-        );
+    generateBundle(_options, bundle) {
+      for (const fileName of Object.keys(bundle)) {
+        const chunk = bundle[fileName];
+        if (fileName.endsWith('.html') && chunk.type === 'asset') {
+          const original =
+            typeof chunk.source === 'string'
+              ? chunk.source
+              : Buffer.from(chunk.source as Uint8Array).toString('utf-8');
+          chunk.source = original
+            // Strip every crossorigin attribute — the root cause of the
+            // opaque "Script error." on iOS WKWebView.
+            .replace(/\s+crossorigin(="[^"]*")?/g, '')
+            // Strip integrity hashes for the same reason (they force a
+            // cross-origin check iOS can't satisfy under capacitor://).
+            .replace(/\s+integrity="[^"]*"/g, '');
+        }
+      }
     },
   };
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), capacitorHtmlFixes()],
+  plugins: [react(), tailwindcss(), capacitorIosFixes()],
 
-  // Relative paths are mandatory for the `capacitor://` iOS scheme.
+  // Required for capacitor:// scheme on iOS.
   base: './',
 
   server: {
@@ -43,27 +48,34 @@ export default defineConfig({
   },
 
   build: {
-    // Must be `www` for Appflow's iOS pipeline — see earlier fix.
+    // Appflow's iOS pipeline requires this folder name.
     outDir: 'www',
     emptyOutDir: true,
-    sourcemap: true,
 
-    // ------------------------------------------------------------------
-    // Target older Safari so the bundle doesn't use syntax that fails
-    // silently on the WKWebView shipped with iOS 14–15. Any syntax the
-    // WebView can't parse ALSO produces "Script error." with no detail.
-    // ------------------------------------------------------------------
+    // Source maps off keeps the bundle small for mobile and removes
+    // an extra cross-origin fetch that WKWebView can trip on.
+    sourcemap: false,
+
+    // Conservative target — works on every iPhone that can run iOS 14.
     target: ['es2020', 'safari14'],
 
-    // Keep modulepreload polyfill disabled — the polyfill injects its
-    // own fetch calls that fail under capacitor:// without CORS headers.
-    modulePreload: { polyfill: false },
+    // Disable modulepreload entirely (not just the polyfill). The
+    // polyfill injects fetch() calls; the non-polyfill version emits
+    // <link rel="modulepreload" crossorigin ...> which we'd have to
+    // strip again. Simplest to turn it off.
+    modulePreload: false,
+
+    cssCodeSplit: true,
+    assetsInlineLimit: 4096,
 
     rollupOptions: {
       output: {
-        // Disable manualChunks optimizations that can break relative
-        // resolution under capacitor://. Let Vite chunk normally.
+        // Let Vite chunk normally but with predictable filenames so
+        // asset-load errors in the inline handler point at readable paths.
         manualChunks: undefined,
+        entryFileNames: 'assets/[name]-[hash].js',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash][extname]',
       },
     },
   },
