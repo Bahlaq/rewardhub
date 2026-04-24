@@ -2,15 +2,9 @@ import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
-// ════════════════════════════════════════════════════════════════════
-// capacitorIosFixes
-// --------------------------------------------------------------------
-// Uses the `generateBundle` hook (NOT `transformIndexHtml`) because
-// Vite's core adds the `crossorigin` attribute during bundling, AFTER
-// all `transformIndexHtml` hooks have run. `generateBundle` fires
-// right before files are written to disk — it's the only reliable
-// place to guarantee the attribute is removed from the final HTML.
-// ════════════════════════════════════════════════════════════════════
+// Strips crossorigin + integrity from every HTML asset in the bundle.
+// generateBundle fires AFTER Vite/Rollup have already injected those
+// attributes, so this is the only reliable place to remove them.
 function capacitorIosFixes(): Plugin {
   return {
     name: 'capacitor-ios-fixes',
@@ -19,16 +13,12 @@ function capacitorIosFixes(): Plugin {
       for (const fileName of Object.keys(bundle)) {
         const chunk = bundle[fileName];
         if (fileName.endsWith('.html') && chunk.type === 'asset') {
-          const original =
+          const src =
             typeof chunk.source === 'string'
               ? chunk.source
               : Buffer.from(chunk.source as Uint8Array).toString('utf-8');
-          chunk.source = original
-            // Strip every crossorigin attribute — the root cause of the
-            // opaque "Script error." on iOS WKWebView.
+          chunk.source = src
             .replace(/\s+crossorigin(="[^"]*")?/g, '')
-            // Strip integrity hashes for the same reason (they force a
-            // cross-origin check iOS can't satisfy under capacitor://).
             .replace(/\s+integrity="[^"]*"/g, '');
         }
       }
@@ -39,7 +29,7 @@ function capacitorIosFixes(): Plugin {
 export default defineConfig({
   plugins: [react(), tailwindcss(), capacitorIosFixes()],
 
-  // Required for capacitor:// scheme on iOS.
+  // Relative base is required for capacitor:// / custom-scheme URLs.
   base: './',
 
   server: {
@@ -47,22 +37,31 @@ export default defineConfig({
     host: '0.0.0.0',
   },
 
+  // Pre-bundle deps through esbuild so the same target applies to
+  // node_modules in both dev and production.
+  optimizeDeps: {
+    esbuildOptions: {
+      // Match the production build target so there are no
+      // syntax surprises between dev and prod bundles.
+      target: ['safari14', 'chrome87', 'edge88', 'firefox78'],
+    },
+  },
+
   build: {
-    // Appflow's iOS pipeline requires this folder name.
     outDir: 'www',
     emptyOutDir: true,
-
-    // Source maps off keeps the bundle small for mobile and removes
-    // an extra cross-origin fetch that WKWebView can trip on.
     sourcemap: false,
 
-    // Conservative target — works on every iPhone that can run iOS 14.
-    target: ['es2020', 'safari14'],
+    // ── Syntax target ────────────────────────────────────────────────
+    // Listing every target browser forces esbuild to transform ALL
+    // syntax that ANY of these browsers can't handle — private class
+    // fields, static class blocks, optional catch bindings, etc.
+    // Safari 14 is the most restrictive; the others keep parity with
+    // common desktop versions from the same era.
+    target: ['safari14', 'chrome87', 'edge88', 'firefox78'],
 
-    // Disable modulepreload entirely (not just the polyfill). The
-    // polyfill injects fetch() calls; the non-polyfill version emits
-    // <link rel="modulepreload" crossorigin ...> which we'd have to
-    // strip again. Simplest to turn it off.
+    // Disable module preload — emits <link crossorigin modulepreload>
+    // which WKWebView rejects under the capacitor:// scheme.
     modulePreload: false,
 
     cssCodeSplit: true,
@@ -70,8 +69,6 @@ export default defineConfig({
 
     rollupOptions: {
       output: {
-        // Let Vite chunk normally but with predictable filenames so
-        // asset-load errors in the inline handler point at readable paths.
         manualChunks: undefined,
         entryFileNames: 'assets/[name]-[hash].js',
         chunkFileNames: 'assets/[name]-[hash].js',
