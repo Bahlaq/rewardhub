@@ -3,61 +3,62 @@
   <head>
     <!--
       ═══════════════════════════════════════════════════════════════
-      POLYFILLS — MUST be the very first script in the document.
-      Every polyfill here targets a Web API that is missing in some
-      iOS / Safari version but is required by our npm dependencies
-      at module-evaluation time (before React even mounts).
+      POLYFILLS — absolute first script in the document.
+      Inline classic scripts run synchronously before any module
+      script is evaluated, so every API below is guaranteed to exist
+      by the time Firebase / Motion / React initialise.
 
-      Availability chart (the crash column = what broke the app):
-        structuredClone     Safari 15.4  ← Firebase Firestore 12.x
-        Object.hasOwn       Safari 15.4  ← Firebase / Motion
-        Array/String.at     Safari 15.4  ← Firebase / Motion
-        Promise.any         Safari 15    ← Firebase Auth
-        WeakRef             Safari 14.5  ← Firebase Firestore listener mgmt
-        FinalizationRegistry Safari 14.5 ← Firebase companion to WeakRef
-        CSS.registerProperty Safari 16.4 ← motion/react v12 (MOST LIKELY)
-        crypto.randomUUID   Safari 15.4  ← Firebase ID generation
+      Availability by Safari version (Capacitor 6 min = iOS 14.0):
+        globalThis           Safari 12.1   (should be fine, belt+suspenders)
+        WeakRef              Safari 14.5   ← Firebase Firestore listeners
+        FinalizationRegistry Safari 14.5   ← Firebase companion
+        Promise.any          Safari 15     ← Firebase Auth
+        structuredClone      Safari 15.4   ← Firestore document cloning
+        Object.hasOwn        Safari 15.4   ← Firebase / Motion internals
+        Array/String.at      Safari 15.4   ← Modern array utils
+        crypto.randomUUID    Safari 15.4   ← Firebase ID generation
+        CSS.registerProperty Safari 16.4   ← motion/react v12 (top suspect)
+        AbortController      Safari 12.1   (belt+suspenders)
       ═══════════════════════════════════════════════════════════════
     -->
     <script>
       (function () {
 
-        /* ── structuredClone (Safari < 15.4) ──────────────────── */
-        if (typeof structuredClone !== 'function') {
-          window.structuredClone = function (val) {
-            if (val === undefined) return undefined;
-            try { return JSON.parse(JSON.stringify(val)); } catch (e) { return val; }
-          };
+        /* ── globalThis (Safari < 12.1, extreme edge case) ──────── */
+        if (typeof globalThis === 'undefined') {
+          Object.defineProperty(Object.prototype, '__magic__', {
+            get: function () { return this; },
+            configurable: true,
+          });
+          /* jshint ignore:start */
+          var _gt = __magic__; // eslint-disable-line no-undef
+          /* jshint ignore:end */
+          delete Object.prototype.__magic__;
+          window.globalThis = _gt;
         }
 
-        /* ── Object.hasOwn (Safari < 15.4) ───────────────────── */
-        if (typeof Object.hasOwn !== 'function') {
-          Object.hasOwn = function (obj, key) {
-            return Object.prototype.hasOwnProperty.call(obj, key);
-          };
+        /* ── WeakRef (Safari < 14.5) ─────────────────────────────── */
+        if (typeof WeakRef === 'undefined') {
+          window.WeakRef = function WeakRef(t) { this._t = t; };
+          window.WeakRef.prototype.deref = function () { return this._t; };
         }
 
-        /* ── Array / String .at() (Safari < 15.4) ────────────── */
-        ['Array', 'String'].forEach(function (name) {
-          var proto = window[name] && window[name].prototype;
-          if (proto && typeof proto.at !== 'function') {
-            Object.defineProperty(proto, 'at', {
-              value: function (n) {
-                n = Math.trunc(n) || 0;
-                if (n < 0) n += this.length;
-                return (n >= 0 && n < this.length) ? this[n] : undefined;
-              },
-              writable: true, configurable: true
-            });
-          }
-        });
+        /* ── FinalizationRegistry (Safari < 14.5) ───────────────── */
+        if (typeof FinalizationRegistry === 'undefined') {
+          window.FinalizationRegistry = function FinalizationRegistry() {};
+          window.FinalizationRegistry.prototype.register   = function () {};
+          window.FinalizationRegistry.prototype.unregister = function () {};
+        }
 
-        /* ── Promise.any (Safari < 15) ────────────────────────── */
+        /* ── Promise.any (Safari < 15) ───────────────────────────── */
         if (typeof Promise !== 'undefined' && typeof Promise.any !== 'function') {
-          Promise.any = function (iterable) {
+          Promise.any = function any(iterable) {
             var arr = Array.from(iterable);
             return new Promise(function (resolve, reject) {
-              if (!arr.length) { reject(new AggregateError([], 'All promises were rejected')); return; }
+              if (!arr.length) {
+                reject(new AggregateError([], 'All promises were rejected'));
+                return;
+              }
               var errs = new Array(arr.length), rem = arr.length;
               arr.forEach(function (p, i) {
                 Promise.resolve(p).then(resolve, function (e) {
@@ -69,34 +70,62 @@
           };
         }
 
-        /* ── WeakRef (Safari < 14.5) ──────────────────────────── */
-        if (typeof WeakRef === 'undefined') {
-          window.WeakRef = function (target) { this._t = target; };
-          window.WeakRef.prototype.deref = function () { return this._t; };
+        /* ── structuredClone (Safari < 15.4) ────────────────────── */
+        if (typeof structuredClone !== 'function') {
+          window.structuredClone = function (val) {
+            if (val === undefined) return undefined;
+            try { return JSON.parse(JSON.stringify(val)); } catch (e) { return val; }
+          };
         }
 
-        /* ── FinalizationRegistry (Safari < 14.5) ─────────────── */
-        if (typeof FinalizationRegistry === 'undefined') {
-          window.FinalizationRegistry = function () {};
-          window.FinalizationRegistry.prototype.register   = function () {};
-          window.FinalizationRegistry.prototype.unregister = function () {};
+        /* ── Object.hasOwn (Safari < 15.4) ──────────────────────── */
+        if (typeof Object.hasOwn !== 'function') {
+          Object.hasOwn = function hasOwn(obj, key) {
+            return Object.prototype.hasOwnProperty.call(obj, key);
+          };
         }
 
-        /* ── CSS.registerProperty (Safari < 16.4) ─────────────── */
-        /*    motion/react v12 calls this at module-evaluation time */
-        /*    to register --motion-scale / --motion-translate-x etc.*/
-        /*    Without it: TypeError → entire module graph crashes.   */
-        if (typeof CSS !== 'undefined' && typeof CSS.registerProperty !== 'function') {
-          CSS.registerProperty = function () { /* noop — Motion falls back to JS animations */ };
-        }
+        /* ── Array.prototype.at / String.prototype.at (< 15.4) ─── */
+        ['Array', 'String'].forEach(function (name) {
+          var proto = window[name] && window[name].prototype;
+          if (proto && typeof proto.at !== 'function') {
+            Object.defineProperty(proto, 'at', {
+              value: function (n) {
+                n = Math.trunc(n) || 0;
+                if (n < 0) n += this.length;
+                return (n >= 0 && n < this.length) ? this[n] : undefined;
+              },
+              writable: true, configurable: true,
+            });
+          }
+        });
 
-        /* ── crypto.randomUUID (Safari < 15.4) ───────────────── */
+        /* ── crypto.randomUUID (Safari < 15.4) ──────────────────── */
         if (typeof crypto !== 'undefined' && typeof crypto.randomUUID !== 'function') {
           crypto.randomUUID = function () {
             return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
               var r = crypto.getRandomValues(new Uint8Array(1))[0] % 16;
               return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
             });
+          };
+        }
+
+        /* ── CSS.registerProperty (Safari < 16.4) ───────────────── */
+        /*    motion/react v12 calls this unconditionally at module   */
+        /*    load time to register --motion-scale etc. On Safari     */
+        /*    < 16.4 this is undefined → TypeError → entire import    */
+        /*    chain collapses as opaque "Script error."               */
+        if (typeof CSS !== 'undefined' && typeof CSS.registerProperty !== 'function') {
+          CSS.registerProperty = function () {};
+        }
+
+        /* ── AbortController (Safari < 12.1, belt+suspenders) ───── */
+        if (typeof AbortController === 'undefined') {
+          window.AbortController = function () {
+            this.signal = { aborted: false, addEventListener: function () {} };
+          };
+          window.AbortController.prototype.abort = function () {
+            this.signal.aborted = true;
           };
         }
 
@@ -128,15 +157,20 @@
       <div id="rh-loader">Loading RewardHub…</div>
     </div>
 
+    <!--
+      ═══════════════════════════════════════════════════════════════
+      GLOBAL ERROR HANDLER — registered before the app bundle loads.
+      ═══════════════════════════════════════════════════════════════
+    -->
     <script>
       (function () {
         function show(title, body) {
           try {
             var root = document.getElementById('root') || document.body;
             root.innerHTML =
-              '<div style="padding:16px;font:13px/1.4 ui-monospace,Menlo,monospace;' +
+              '<div style="padding:16px;font:12px/1.5 ui-monospace,Menlo,monospace;' +
               'background:#fff;color:#111;position:fixed;inset:0;overflow:auto;">' +
-                '<div style="color:#b00020;font-weight:700;margin-bottom:8px;font-size:15px;">' +
+                '<div style="color:#b00020;font-weight:700;font-size:14px;margin-bottom:8px;">' +
                   title +
                 '</div>' +
                 '<pre style="white-space:pre-wrap;word-break:break-word;' +
@@ -147,33 +181,29 @@
           } catch (_) { console.error(title, body); }
         }
 
+        window.__rhShow = show;
+
         window.addEventListener('error', function (e) {
           var t = e.target;
           if (t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK' || t.tagName === 'IMG')) {
-            show('Asset failed to load',
-              t.tagName + ': ' + (t.src || t.href || '(no src)') +
-              '\n\nA file is missing from the www/ bundle. ' +
-              'Check vite.config.ts: base:"./" and build.outDir:"www".');
+            show('Asset load failure',
+              (t.src || t.href || '(no src)') +
+              '\n\nA file is missing from www/. Confirm vite.config.ts ' +
+              'has base:"./" and build.outDir:"www".');
             return;
           }
           var msg = e.message || '';
-          var detail;
           if (!e.filename && msg.indexOf('Script error') === 0) {
-            detail =
-              'WKWebView opaque "Script error." — a JS module crashed.\n\n' +
-              'All known polyfills are now in place (structuredClone, WeakRef,\n' +
-              'CSS.registerProperty, crypto.randomUUID, etc.).\n\n' +
-              'If this persists, connect Safari Web Inspector to this device and\n' +
-              'look for the first red error in the Console tab — it will show the\n' +
-              'exact TypeError / ReferenceError and which file caused it.\n\n' +
-              'Develop menu → Experimental → Allow Inspecting WebViews must be ON.';
+            show('Script error (WKWebView masked the details)',
+              'All polyfills are active. The dynamic import below should\n' +
+              'have shown the real error instead of this message.\n' +
+              'Connect Safari Web Inspector (Mac → Develop menu) for the\n' +
+              'actual stack trace.');
           } else {
-            detail =
+            show('JS error',
               ((e.error && e.error.stack) || (e.error && e.error.message) || msg) +
-              '\n\nFile: ' + (e.filename || '(unknown)') +
-              ':' + (e.lineno || 0) + ':' + (e.colno || 0);
+              '\nFile: ' + (e.filename || '?') + ':' + (e.lineno || 0));
           }
-          show('JS error', detail);
         }, true);
 
         window.addEventListener('unhandledrejection', function (e) {
@@ -187,15 +217,43 @@
           var loader = document.getElementById('rh-loader');
           if (loader && loader.parentNode) {
             show('App never mounted (15s timeout)',
-              'Bundle loaded but React never rendered.\n' +
-              '  • Firebase init hanging (network / auth domain)\n' +
-              '  • A top-level await blocking the module\n' +
-              '  • An infinite loop during module evaluation');
+              '• Firebase auth hanging — check apiKey / authDomain\n' +
+              '• A top-level await blocking the module\n' +
+              '• Silent crash not caught by error handler');
           }
         }, 15000);
       })();
     </script>
 
-    <script type="module" src="/src/main.tsx"></script>
+    <!--
+      ═══════════════════════════════════════════════════════════════
+      APP ENTRY — dynamic import().catch() instead of a static
+      <script type="module" src="..."> tag.
+
+      WHY: WKWebView ALWAYS reports static-module errors as the
+      opaque "Script error." with no filename, hiding the real cause.
+      A dynamic import() rejects with a real Error object, so .catch()
+      receives the full TypeError/SyntaxError/ReferenceError and we
+      can display it on screen.
+
+      Vite transforms import('/src/main.tsx') to the correct hashed
+      asset path in the built www/index.html, exactly as it does for
+      the static src attribute.
+      ═══════════════════════════════════════════════════════════════
+    -->
+    <script type="module">
+      import('/src/main.tsx').catch(function (err) {
+        var msg = (err && err.stack) || (err && err.message) || String(err);
+        console.error('[Boot] Module load failed:', err);
+        if (window.__rhShow) {
+          window.__rhShow(
+            'Boot error — real details',
+            msg + '\n\n' +
+            'This is the ACTUAL error (not the WKWebView-masked "Script error.").\n' +
+            'Add the missing polyfill or fix the shown TypeError/ReferenceError.'
+          );
+        }
+      });
+    </script>
   </body>
 </html>
