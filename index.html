@@ -3,73 +3,103 @@
   <head>
     <!--
       ═══════════════════════════════════════════════════════════════
-      POLYFILLS — must appear FIRST, before any <script type="module">.
-      These patch Web APIs that Firebase 12.x / Motion 12.x need but
-      that are missing in iOS < 15.4 (Safari < 15.4):
-        • structuredClone  — added Safari 15.4, Mar 2022
-        • Object.hasOwn    — added Safari 15.4, Mar 2022
-        • Array/String.at  — added Safari 15.4, Mar 2022
-        • Promise.any      — added Safari 15,   Sep 2021
-      Without these, initializeFirestore() throws ReferenceError on
-      older devices and the entire module graph fails silently as
-      WKWebView's opaque "Script error."
+      POLYFILLS — MUST be the very first script in the document.
+      Every polyfill here targets a Web API that is missing in some
+      iOS / Safari version but is required by our npm dependencies
+      at module-evaluation time (before React even mounts).
+
+      Availability chart (the crash column = what broke the app):
+        structuredClone     Safari 15.4  ← Firebase Firestore 12.x
+        Object.hasOwn       Safari 15.4  ← Firebase / Motion
+        Array/String.at     Safari 15.4  ← Firebase / Motion
+        Promise.any         Safari 15    ← Firebase Auth
+        WeakRef             Safari 14.5  ← Firebase Firestore listener mgmt
+        FinalizationRegistry Safari 14.5 ← Firebase companion to WeakRef
+        CSS.registerProperty Safari 16.4 ← motion/react v12 (MOST LIKELY)
+        crypto.randomUUID   Safari 15.4  ← Firebase ID generation
       ═══════════════════════════════════════════════════════════════
     -->
     <script>
       (function () {
-        /* structuredClone */
+
+        /* ── structuredClone (Safari < 15.4) ──────────────────── */
         if (typeof structuredClone !== 'function') {
-          self.structuredClone = function sc(val) {
+          window.structuredClone = function (val) {
             if (val === undefined) return undefined;
             try { return JSON.parse(JSON.stringify(val)); } catch (e) { return val; }
           };
         }
 
-        /* Object.hasOwn */
+        /* ── Object.hasOwn (Safari < 15.4) ───────────────────── */
         if (typeof Object.hasOwn !== 'function') {
-          Object.hasOwn = function hasOwn(obj, key) {
+          Object.hasOwn = function (obj, key) {
             return Object.prototype.hasOwnProperty.call(obj, key);
           };
         }
 
-        /* Array.prototype.at / String.prototype.at */
+        /* ── Array / String .at() (Safari < 15.4) ────────────── */
         ['Array', 'String'].forEach(function (name) {
-          var proto = self[name] && self[name].prototype;
+          var proto = window[name] && window[name].prototype;
           if (proto && typeof proto.at !== 'function') {
             Object.defineProperty(proto, 'at', {
-              value: function at(n) {
+              value: function (n) {
                 n = Math.trunc(n) || 0;
                 if (n < 0) n += this.length;
                 return (n >= 0 && n < this.length) ? this[n] : undefined;
               },
-              writable: true,
-              configurable: true,
+              writable: true, configurable: true
             });
           }
         });
 
-        /* Promise.any */
+        /* ── Promise.any (Safari < 15) ────────────────────────── */
         if (typeof Promise !== 'undefined' && typeof Promise.any !== 'function') {
-          Promise.any = function any(iterable) {
-            var promises = Array.from(iterable);
+          Promise.any = function (iterable) {
+            var arr = Array.from(iterable);
             return new Promise(function (resolve, reject) {
-              if (!promises.length) {
-                reject(new AggregateError([], 'All promises were rejected'));
-                return;
-              }
-              var errs = new Array(promises.length);
-              var remaining = promises.length;
-              promises.forEach(function (p, i) {
+              if (!arr.length) { reject(new AggregateError([], 'All promises were rejected')); return; }
+              var errs = new Array(arr.length), rem = arr.length;
+              arr.forEach(function (p, i) {
                 Promise.resolve(p).then(resolve, function (e) {
                   errs[i] = e;
-                  if (!--remaining) {
-                    reject(new AggregateError(errs, 'All promises were rejected'));
-                  }
+                  if (!--rem) reject(new AggregateError(errs, 'All promises were rejected'));
                 });
               });
             });
           };
         }
+
+        /* ── WeakRef (Safari < 14.5) ──────────────────────────── */
+        if (typeof WeakRef === 'undefined') {
+          window.WeakRef = function (target) { this._t = target; };
+          window.WeakRef.prototype.deref = function () { return this._t; };
+        }
+
+        /* ── FinalizationRegistry (Safari < 14.5) ─────────────── */
+        if (typeof FinalizationRegistry === 'undefined') {
+          window.FinalizationRegistry = function () {};
+          window.FinalizationRegistry.prototype.register   = function () {};
+          window.FinalizationRegistry.prototype.unregister = function () {};
+        }
+
+        /* ── CSS.registerProperty (Safari < 16.4) ─────────────── */
+        /*    motion/react v12 calls this at module-evaluation time */
+        /*    to register --motion-scale / --motion-translate-x etc.*/
+        /*    Without it: TypeError → entire module graph crashes.   */
+        if (typeof CSS !== 'undefined' && typeof CSS.registerProperty !== 'function') {
+          CSS.registerProperty = function () { /* noop — Motion falls back to JS animations */ };
+        }
+
+        /* ── crypto.randomUUID (Safari < 15.4) ───────────────── */
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID !== 'function') {
+          crypto.randomUUID = function () {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+              var r = crypto.getRandomValues(new Uint8Array(1))[0] % 16;
+              return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+            });
+          };
+        }
+
       })();
     </script>
 
@@ -98,56 +128,45 @@
       <div id="rh-loader">Loading RewardHub…</div>
     </div>
 
-    <!--
-      ═══════════════════════════════════════════════════════════════
-      INLINE ERROR HANDLER — runs synchronously before any module
-      script. Catches parse errors, network errors, and early crashes.
-      ═══════════════════════════════════════════════════════════════
-    -->
     <script>
       (function () {
         function show(title, body) {
           try {
             var root = document.getElementById('root') || document.body;
             root.innerHTML =
-              '<div style="padding:16px;font:13px/1.4 ui-monospace,Menlo,monospace;background:#fff;color:#111;position:fixed;inset:0;overflow:auto;">' +
-                '<div style="color:#b00020;font-weight:700;margin-bottom:8px;font-size:15px;">' + title + '</div>' +
-                '<pre style="white-space:pre-wrap;word-break:break-word;background:#f5f5f5;padding:12px;border-radius:8px;margin:0;">' +
+              '<div style="padding:16px;font:13px/1.4 ui-monospace,Menlo,monospace;' +
+              'background:#fff;color:#111;position:fixed;inset:0;overflow:auto;">' +
+                '<div style="color:#b00020;font-weight:700;margin-bottom:8px;font-size:15px;">' +
+                  title +
+                '</div>' +
+                '<pre style="white-space:pre-wrap;word-break:break-word;' +
+                'background:#f5f5f5;padding:12px;border-radius:8px;margin:0;">' +
                   String(body).replace(/</g, '&lt;') +
                 '</pre>' +
               '</div>';
-          } catch (_) {
-            console.error(title, body);
-          }
+          } catch (_) { console.error(title, body); }
         }
 
         window.addEventListener('error', function (e) {
           var t = e.target;
           if (t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK' || t.tagName === 'IMG')) {
-            show(
-              'Asset failed to load',
+            show('Asset failed to load',
               t.tagName + ': ' + (t.src || t.href || '(no src)') +
-              '\n\nFile missing from www/ bundle or wrong path. ' +
-              'Check vite.config.ts: base:"./" and build.outDir:"www".'
-            );
+              '\n\nA file is missing from the www/ bundle. ' +
+              'Check vite.config.ts: base:"./" and build.outDir:"www".');
             return;
           }
-
           var msg = e.message || '';
           var detail;
           if (!e.filename && msg.indexOf('Script error') === 0) {
             detail =
-              'WKWebView reported an opaque "Script error." — this means a ' +
-              'JS module crashed before it could identify itself.\n\n' +
-              'MOST LIKELY CAUSE on this device:\n' +
-              '  Missing Web API polyfill — the polyfill block in <head>\n' +
-              '  should have fixed structuredClone / Object.hasOwn / Array.at.\n' +
-              '  If you still see this, check the browser console for:\n' +
-              '    ReferenceError / TypeError from Firebase or Motion.\n\n' +
-              'Other causes:\n' +
-              '  • Firebase config (apiKey/projectId) mismatch\n' +
-              '  • A native plugin calling a method unavailable on iOS\n' +
-              '  • iOS < 14 (Capacitor 6 requires iOS 14 minimum)';
+              'WKWebView opaque "Script error." — a JS module crashed.\n\n' +
+              'All known polyfills are now in place (structuredClone, WeakRef,\n' +
+              'CSS.registerProperty, crypto.randomUUID, etc.).\n\n' +
+              'If this persists, connect Safari Web Inspector to this device and\n' +
+              'look for the first red error in the Console tab — it will show the\n' +
+              'exact TypeError / ReferenceError and which file caused it.\n\n' +
+              'Develop menu → Experimental → Allow Inspecting WebViews must be ON.';
           } else {
             detail =
               ((e.error && e.error.stack) || (e.error && e.error.message) || msg) +
@@ -159,22 +178,19 @@
 
         window.addEventListener('unhandledrejection', function (e) {
           var r = e.reason;
-          show(
-            'Unhandled promise rejection',
-            (r && r.stack) || (r && r.message) || (typeof r === 'string' ? r : JSON.stringify(r))
-          );
+          show('Unhandled promise rejection',
+            (r && r.stack) || (r && r.message) ||
+            (typeof r === 'string' ? r : JSON.stringify(r)));
         });
 
         setTimeout(function () {
           var loader = document.getElementById('rh-loader');
           if (loader && loader.parentNode) {
-            show(
-              'App never mounted (15s timeout)',
-              'Bundle loaded but React never rendered. Likely causes:\n' +
-              '  • Firebase init hanging (check apiKey / network)\n' +
-              '  • A top-level await that never resolves\n' +
-              '  • An infinite loop during module evaluation'
-            );
+            show('App never mounted (15s timeout)',
+              'Bundle loaded but React never rendered.\n' +
+              '  • Firebase init hanging (network / auth domain)\n' +
+              '  • A top-level await blocking the module\n' +
+              '  • An infinite loop during module evaluation');
           }
         }, 15000);
       })();
