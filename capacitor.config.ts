@@ -3,12 +3,6 @@ import type { CapacitorConfig } from '@capacitor/cli';
 const config: CapacitorConfig = {
   appId: 'com.rewardhub.official.app',
   appName: 'RewardHub',
-
-  // ------------------------------------------------------------------
-  // webDir MUST match vite.config.ts `build.outDir`, and both MUST be
-  // `www` for Ionic Appflow's iOS pipeline to pass its pre-build
-  // sanity check ("[!] No www found in root of project").
-  // ------------------------------------------------------------------
   webDir: 'www',
 
   ios: {
