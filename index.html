@@ -1,137 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <!--
-      ═══════════════════════════════════════════════════════════════
-      POLYFILLS — absolute first script in the document.
-      Inline classic scripts run synchronously before any module
-      script is evaluated, so every API below is guaranteed to exist
-      by the time Firebase / Motion / React initialise.
-
-      Availability by Safari version (Capacitor 6 min = iOS 14.0):
-        globalThis           Safari 12.1   (should be fine, belt+suspenders)
-        WeakRef              Safari 14.5   ← Firebase Firestore listeners
-        FinalizationRegistry Safari 14.5   ← Firebase companion
-        Promise.any          Safari 15     ← Firebase Auth
-        structuredClone      Safari 15.4   ← Firestore document cloning
-        Object.hasOwn        Safari 15.4   ← Firebase / Motion internals
-        Array/String.at      Safari 15.4   ← Modern array utils
-        crypto.randomUUID    Safari 15.4   ← Firebase ID generation
-        CSS.registerProperty Safari 16.4   ← motion/react v12 (top suspect)
-        AbortController      Safari 12.1   (belt+suspenders)
-      ═══════════════════════════════════════════════════════════════
-    -->
-    <script>
-      (function () {
-
-        /* ── globalThis (Safari < 12.1, extreme edge case) ──────── */
-        if (typeof globalThis === 'undefined') {
-          Object.defineProperty(Object.prototype, '__magic__', {
-            get: function () { return this; },
-            configurable: true,
-          });
-          /* jshint ignore:start */
-          var _gt = __magic__; // eslint-disable-line no-undef
-          /* jshint ignore:end */
-          delete Object.prototype.__magic__;
-          window.globalThis = _gt;
-        }
-
-        /* ── WeakRef (Safari < 14.5) ─────────────────────────────── */
-        if (typeof WeakRef === 'undefined') {
-          window.WeakRef = function WeakRef(t) { this._t = t; };
-          window.WeakRef.prototype.deref = function () { return this._t; };
-        }
-
-        /* ── FinalizationRegistry (Safari < 14.5) ───────────────── */
-        if (typeof FinalizationRegistry === 'undefined') {
-          window.FinalizationRegistry = function FinalizationRegistry() {};
-          window.FinalizationRegistry.prototype.register   = function () {};
-          window.FinalizationRegistry.prototype.unregister = function () {};
-        }
-
-        /* ── Promise.any (Safari < 15) ───────────────────────────── */
-        if (typeof Promise !== 'undefined' && typeof Promise.any !== 'function') {
-          Promise.any = function any(iterable) {
-            var arr = Array.from(iterable);
-            return new Promise(function (resolve, reject) {
-              if (!arr.length) {
-                reject(new AggregateError([], 'All promises were rejected'));
-                return;
-              }
-              var errs = new Array(arr.length), rem = arr.length;
-              arr.forEach(function (p, i) {
-                Promise.resolve(p).then(resolve, function (e) {
-                  errs[i] = e;
-                  if (!--rem) reject(new AggregateError(errs, 'All promises were rejected'));
-                });
-              });
-            });
-          };
-        }
-
-        /* ── structuredClone (Safari < 15.4) ────────────────────── */
-        if (typeof structuredClone !== 'function') {
-          window.structuredClone = function (val) {
-            if (val === undefined) return undefined;
-            try { return JSON.parse(JSON.stringify(val)); } catch (e) { return val; }
-          };
-        }
-
-        /* ── Object.hasOwn (Safari < 15.4) ──────────────────────── */
-        if (typeof Object.hasOwn !== 'function') {
-          Object.hasOwn = function hasOwn(obj, key) {
-            return Object.prototype.hasOwnProperty.call(obj, key);
-          };
-        }
-
-        /* ── Array.prototype.at / String.prototype.at (< 15.4) ─── */
-        ['Array', 'String'].forEach(function (name) {
-          var proto = window[name] && window[name].prototype;
-          if (proto && typeof proto.at !== 'function') {
-            Object.defineProperty(proto, 'at', {
-              value: function (n) {
-                n = Math.trunc(n) || 0;
-                if (n < 0) n += this.length;
-                return (n >= 0 && n < this.length) ? this[n] : undefined;
-              },
-              writable: true, configurable: true,
-            });
-          }
-        });
-
-        /* ── crypto.randomUUID (Safari < 15.4) ──────────────────── */
-        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID !== 'function') {
-          crypto.randomUUID = function () {
-            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-              var r = crypto.getRandomValues(new Uint8Array(1))[0] % 16;
-              return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-            });
-          };
-        }
-
-        /* ── CSS.registerProperty (Safari < 16.4) ───────────────── */
-        /*    motion/react v12 calls this unconditionally at module   */
-        /*    load time to register --motion-scale etc. On Safari     */
-        /*    < 16.4 this is undefined → TypeError → entire import    */
-        /*    chain collapses as opaque "Script error."               */
-        if (typeof CSS !== 'undefined' && typeof CSS.registerProperty !== 'function') {
-          CSS.registerProperty = function () {};
-        }
-
-        /* ── AbortController (Safari < 12.1, belt+suspenders) ───── */
-        if (typeof AbortController === 'undefined') {
-          window.AbortController = function () {
-            this.signal = { aborted: false, addEventListener: function () {} };
-          };
-          window.AbortController.prototype.abort = function () {
-            this.signal.aborted = true;
-          };
-        }
-
-      })();
-    </script>
-
     <meta charset="UTF-8" />
     <meta
       name="viewport"
@@ -151,6 +20,187 @@
         font: 14px -apple-system, system-ui, sans-serif; color: #888;
       }
     </style>
+
+    <!--
+      POLYFILLS — must run synchronously before any module script.
+      Each guard is intentional: never overwrite a native implementation.
+    -->
+    <script>
+      // globalThis
+      (function () {
+        if (typeof globalThis === 'undefined') {
+          Object.defineProperty(Object.prototype, '__globalThis__', {
+            get: function () { return this; },
+            configurable: true,
+          });
+          /* global __globalThis__ */
+          globalThis = __globalThis__;
+          delete Object.prototype.__globalThis__;
+        }
+      })();
+
+      // WeakRef
+      if (typeof WeakRef === 'undefined') {
+        window.WeakRef = function WeakRef(target) { this._t = target; };
+        window.WeakRef.prototype.deref = function () { return this._t; };
+      }
+
+      // FinalizationRegistry (no-op shim — GC hooks unavailable in JS)
+      if (typeof FinalizationRegistry === 'undefined') {
+        window.FinalizationRegistry = function FinalizationRegistry() {};
+        window.FinalizationRegistry.prototype.register = function () {};
+        window.FinalizationRegistry.prototype.unregister = function () {};
+      }
+
+      // Promise.any
+      if (typeof Promise.any === 'undefined') {
+        Promise.any = function (promises) {
+          return new Promise(function (resolve, reject) {
+            var n = 0, errors = [];
+            var arr = Array.prototype.slice.call(promises);
+            if (arr.length === 0) return reject(new AggregateError([], 'All promises were rejected'));
+            arr.forEach(function (p, i) {
+              Promise.resolve(p).then(resolve, function (e) {
+                errors[i] = e;
+                if (++n === arr.length) reject(new AggregateError(errors, 'All promises were rejected'));
+              });
+            });
+          });
+        };
+      }
+
+      // structuredClone
+      if (typeof structuredClone === 'undefined') {
+        window.structuredClone = function (obj) {
+          if (obj === undefined) return undefined;
+          return JSON.parse(JSON.stringify(obj));
+        };
+      }
+
+      // Object.hasOwn
+      if (typeof Object.hasOwn === 'undefined') {
+        Object.hasOwn = function (obj, key) {
+          return Object.prototype.hasOwnProperty.call(obj, key);
+        };
+      }
+
+      // Array.prototype.at
+      if (typeof Array.prototype.at === 'undefined') {
+        Array.prototype.at = function (n) {
+          n = Math.trunc(n) || 0;
+          if (n < 0) n += this.length;
+          return (n < 0 || n >= this.length) ? undefined : this[n];
+        };
+      }
+
+      // String.prototype.at
+      if (typeof String.prototype.at === 'undefined') {
+        String.prototype.at = function (n) {
+          n = Math.trunc(n) || 0;
+          if (n < 0) n += this.length;
+          return (n < 0 || n >= this.length) ? undefined : this[n];
+        };
+      }
+
+      // crypto.randomUUID
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'undefined') {
+        crypto.randomUUID = function () {
+          var b = crypto.getRandomValues(new Uint8Array(16));
+          b[6] = (b[6] & 0x0f) | 0x40;
+          b[8] = (b[8] & 0x3f) | 0x80;
+          var h = Array.from(b).map(function (x) { return x.toString(16).padStart(2, '0'); });
+          return h[0]+h[1]+h[2]+h[3]+'-'+h[4]+h[5]+'-'+h[6]+h[7]+'-'+h[8]+h[9]+'-'+h[10]+h[11]+h[12]+h[13]+h[14]+h[15];
+        };
+      }
+
+      // CSS.registerProperty — motion/react v12 calls this at module evaluation.
+      // Safari < 16.4 doesn't support it; a no-op prevents the crash.
+      if (typeof CSS !== 'undefined' && typeof CSS.registerProperty === 'undefined') {
+        CSS.registerProperty = function () {};
+      }
+
+      // AbortController
+      if (typeof AbortController === 'undefined') {
+        window.AbortController = function AbortController() {
+          var listeners = [];
+          this.signal = {
+            aborted: false,
+            addEventListener: function (_, fn) { listeners.push(fn); },
+            removeEventListener: function (_, fn) { listeners = listeners.filter(function (l) { return l !== fn; }); },
+          };
+          this.abort = function () {
+            this.signal.aborted = true;
+            listeners.forEach(function (fn) { fn(); });
+          };
+        };
+      }
+    </script>
+
+    <!--
+      INLINE ERROR HANDLER — runs synchronously before any module script.
+    -->
+    <script>
+      (function () {
+        window.__rhShow = function show(title, body) {
+          try {
+            var root = document.getElementById('root') || document.body;
+            root.innerHTML =
+              '<div style="padding:16px;font:13px/1.4 ui-monospace,Menlo,monospace;background:#fff;color:#111;position:fixed;inset:0;overflow:auto;">' +
+                '<div style="color:#b00020;font-weight:700;margin-bottom:8px;font-size:15px;">' + title + '</div>' +
+                '<pre style="white-space:pre-wrap;word-break:break-word;background:#f5f5f5;padding:12px;border-radius:8px;margin:0;">' +
+                  String(body).replace(/</g, '&lt;') +
+                '</pre>' +
+              '</div>';
+          } catch (_) {
+            console.error(title, body);
+          }
+        };
+
+        window.addEventListener('error', function (e) {
+          var t = e.target;
+          if (t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK' || t.tagName === 'IMG')) {
+            window.__rhShow(
+              'Asset failed to load',
+              t.tagName + ': ' + (t.src || t.href || '(no src)') +
+              '\n\nCheck that vite.config.ts has base:"./" and build.outDir:"www".'
+            );
+            return;
+          }
+          var msg = e.message || '';
+          var detail;
+          if (!e.filename && msg.indexOf('Script error') === 0) {
+            detail =
+              'Opaque "Script error." — the error occurred inside a JS chunk ' +
+              'but WKWebView cannot surface it here.\n\n' +
+              'See the dynamic import().catch() below for the real message.';
+          } else {
+            detail =
+              ((e.error && e.error.stack) || (e.error && e.error.message) || msg) +
+              '\nFile: ' + (e.filename || '(unknown)') + ':' + (e.lineno || 0) + ':' + (e.colno || 0);
+          }
+          window.__rhShow('JS error', detail);
+        }, true);
+
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e.reason;
+          window.__rhShow(
+            'Unhandled promise rejection',
+            (r && r.stack) || (r && r.message) || (typeof r === 'string' ? r : JSON.stringify(r))
+          );
+        });
+
+        setTimeout(function () {
+          var loader = document.getElementById('rh-loader');
+          if (loader && loader.parentNode) {
+            window.__rhShow(
+              'App never mounted (15 s timeout)',
+              'Bundle loaded but React did not render.\n' +
+              'Likely: top-level await, infinite loop during module eval, or blocking network request.'
+            );
+          }
+        }, 15000);
+      })();
+    </script>
   </head>
   <body>
     <div id="root">
@@ -158,100 +208,17 @@
     </div>
 
     <!--
-      ═══════════════════════════════════════════════════════════════
-      GLOBAL ERROR HANDLER — registered before the app bundle loads.
-      ═══════════════════════════════════════════════════════════════
-    -->
-    <script>
-      (function () {
-        function show(title, body) {
-          try {
-            var root = document.getElementById('root') || document.body;
-            root.innerHTML =
-              '<div style="padding:16px;font:12px/1.5 ui-monospace,Menlo,monospace;' +
-              'background:#fff;color:#111;position:fixed;inset:0;overflow:auto;">' +
-                '<div style="color:#b00020;font-weight:700;font-size:14px;margin-bottom:8px;">' +
-                  title +
-                '</div>' +
-                '<pre style="white-space:pre-wrap;word-break:break-word;' +
-                'background:#f5f5f5;padding:12px;border-radius:8px;margin:0;">' +
-                  String(body).replace(/</g, '&lt;') +
-                '</pre>' +
-              '</div>';
-          } catch (_) { console.error(title, body); }
-        }
-
-        window.__rhShow = show;
-
-        window.addEventListener('error', function (e) {
-          var t = e.target;
-          if (t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK' || t.tagName === 'IMG')) {
-            show('Asset load failure',
-              (t.src || t.href || '(no src)') +
-              '\n\nA file is missing from www/. Confirm vite.config.ts ' +
-              'has base:"./" and build.outDir:"www".');
-            return;
-          }
-          var msg = e.message || '';
-          if (!e.filename && msg.indexOf('Script error') === 0) {
-            show('Script error (WKWebView masked the details)',
-              'All polyfills are active. The dynamic import below should\n' +
-              'have shown the real error instead of this message.\n' +
-              'Connect Safari Web Inspector (Mac → Develop menu) for the\n' +
-              'actual stack trace.');
-          } else {
-            show('JS error',
-              ((e.error && e.error.stack) || (e.error && e.error.message) || msg) +
-              '\nFile: ' + (e.filename || '?') + ':' + (e.lineno || 0));
-          }
-        }, true);
-
-        window.addEventListener('unhandledrejection', function (e) {
-          var r = e.reason;
-          show('Unhandled promise rejection',
-            (r && r.stack) || (r && r.message) ||
-            (typeof r === 'string' ? r : JSON.stringify(r)));
-        });
-
-        setTimeout(function () {
-          var loader = document.getElementById('rh-loader');
-          if (loader && loader.parentNode) {
-            show('App never mounted (15s timeout)',
-              '• Firebase auth hanging — check apiKey / authDomain\n' +
-              '• A top-level await blocking the module\n' +
-              '• Silent crash not caught by error handler');
-          }
-        }, 15000);
-      })();
-    </script>
-
-    <!--
-      ═══════════════════════════════════════════════════════════════
-      APP ENTRY — dynamic import().catch() instead of a static
-      <script type="module" src="..."> tag.
-
-      WHY: WKWebView ALWAYS reports static-module errors as the
-      opaque "Script error." with no filename, hiding the real cause.
-      A dynamic import() rejects with a real Error object, so .catch()
-      receives the full TypeError/SyntaxError/ReferenceError and we
-      can display it on screen.
-
-      Vite transforms import('/src/main.tsx') to the correct hashed
-      asset path in the built www/index.html, exactly as it does for
-      the static src attribute.
-      ═══════════════════════════════════════════════════════════════
+      Entry point via dynamic import so WKWebView errors are catchable.
+      Static <script type="module" src="..."> errors are always opaque
+      in WKWebView ("Script error." with no filename). Dynamic import()
+      rejections carry the real Error object with a full stack trace.
     -->
     <script type="module">
       import('/src/main.tsx').catch(function (err) {
         var msg = (err && err.stack) || (err && err.message) || String(err);
         console.error('[Boot] Module load failed:', err);
         if (window.__rhShow) {
-          window.__rhShow(
-            'Boot error — real details',
-            msg + '\n\n' +
-            'This is the ACTUAL error (not the WKWebView-masked "Script error.").\n' +
-            'Add the missing polyfill or fix the shown TypeError/ReferenceError.'
-          );
+          window.__rhShow('Boot error — real details', msg);
         }
       });
     </script>
