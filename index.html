@@ -21,10 +21,6 @@
       }
     </style>
 
-    <!--
-      POLYFILLS — must run synchronously before any module script.
-      Each guard is intentional: never overwrite a native implementation.
-    -->
     <script>
       // globalThis
       (function () {
@@ -45,7 +41,7 @@
         window.WeakRef.prototype.deref = function () { return this._t; };
       }
 
-      // FinalizationRegistry (no-op shim — GC hooks unavailable in JS)
+      // FinalizationRegistry (no-op shim)
       if (typeof FinalizationRegistry === 'undefined') {
         window.FinalizationRegistry = function FinalizationRegistry() {};
         window.FinalizationRegistry.prototype.register = function () {};
@@ -113,8 +109,8 @@
         };
       }
 
-      // CSS.registerProperty — motion/react v12 calls this at module evaluation.
-      // Safari < 16.4 doesn't support it; a no-op prevents the crash.
+      // CSS.registerProperty — motion/react v12 calls this at module eval time.
+      // Safari < 16.4 throws; no-op prevents the crash.
       if (typeof CSS !== 'undefined' && typeof CSS.registerProperty === 'undefined') {
         CSS.registerProperty = function () {};
       }
@@ -136,9 +132,6 @@
       }
     </script>
 
-    <!--
-      INLINE ERROR HANDLER — runs synchronously before any module script.
-    -->
     <script>
       (function () {
         window.__rhShow = function show(title, body) {
@@ -170,7 +163,7 @@
           var detail;
           if (!e.filename && msg.indexOf('Script error') === 0) {
             detail =
-              'Opaque "Script error." — the error occurred inside a JS chunk ' +
+              'Opaque "Script error." — error occurred inside a JS chunk ' +
               'but WKWebView cannot surface it here.\n\n' +
               'See the dynamic import().catch() below for the real message.';
           } else {
@@ -207,18 +200,22 @@
       <div id="rh-loader">Loading RewardHub…</div>
     </div>
 
-    <!--
-      Entry point via dynamic import so WKWebView errors are catchable.
-      Static <script type="module" src="..."> errors are always opaque
-      in WKWebView ("Script error." with no filename). Dynamic import()
-      rejections carry the real Error object with a full stack trace.
-    -->
     <script type="module">
       import('/src/main.tsx').catch(function (err) {
         var msg = (err && err.stack) || (err && err.message) || String(err);
         console.error('[Boot] Module load failed:', err);
-        if (window.__rhShow) {
-          window.__rhShow('Boot error — real details', msg);
+        try {
+          if (typeof window.__rhShow === 'function') {
+            window.__rhShow('Boot error — real details', msg);
+          } else {
+            document.body.innerHTML =
+              '<div style="padding:16px;font:13px/1.5 ui-monospace,Menlo,monospace;background:#fff;color:#111;position:fixed;inset:0;overflow:auto;">' +
+              '<div style="color:#b00020;font-weight:700;font-size:15px;margin-bottom:8px;">Boot error — real details</div>' +
+              '<pre style="white-space:pre-wrap;word-break:break-word;background:#f5f5f5;padding:12px;border-radius:8px;margin:0;">' +
+              msg.replace(/</g, '&lt;') + '</pre></div>';
+          }
+        } catch (displayErr) {
+          console.error('[Boot] Could not display error:', displayErr);
         }
       });
     </script>
