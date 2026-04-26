@@ -35,7 +35,7 @@ export default defineConfig({
 
   optimizeDeps: {
     esbuildOptions: {
-      target: ['safari14', 'chrome87', 'edge88', 'firefox78'],
+      target: 'es2015',
     },
   },
 
@@ -43,7 +43,7 @@ export default defineConfig({
     outDir: 'www',
     emptyOutDir: true,
     sourcemap: false,
-    target: ['safari14', 'chrome87', 'edge88', 'firefox78'],
+    target: 'es2015',
     modulePreload: false,
     cssCodeSplit: true,
     assetsInlineLimit: 4096,
