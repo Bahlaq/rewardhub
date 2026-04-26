@@ -1,31 +1,28 @@
-// ═══════════════════════════════════════════════════════════════════════
-// Push Notifications — v13.5.1 SAFETY-FIRST WRAPPER + DIAGNOSTICS.
-//
-// Every step logs to console so you can see exactly where the chain
-// breaks in Chrome DevTools → Remote Devices → your phone.
-// ═══════════════════════════════════════════════════════════════════════
-
 import { Capacitor } from '@capacitor/core';
 
 type TokenCallback = (token: string) => void;
 
 let registerCalled = false;
 
-// ─── Plugin loader ───────────────────────────────────────────────────
-async function loadPushPlugin(): Promise<any | null> {
+// Returns { plugin } wrapper — NOT the plugin directly.
+// Capacitor plugin objects are Proxies. Returning one from an async function
+// causes JS Promise resolution to call plugin.then() to test for a thenable,
+// which hits the native bridge and throws
+// "PushNotifications.then() is not implemented on android".
+function loadPushPlugin(): Promise<{ plugin: any } | null> {
   console.log('[Push][1] loadPushPlugin — attempting dynamic import...');
-  try {
-    const mod = await import('@capacitor/push-notifications');
-    const plugin = mod.PushNotifications || null;
-    console.log('[Push][1] loadPushPlugin — success, plugin:', plugin ? 'loaded' : 'null');
-    return plugin;
-  } catch (e) {
-    console.error('[Push][1] loadPushPlugin — FAILED:', e);
-    return null;
-  }
+  return import('@capacitor/push-notifications')
+    .then(function (mod) {
+      const plugin = mod.PushNotifications || null;
+      console.log('[Push][1] loadPushPlugin — success, plugin:', plugin ? 'loaded' : 'null');
+      return plugin ? { plugin } : null;
+    })
+    .catch(function (e) {
+      console.error('[Push][1] loadPushPlugin — FAILED:', e);
+      return null;
+    });
 }
 
-// ─── Permission helpers ─────────────────────────────────────────────
 async function ensurePermission(PushNotifications: any): Promise<boolean> {
   console.log('[Push][2] ensurePermission — checking current status...');
   try {
@@ -51,7 +48,6 @@ async function ensurePermission(PushNotifications: any): Promise<boolean> {
   }
 }
 
-// ─── Android channel bootstrap (noop on iOS) ────────────────────────
 async function ensureDefaultChannel(PushNotifications: any): Promise<void> {
   const platform = Capacitor.getPlatform();
   console.log('[Push][3] ensureDefaultChannel — platform:', platform);
@@ -76,7 +72,6 @@ async function ensureDefaultChannel(PushNotifications: any): Promise<void> {
   }
 }
 
-// ─── Main entry ─────────────────────────────────────────────────────
 export async function initPushNotifications(
   onToken: TokenCallback
 ): Promise<void> {
@@ -87,27 +82,24 @@ export async function initPushNotifications(
   console.log('[Push] registerCalled:', registerCalled);
   console.log('════════════════════════════════════════════');
 
-  // Guard 1: native only
   if (!Capacitor.isNativePlatform()) {
     console.log('[Push] BAIL — not native platform');
     return;
   }
 
-  // Guard 2: once per process
   if (registerCalled) {
     console.log('[Push] BAIL — already registered');
     return;
   }
   registerCalled = true;
 
-  // Guard 3: plugin present?
-  const PushNotifications = await loadPushPlugin();
-  if (!PushNotifications) {
+  const pluginWrapper = await loadPushPlugin();
+  if (!pluginWrapper) {
     console.log('[Push] BAIL — plugin not in bundle');
     return;
   }
+  const PushNotifications = pluginWrapper.plugin;
 
-  // Step 1: permission
   const ok = await ensurePermission(PushNotifications);
   if (!ok) {
     console.log('[Push] BAIL — permission not granted');
@@ -115,10 +107,8 @@ export async function initPushNotifications(
   }
   console.log('[Push] permission granted ✓');
 
-  // Step 2: Android channel
   await ensureDefaultChannel(PushNotifications);
 
-  // Step 3: attach listeners BEFORE register()
   console.log('[Push][4] attaching listeners...');
   try {
     PushNotifications.addListener('registration', function (token: any) {
@@ -163,7 +153,6 @@ export async function initPushNotifications(
     return;
   }
 
-  // Step 4: register()
   console.log('[Push][6] calling register()...');
   try {
     await PushNotifications.register();
@@ -173,12 +162,11 @@ export async function initPushNotifications(
   }
 }
 
-// ─── Cleanup helper ─────────────────────────────────────────────────
 export async function removeAllPushListeners(): Promise<void> {
   try {
-    const PushNotifications = await loadPushPlugin();
-    if (!PushNotifications) return;
-    await PushNotifications.removeAllListeners();
+    const wrapper = await loadPushPlugin();
+    if (!wrapper) return;
+    await wrapper.plugin.removeAllListeners();
   } catch (e) {
     console.warn('[Push] removeAllListeners failed:', e);
   }
