@@ -1,6 +1,5 @@
-// HomeScreen — v13.4.0 (refreshed 2026-04-16). Dynamic filters + skeleton loaders.
+// HomeScreen — v13.5.7. motion/react removed — CSS animations only.
 import React from 'react';
-import { motion } from 'motion/react';
 import {
   Search, PlayCircle, TrendingUp, Gift, Clock, Zap, CheckCircle2,
   Copy, ExternalLink, Award, Loader2, MapPin, ChevronDown, Timer, X
@@ -16,22 +15,9 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// Sentinels for the "show everything" options.
-// Keep these in sync with the defaults in App.tsx.
-// ═══════════════════════════════════════════════════════════════════════
 export const ALL_COUNTRIES = 'All Countries';
 export const ALL_CATEGORIES = 'All Categories';
 
-// ═══════════════════════════════════════════════════════════════════════
-// buildCountriesList — derives a unique, sorted list of country names from
-// the offers collection received from Firestore.
-//
-// Reads from BOTH `countries` (array or string) and `country` (string).
-// The sentinels "GLOBAL" and "ALL" are treated as "no specific country"
-// and do not appear as dropdown entries.
-// Always prepends ALL_COUNTRIES so the user can reset the filter.
-// ═══════════════════════════════════════════════════════════════════════
 export function buildCountriesList(offers: Offer[]): string[] {
   const set = new Set<string>();
   for (let i = 0; i < offers.length; i++) {
@@ -64,11 +50,6 @@ export function buildCountriesList(offers: Offer[]): string[] {
   })];
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// buildCategoriesList — derives a unique, sorted list of category names.
-// Reads the `category` field which can be a string OR string[].
-// Always prepends ALL_CATEGORIES.
-// ═══════════════════════════════════════════════════════════════════════
 export function buildCategoriesList(offers: Offer[]): string[] {
   const set = new Set<string>();
   for (let i = 0; i < offers.length; i++) {
@@ -87,16 +68,6 @@ export function buildCategoriesList(offers: Offer[]): string[] {
   })];
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// offerMatchesCountry — STRICT matcher.
-//
-// • ALL_COUNTRIES → every offer matches.
-// • Specific country → ONLY offers whose `countries` array (or `country`
-//   string) contains that exact value (case-insensitive) match.
-//   Offers without any country data are hidden when a specific country
-//   is selected. "GLOBAL"/"ALL" entries in an offer's countries list
-//   also count as a match (so globally-available brands still appear).
-// ═══════════════════════════════════════════════════════════════════════
 export function offerMatchesCountry(
   offer: Offer,
   selectedCountry: string
@@ -126,13 +97,9 @@ export function offerMatchesCountry(
     return val === sel || val === 'GLOBAL' || val === 'ALL';
   }
 
-  // No country data → hide when a specific country is selected.
   return false;
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// offerMatchesCategory — STRICT category matcher (shared with App.tsx).
-// ═══════════════════════════════════════════════════════════════════════
 export function offerMatchesCategory(
   offer: Offer,
   selectedCategory: string
@@ -197,7 +164,7 @@ export function getTimeLeft(id: string): string | null {
   return `${h}h ${m}m`;
 }
 
-// ─── Searchable Country Picker (dynamic list) ───────────────────────────
+// ─── Searchable Country Picker ──────────────────────────────────
 const CountryPicker = ({
   value,
   onChange,
@@ -316,12 +283,7 @@ const OfferCard = ({
   const [imgErr, setImgErr] = React.useState(false);
 
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="bg-white rounded-2xl border border-zinc-200 overflow-hidden shadow-sm hover:shadow-md relative"
-    >
+    <div className="bg-white rounded-2xl border border-zinc-200 overflow-hidden shadow-sm hover:shadow-md relative rh-card-in">
       {unlocked && (
         <div className="absolute top-3 left-3 z-20 flex items-center gap-1.5 bg-emerald-500 text-white px-2 py-1 rounded-lg font-bold text-[10px] uppercase tracking-wider">
           <CheckCircle2 size={12} /> {timeLeft || 'Unlocked'}
@@ -419,7 +381,7 @@ const OfferCard = ({
           </div>
         )}
       </div>
-    </motion.div>
+    </div>
   );
 };
 
@@ -491,21 +453,15 @@ export const HomeScreen = (props: HomeScreenProps) => {
   ).padStart(2, '0')}`;
 
   return (
-    <motion.div
-      key="offers"
-      initial={{ opacity: 0, x: -10 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 10 }}
-      className="space-y-5"
-    >
-      {/* Country Picker — populated dynamically from Firestore offers */}
+    <div className="space-y-5 rh-slide-in">
+      {/* Country Picker */}
       <CountryPicker
         value={selectedCountry}
         onChange={setSelectedCountry}
         options={countries}
       />
 
-      {/* Search + Categories (dynamic) */}
+      {/* Search + Categories */}
       <div className="space-y-3">
         <div className="relative group">
           <Search
@@ -581,11 +537,8 @@ export const HomeScreen = (props: HomeScreenProps) => {
               </button>
             )}
             <div className="flex-1 h-1.5 bg-white/20 rounded-full overflow-hidden">
-              <motion.div
-                initial={{ width: 0 }}
-                animate={{
-                  width: `${isCooldownActive ? 100 : pct}%`,
-                }}
+              <div
+                style={{ width: `${isCooldownActive ? 100 : pct}%`, transition: 'width 0.5s ease-out' }}
                 className={cn(
                   'h-full',
                   isCooldownActive
@@ -614,7 +567,6 @@ export const HomeScreen = (props: HomeScreenProps) => {
       {/* Offer cards */}
       <div className="grid gap-4">
         {isLoading ? (
-          // Skeleton cards — visually lighter than a spinner, feel instant.
           <>
             {[0, 1, 2].map((i) => (
               <div
@@ -660,6 +612,6 @@ export const HomeScreen = (props: HomeScreenProps) => {
       </div>
 
       <div className="h-[100px]" />
-    </motion.div>
+    </div>
   );
 };
