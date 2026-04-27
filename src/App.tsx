@@ -1,4 +1,4 @@
-// App.tsx — v13.5.7 (2026-04-22). motion/react removed — CSS animations only.
+// App.tsx — v13.5.1 (2026-04-17). Push restored with safety wrapper + diagnostics.
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Gift, User, LayoutDashboard, PlayCircle, TrendingUp, AlertCircle,
@@ -202,6 +202,9 @@ var SimpleModal = function(props: {
   );
 };
 
+// ═════════════════════════════════════════════════════════════════
+// saveFcmToken — persists an FCM token to Firestore with retries.
+// ═════════════════════════════════════════════════════════════════
 async function saveFcmToken(uid: string, token: string): Promise<boolean> {
   console.log('[FCM] ═══ saveFcmToken called ═══');
   console.log('[FCM] uid:', uid ? uid.slice(0, 10) + '...' : 'MISSING');
@@ -248,6 +251,9 @@ async function saveFcmToken(uid: string, token: string): Promise<boolean> {
   return false;
 }
 
+// ═════════════════════════════════════════════════════════════════
+// requestATTIfNeeded — iOS App Tracking Transparency prompt.
+// ═════════════════════════════════════════════════════════════════
 async function requestATTIfNeeded(): Promise<void> {
   if (Capacitor.getPlatform() !== 'ios') return;
   try {
@@ -286,6 +292,7 @@ export default function App() {
   var [webNum, setWebNum] = useState(1);
   var [webTotal, setWebTotal] = useState(1);
   var webRef = useRef<((v: boolean) => void) | null>(null);
+
   var appOpenShownRef = useRef(false);
 
   // ─── Cooldown ─────────────────────────────────────────────────
@@ -344,11 +351,15 @@ export default function App() {
 
   // ─── Auth ─────────────────────────────────────────────────────
   useEffect(function() {
+    var timeout = setTimeout(function() {
+      setAuthLoading(false);
+    }, 5000);
     var unsub = firebaseService.onAuthChange(function(f) {
+      clearTimeout(timeout);
       setFbUser(f);
       if (!f) setAuthLoading(false);
     });
-    return function() { unsub(); };
+    return function() { clearTimeout(timeout); unsub(); };
   }, []);
 
   // ─── Ads Hook ─────────────────────────────────────────────────
@@ -358,7 +369,7 @@ export default function App() {
     showAppOpenAd, isNative,
   } = useAds(fbUser?.uid);
 
-  // ─── Phase 1: global error handlers + AdMob warm-up ──────────
+  // ─── Phase 1: error handlers + AdMob warm-up ─────────────────
   useEffect(function() {
     if (typeof window === 'undefined') return;
 
@@ -390,7 +401,7 @@ export default function App() {
     };
   }, [isNative]);
 
-  // ─── Phase 2: App Open Ad at T+800ms ─────────────────────────
+  // ─── Phase 2: App Open Ad ─────────────────────────────────────
   useEffect(function() {
     if (!isNative) return;
     if (appOpenShownRef.current) return;
@@ -407,7 +418,7 @@ export default function App() {
     return function() { clearTimeout(t); };
   }, [isNative, showAppOpenAd]);
 
-  // ─── Phase 3: Push notifications at T+10s after auth ─────────
+  // ─── Phase 3: Push notifications (T+30s after auth) ──────────
   var pushInitRef = useRef(false);
 
   useEffect(function() {
@@ -427,7 +438,7 @@ export default function App() {
     }
 
     var uid = fbUser.uid;
-    console.log('[Phase3] ✓ all guards passed — starting 10s timer for uid:', uid.slice(0, 10) + '...');
+    console.log('[Phase3] ✓ all guards passed — starting 30s timer for uid:', uid.slice(0, 10) + '...');
 
     var t = setTimeout(function() {
       if (pushInitRef.current) {
@@ -449,7 +460,7 @@ export default function App() {
       }).catch(function(err) {
         console.error('[Phase3] initPushNotifications threw:', err);
       });
-    }, 10000);
+    }, 30000);
 
     return function() { clearTimeout(t); };
   }, [isNative, fbUser?.uid]);
@@ -562,6 +573,7 @@ export default function App() {
     return function() { unsub(); };
   }, [onOffersChange]);
 
+  // ─── Filtered Offers ──────────────────────────────────────────
   var filteredOffers = useMemo(function() {
     var result: Offer[] = [];
 
@@ -792,7 +804,11 @@ export default function App() {
   }
 
   if (authLoading) {
-    return null;
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <Logo className="max-w-[80px] animate-pulse" />
+      </div>
+    );
   }
 
   if (!fbUser) {
