@@ -4,11 +4,6 @@ type TokenCallback = (token: string) => void;
 
 let registerCalled = false;
 
-// Returns { plugin } wrapper — NOT the plugin directly.
-// Capacitor plugin objects are Proxies. Returning one from an async function
-// causes JS Promise resolution to call plugin.then() to test for a thenable,
-// which hits the native bridge and throws
-// "PushNotifications.then() is not implemented on android".
 function loadPushPlugin(): Promise<{ plugin: any } | null> {
   console.log('[Push][1] loadPushPlugin — attempting dynamic import...');
   return import('@capacitor/push-notifications')
