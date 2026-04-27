@@ -1,6 +1,5 @@
-// App.tsx — v13.5.1 (2026-04-17). Push restored with safety wrapper + diagnostics.
+// App.tsx — v13.5.7
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
 import {
   Gift, User, LayoutDashboard, PlayCircle, TrendingUp, AlertCircle,
   X, ChevronRight, Zap, History, Copy, ExternalLink, ShieldCheck, Trash2
@@ -192,37 +191,17 @@ var SimpleModal = function(props: {
   if (!props.open) return null;
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6">
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
+      <div
         onClick={props.close}
-        className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
+        className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm rh-fade-in"
       />
-      <motion.div
-        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="relative w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl overflow-hidden"
-      >
+      <div className="relative w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl overflow-hidden rh-scale-in">
         <div className="p-8">{props.children}</div>
-      </motion.div>
+      </div>
     </div>
   );
 };
 
-// ═════════════════════════════════════════════════════════════════
-// saveFcmToken — persists an FCM token to Firestore with retries.
-//
-// Written as a module-level helper (not a hook) so it can be invoked
-// from inside the push listener callback without needing React state
-// or a ref. Calls `firebaseService.saveFcmToken(uid, token, platform)`
-// which is the canonical write path; if that method is missing on the
-// service layer, we log a clear error rather than crashing.
-//
-// Retry policy: 3 attempts with exponential backoff (1s, 2s, 4s) to
-// survive transient offline / Firestore rate-limit states. Anything
-// beyond attempt #3 is almost certainly a persistent quota or rules
-// issue — we surface it in the console for the dev to investigate.
-// ═════════════════════════════════════════════════════════════════
 async function saveFcmToken(uid: string, token: string): Promise<boolean> {
   console.log('[FCM] ═══ saveFcmToken called ═══');
   console.log('[FCM] uid:', uid ? uid.slice(0, 10) + '...' : 'MISSING');
@@ -236,16 +215,12 @@ async function saveFcmToken(uid: string, token: string): Promise<boolean> {
   const platform = Capacitor.getPlatform();
   console.log('[FCM] platform:', platform);
 
-  // Check if firebaseService has the method
   const svc = firebaseService as any;
   const methods = Object.keys(svc).filter(function(k) { return typeof svc[k] === 'function'; });
   console.log('[FCM] firebaseService methods:', methods.join(', '));
 
   if (typeof svc.saveFcmToken !== 'function') {
-    console.error(
-      '[FCM] ✗ firebaseService.saveFcmToken IS MISSING! ' +
-      'Available methods: ' + methods.join(', ')
-    );
+    console.error('[FCM] ✗ firebaseService.saveFcmToken IS MISSING! Available methods: ' + methods.join(', '));
     return false;
   }
   console.log('[FCM] ✓ firebaseService.saveFcmToken exists');
@@ -270,26 +245,12 @@ async function saveFcmToken(uid: string, token: string): Promise<boolean> {
   return false;
 }
 
-// ═════════════════════════════════════════════════════════════════
-// requestATTIfNeeded — iOS App Tracking Transparency prompt.
-//
-// Apple requires a user prompt before an app can access the IDFA. Not
-// calling this means AdMob falls back to non-personalized ads on iOS
-// 14.5+, which cuts eCPM significantly. No-op on Android / web.
-//
-// Uses a dynamic import so removing the plugin later doesn't break the
-// bundle. Fails silently if the plugin isn't installed; AdMob will
-// just serve non-personalized ads in that case.
-// ═════════════════════════════════════════════════════════════════
 async function requestATTIfNeeded(): Promise<void> {
   if (Capacitor.getPlatform() !== 'ios') return;
   try {
     const mod: any = await import('capacitor-plugin-app-tracking-transparency');
     const ATT = mod.AppTrackingTransparency || mod.default;
-    if (!ATT) {
-      console.log('[ATT] plugin shape unknown — skipping');
-      return;
-    }
+    if (!ATT) { console.log('[ATT] plugin shape unknown — skipping'); return; }
     const status = await ATT.getStatus();
     if (status && status.status === 'notDetermined') {
       const result = await ATT.requestPermission();
@@ -319,32 +280,6 @@ export default function App() {
   var [webNum, setWebNum] = useState(1);
   var [webTotal, setWebTotal] = useState(1);
   var webRef = useRef<((v: boolean) => void) | null>(null);
-
-  // ═══════════════════════════════════════════════════════════════
-  // v13.2.0 — Crash-proof init refactor.
-  //
-  // Previous design coupled the App Open Ad to a `notificationsDone`
-  // flag. That created two fatal problems:
-  //   • If the permission dialog destroyed MainActivity (Cause #1 —
-  //     missing configChanges flags on Samsung/Xiaomi OEMs), the flag
-  //     was never set in the original instance, and the recreated
-  //     activity raced AdMob init against FCM registration.
-  //   • The App Open Ad was blocked waiting for a signal that could
-  //     never arrive, which is why users saw no ad at all.
-  //
-  // New design:
-  //   • Phase 1 (T+0):   install global error swallowers, warm up
-  //     AdMob SDK in the background.
-  //   • Phase 2 (T+2s):  show App Open Ad once, independent of any
-  //     notification state.
-  //   • Phase 3 (T+8s after auth): init push notifications.
-  //     By then the App Open Ad has already shown + closed, so FCM
-  //     registration no longer competes with ad activity on the main
-  //     thread.
-  //
-  // Each phase is wrapped in try/catch. A failure in one phase does
-  // not block the others.
-  // ═══════════════════════════════════════════════════════════════
   var appOpenShownRef = useRef(false);
 
   // ─── Cooldown ─────────────────────────────────────────────────
@@ -417,36 +352,20 @@ export default function App() {
     showAppOpenAd, isNative,
   } = useAds(fbUser?.uid);
 
-  // ═══════════════════════════════════════════════════════════════
-  // PHASE 1 — mount: install global error swallowers + warm AdMob SDK.
-  // This runs exactly once, before auth, before notifications, before
-  // any ad attempt. Its only job is to make failure modes survivable
-  // and to have the AdMob SDK already initialised by the time we try
-  // to show the App Open Ad.
-  // ═══════════════════════════════════════════════════════════════
+  // ─── Phase 1: global error swallowers + AdMob warmup ──────────
   useEffect(function() {
     if (typeof window === 'undefined') return;
-
     var onUncaught = function(ev: ErrorEvent) {
       console.error('[Global] Uncaught:', ev.message, ev.filename, ev.lineno);
-      // Swallow so the Capacitor native bridge doesn't surface the
-      // error to Android as an unhandled exception.
       ev.preventDefault();
     };
     var onRejection = function(ev: PromiseRejectionEvent) {
       console.error('[Global] Unhandled rejection:', ev.reason);
       ev.preventDefault();
     };
-
     window.addEventListener('error', onUncaught);
     window.addEventListener('unhandledrejection', onRejection);
-
-    // Warm up AdMob SDK via the shared useAds singleton (non-blocking).
     if (isNative) {
-      // On iOS, request App Tracking Transparency permission BEFORE
-      // initialising AdMob — IDFA availability is latched at SDK init,
-      // so prompting afterward means we'd ship non-personalized ads for
-      // the first session even if the user grants consent.
       requestATTIfNeeded()
         .catch(function(err) { console.warn('[ATT] pre-init threw:', err); })
         .finally(function() {
@@ -455,81 +374,41 @@ export default function App() {
             .catch(function(err) { console.warn('[Init] AdMob pre-warm threw:', err); });
         });
     }
-
     return function() {
       window.removeEventListener('error', onUncaught);
       window.removeEventListener('unhandledrejection', onRejection);
     };
   }, [isNative]);
 
-  // ═══════════════════════════════════════════════════════════════
-  // PHASE 2 — T+2s: show App Open Ad exactly once per process lifetime.
-  // Independent of notifications. Independent of auth. If AdMob
-  // wasn't ready, showAppOpenAd() no-ops and logs a warning.
-  // ═══════════════════════════════════════════════════════════════
+  // ─── Phase 2: App Open Ad at T+800ms ──────────────────────────
   useEffect(function() {
     if (!isNative) return;
     if (appOpenShownRef.current) return;
-
     var t = setTimeout(function() {
       if (appOpenShownRef.current) return;
       appOpenShownRef.current = true;
       console.log('[Init] Firing App Open Ad (T+800ms)');
-      showAppOpenAd().catch(function(err) {
-        console.warn('[Init] App Open Ad non-fatal:', err);
-      });
+      showAppOpenAd().catch(function(err) { console.warn('[Init] App Open Ad non-fatal:', err); });
     }, 800);
-
     return function() { clearTimeout(t); };
   }, [isNative, showAppOpenAd]);
 
-  // ═══════════════════════════════════════════════════════════════
-  // PHASE 3 — T+10s after auth: init push notifications (Android+iOS).
-  //
-  // Restored in v13.5.0 with the safety-first wrapper. Fires only
-  // after the user is authenticated (so we have a uid to write the
-  // token against) and only once per process (pushInitRef).
-  //
-  // The 10-second delay is the central stability measure: by T+10s
-  // the App Open Ad has shown and closed, MainActivity is settled,
-  // and Samsung/Xiaomi OEM permission dialogs will no longer race
-  // AdMob init on the main thread.
-  //
-  // On token receipt, saveFcmToken() writes to Firestore with 3x
-  // exponential-backoff retries, so transient offline states don't
-  // silently drop the token.
-  // ═══════════════════════════════════════════════════════════════
+  // ─── Phase 3: Push notifications at T+10s after auth ──────────
   var pushInitRef = useRef(false);
 
   useEffect(function() {
     console.log('[Phase3] useEffect fired — isNative:', isNative, 'uid:', fbUser?.uid ? fbUser.uid.slice(0, 10) + '...' : 'null', 'pushInitDone:', pushInitRef.current);
-
-    if (!isNative) {
-      console.log('[Phase3] BAIL — not native');
-      return;
-    }
-    if (!fbUser?.uid) {
-      console.log('[Phase3] BAIL — no uid (auth not ready yet)');
-      return;
-    }
-    if (pushInitRef.current) {
-      console.log('[Phase3] BAIL — already initialized');
-      return;
-    }
-
+    if (!isNative) { console.log('[Phase3] BAIL — not native'); return; }
+    if (!fbUser?.uid) { console.log('[Phase3] BAIL — no uid'); return; }
+    if (pushInitRef.current) { console.log('[Phase3] BAIL — already initialized'); return; }
     var uid = fbUser.uid;
-    console.log('[Phase3] ✓ all guards passed — starting 10s timer for uid:', uid.slice(0, 10) + '...');
-
+    console.log('[Phase3] ✓ starting 10s timer for uid:', uid.slice(0, 10) + '...');
     var t = setTimeout(function() {
-      if (pushInitRef.current) {
-        console.log('[Phase3] timer fired but pushInitRef already true — skipping');
-        return;
-      }
+      if (pushInitRef.current) return;
       pushInitRef.current = true;
       console.log('[Phase3] ★ Timer fired! Calling initPushNotifications...');
-
       initPushNotifications(function(token) {
-        console.log('[Phase3] ★ Token received in callback! Calling saveFcmToken...');
+        console.log('[Phase3] ★ Token received! Calling saveFcmToken...');
         saveFcmToken(uid, token).then(function(ok) {
           console.log('[Phase3] saveFcmToken returned:', ok);
         }).catch(function(err) {
@@ -541,7 +420,6 @@ export default function App() {
         console.error('[Phase3] initPushNotifications threw:', err);
       });
     }, 10000);
-
     return function() { clearTimeout(t); };
   }, [isNative, fbUser?.uid]);
 
@@ -556,11 +434,9 @@ export default function App() {
       setFsHistory([]);
       return;
     }
-
     var uid = fbUser.uid;
     setAuthLoading(true);
     firebaseService.checkDailyReset(uid);
-
     var u1 = firebaseService.onProfileChange(uid, function(p) {
       if (p) {
         setUser(p);
@@ -568,47 +444,25 @@ export default function App() {
         firebaseService.saveUserProfile({
           uid: uid,
           email: fbUser.email || (uid.startsWith('local_guest_') ? 'Guest User' : 'Unknown'),
-          points: 0,
-          claimsToday: 0,
-          lastClaimDate: null,
-          totalEarned: 0,
-          boostLevel: 1,
-          adsWatchedToday: 0,
-          currentLevelAdCounter: 0,
+          points: 0, claimsToday: 0, lastClaimDate: null, totalEarned: 0,
+          boostLevel: 1, adsWatchedToday: 0, currentLevelAdCounter: 0,
           lastBoostDate: new Date().toDateString(),
         });
       }
       setAuthLoading(false);
     });
-
     var u2 = firebaseService.onClaimsChange(uid, setFsClaims);
     var u3 = firebaseService.onHistoryChange(uid, setFsHistory);
-
     return function() { u1(); u2(); u3(); };
   }, [fbUser?.uid]);
 
-  // ─── Search, Categories, Transactions ────────────────────────
+  // ─── Search / Category ────────────────────────────────────────
   var [searchQuery, setSearchQuery] = useState('');
   var [selectedCategory, setSelectedCategory] = useState<string>(ALL_CATEGORIES);
 
-  // ═══════════════════════════════════════════════════════════════
-  // DYNAMIC FILTER LISTS — derived from the offers snapshot.
-  // Updates automatically whenever Firestore pushes a new offers[]
-  // because offers is the only dep. Adding a new country or category
-  // value to any offer document in the `offers` collection causes the
-  // dropdown to reflect it on the next snapshot — no redeploy needed.
-  // ═══════════════════════════════════════════════════════════════
-  var categories = useMemo(function() {
-    return buildCategoriesList(offers);
-  }, [offers]);
+  var categories = useMemo(function() { return buildCategoriesList(offers); }, [offers]);
+  var countries  = useMemo(function() { return buildCountriesList(offers); },  [offers]);
 
-  var countries = useMemo(function() {
-    return buildCountriesList(offers);
-  }, [offers]);
-
-  // If the currently-selected country/category is no longer present in
-  // the list (e.g. the last offer tagged with it was removed in Firestore),
-  // gracefully reset to the "All" sentinel.
   useEffect(function() {
     if (countries.indexOf(country) === -1) {
       setCountry(ALL_COUNTRIES);
@@ -617,29 +471,20 @@ export default function App() {
   }, [countries, country]);
 
   useEffect(function() {
-    if (categories.indexOf(selectedCategory) === -1) {
-      setSelectedCategory(ALL_CATEGORIES);
-    }
+    if (categories.indexOf(selectedCategory) === -1) setSelectedCategory(ALL_CATEGORIES);
   }, [categories, selectedCategory]);
 
   var [localTx, setLocalTx] = useState<Transaction[]>(function() {
-    try {
-      return JSON.parse(localStorage.getItem('local_transactions') || '[]');
-    } catch (e) {
-      return [];
-    }
+    try { return JSON.parse(localStorage.getItem('local_transactions') || '[]'); }
+    catch (e) { return []; }
   });
 
   var transactions = useMemo(function() {
     var all = localTx.concat(fsClaims).concat(fsHistory);
     var map = new Map<string, Transaction>();
-    for (var i = 0; i < all.length; i++) {
-      map.set(all[i].id, all[i]);
-    }
+    for (var i = 0; i < all.length; i++) map.set(all[i].id, all[i]);
     var unique = Array.from(map.values());
-    unique.sort(function(a, b) {
-      return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-    });
+    unique.sort(function(a, b) { return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(); });
     return unique;
   }, [localTx, fsClaims, fsHistory]);
 
@@ -657,62 +502,37 @@ export default function App() {
     return Math.max(0, total);
   }, [transactions]);
 
-  // ─── Offers ───────────────────────────────────────────────────
   useEffect(function() {
     var unsub = onOffersChange();
     return function() { unsub(); };
   }, [onOffersChange]);
 
-  // ─── Filtered Offers ──────────────────────────────────────────
-  // Strict rules:
-  //   • ALL_CATEGORIES + ALL_COUNTRIES ⇒ everything passes the filter.
-  //   • Specific category  ⇒ offer's `category` (string or string[]) must include it.
-  //   • Specific country   ⇒ offer's `countries`/`country` must include it
-  //                           (or contain "GLOBAL"/"ALL" to match any country).
-  //     Offers with no country data are hidden when a specific country is picked.
   var filteredOffers = useMemo(function() {
     var result: Offer[] = [];
-
     for (var i = 0; i < offers.length; i++) {
       var o = offers[i];
-
-      // 1. Category filter (strict)
       if (!offerMatchesCategory(o, selectedCategory)) continue;
-
-      // 2. Country filter (strict)
       if (!offerMatchesCountry(o, country)) continue;
-
-      // 3. Search filter
       if (searchQuery) {
         var q = searchQuery.toLowerCase();
-        var brandMatch = o.brand.toLowerCase().indexOf(q) !== -1;
-        var descMatch = o.description.toLowerCase().indexOf(q) !== -1;
-        if (!brandMatch && !descMatch) continue;
+        if (o.brand.toLowerCase().indexOf(q) === -1 && o.description.toLowerCase().indexOf(q) === -1) continue;
       }
-
       result.push(o);
     }
-
-    console.log('[Filter] ' + offers.length + ' → ' + result.length + ' (country=' + country + ', cat=' + selectedCategory + ')');
+    console.log('[Filter] ' + offers.length + ' → ' + result.length);
     return result;
   }, [offers, searchQuery, selectedCategory, country]);
 
-  // ─── Banner ───────────────────────────────────────────────────
   useEffect(function() {
-    if (isNative && tab === 'offers' && !adRunning) {
-      showBanner();
-    } else if (isNative) {
-      hideBanner();
-    }
+    if (isNative && tab === 'offers' && !adRunning) { showBanner(); }
+    else if (isNative) { hideBanner(); }
   }, [tab, adRunning, isNative, showBanner, hideBanner]);
 
   // ─── Web Ad Simulator ────────────────────────────────────────
   var showWebAd = useCallback(function(num: number, total: number): Promise<boolean> {
     return new Promise(function(resolve) {
       webRef.current = resolve;
-      setWebNum(num);
-      setWebTotal(total);
-      setWebOpen(true);
+      setWebNum(num); setWebTotal(total); setWebOpen(true);
     });
   }, []);
 
@@ -731,32 +551,19 @@ export default function App() {
     if (adRunning || !user || cdActive) return;
     setAdRunning(true);
     if (isNative) await hideBanner();
-
     var boostLevel = Number(user.boostLevel) || 1;
     var currentProgress = Number(user.currentLevelAdCounter) || 0;
     var adsNeeded = boostLevel;
     var remaining = adsNeeded - currentProgress;
-
     if (remaining <= 0) {
-      await handleClaimBoost();
-      startCooldown();
-      setAdRunning(false);
-      if (isNative) showBanner();
-      return;
+      await handleClaimBoost(); startCooldown(); setAdRunning(false);
+      if (isNative) showBanner(); return;
     }
-
     var completed = 0;
     for (var i = 0; i < remaining; i++) {
       var adNum = currentProgress + i + 1;
-      var ok = isNative
-        ? await showRewardedAdAndWait()
-        : await showWebAd(adNum, adsNeeded);
-
-      if (!ok) {
-        Toast.show({ text: 'Ad not completed.', duration: 'short' });
-        break;
-      }
-
+      var ok = isNative ? await showRewardedAdAndWait() : await showWebAd(adNum, adsNeeded);
+      if (!ok) { Toast.show({ text: 'Ad not completed.', duration: 'short' }); break; }
       var result = await recordAdWatch();
       if (result) {
         completed++;
@@ -766,12 +573,7 @@ export default function App() {
         }
       }
     }
-
-    if (completed === remaining) {
-      await handleClaimBoost();
-      startCooldown();
-    }
-
+    if (completed === remaining) { await handleClaimBoost(); startCooldown(); }
     setAdRunning(false);
     if (isNative && tab === 'offers') showBanner();
   };
@@ -779,65 +581,40 @@ export default function App() {
   var handleClaimBoost = async function() {
     try {
       var result = await claimBoostReward();
-      if (result) {
-        Toast.show({ text: '+100 pts!', duration: 'long' });
-      }
-    } catch (e) {
-      Toast.show({ text: 'Claim failed.', duration: 'short' });
-    }
+      if (result) Toast.show({ text: '+100 pts!', duration: 'long' });
+    } catch (e) { Toast.show({ text: 'Claim failed.', duration: 'short' }); }
   };
 
-  // ─── Claim Offer ─────────────────────────────────────────────
   var handleClaimOffer = async function(offer: Offer, cost: number) {
     if (!user) return;
-
     if (user.points < cost) {
-      setConfirmCfg({
-        title: 'Not Enough Points',
-        msg: 'Need ' + (cost - user.points) + ' more.',
-        fn: handleWatchAd,
-      });
-      setConfirmOpen(true);
-      return;
+      setConfirmCfg({ title: 'Not Enough Points', msg: 'Need ' + (cost - user.points) + ' more.', fn: handleWatchAd });
+      setConfirmOpen(true); return;
     }
-
     try {
       await firebaseService.claimOffer(user.uid, offer);
       recordUnlock(offer.id);
-
       if (!offer.code) {
         Browser.open({ url: offer.url });
       } else {
         setConfirmCfg({
-          title: 'Success!',
-          msg: 'Code: ' + offer.code,
-          fn: function() {
-            Clipboard.write({ string: offer.code! });
-            Toast.show({ text: 'Copied!', duration: 'short' });
-          },
+          title: 'Success!', msg: 'Code: ' + offer.code,
+          fn: function() { Clipboard.write({ string: offer.code! }); Toast.show({ text: 'Copied!', duration: 'short' }); },
         });
         setConfirmOpen(true);
       }
-    } catch (e) {
-      Toast.show({ text: 'Failed.', duration: 'long' });
-    }
+    } catch (e) { Toast.show({ text: 'Failed.', duration: 'long' }); }
   };
 
-  // ─── Auth Handlers ───────────────────────────────────────────
   var handleSignIn = async function() {
     setAuthLoading(true);
     try {
       var u = await firebaseService.signInWithGoogle();
-      if (u) {
-        setFbUser(u);
-        Toast.show({ text: 'Signed in!', duration: 'short' });
-      }
+      if (u) { setFbUser(u); Toast.show({ text: 'Signed in!', duration: 'short' }); }
     } catch (e) {
       var msg = e instanceof Error ? e.message : String(e);
       Toast.show({ text: msg.slice(0, 100), duration: 'long' });
-    } finally {
-      setAuthLoading(false);
-    }
+    } finally { setAuthLoading(false); }
   };
 
   var handleGuest = async function() {
@@ -847,28 +624,15 @@ export default function App() {
       setFbUser(f);
     } catch (e) {
       var id = localStorage.getItem('persistent_guest_id');
-      if (!id) {
-        id = 'local_guest_' + Math.random().toString(36).substr(2, 9);
-        localStorage.setItem('persistent_guest_id', id);
-      }
+      if (!id) { id = 'local_guest_' + Math.random().toString(36).substr(2, 9); localStorage.setItem('persistent_guest_id', id); }
       setFbUser({ uid: id, isAnonymous: true } as any);
-      setUser({
-        uid: id,
-        email: 'Guest User',
-        points: 0,
-        claimsToday: 0,
-        lastClaimDate: null,
-        totalEarned: 0,
-      });
-    } finally {
-      setAuthLoading(false);
-    }
+      setUser({ uid: id, email: 'Guest User', points: 0, claimsToday: 0, lastClaimDate: null, totalEarned: 0 });
+    } finally { setAuthLoading(false); }
   };
 
   var handleSignOut = async function() {
     try { await firebaseService.logout(); } catch (e) { /* silent */ }
-    setFbUser(null);
-    setUser(null);
+    setFbUser(null); setUser(null);
   };
 
   var handleDelete = async function() {
@@ -876,20 +640,12 @@ export default function App() {
     setAuthLoading(true);
     try {
       await firebaseService.deleteUserProfile(user.uid);
-      if (!user.uid.startsWith('local_guest_')) {
-        await firebaseService.deleteAccount();
-      }
+      if (!user.uid.startsWith('local_guest_')) await firebaseService.deleteAccount();
       Toast.show({ text: 'Deleted', duration: 'long' });
     } catch (e: any) {
-      Toast.show({
-        text: e && e.code === 'auth/requires-recent-login' ? 'Re-sign in first.' : 'Failed.',
-        duration: 'long',
-      });
+      Toast.show({ text: e && e.code === 'auth/requires-recent-login' ? 'Re-sign in first.' : 'Failed.', duration: 'long' });
     } finally {
-      setFbUser(null);
-      setUser(null);
-      setAuthLoading(false);
-      setDeleteOpen(false);
+      setFbUser(null); setUser(null); setAuthLoading(false); setDeleteOpen(false);
     }
   };
 
@@ -903,59 +659,31 @@ export default function App() {
     );
   }
 
-  // v13.5.0 — Splash loader removed for faster, more direct entry.
-  // While auth is still resolving we render nothing, so the native
-  // Capacitor splash (controlled by capacitor.config.ts) stays visible
-  // for a beat before the main UI takes over. No JS-side loading bar
-  // between splash and content — this matches user expectation of an
-  // instant launch.
-  if (authLoading) {
-    return null;
-  }
+  if (authLoading) return null;
 
   if (!fbUser) {
     return (
       <div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-8 text-center">
         <div className="w-full max-w-sm flex flex-col items-center">
           <Logo className="max-w-[160px]" />
-          <h1 className="text-3xl font-black text-zinc-900 mt-8 mb-3">
-            Welcome to {APP_NAME}
-          </h1>
+          <h1 className="text-3xl font-black text-zinc-900 mt-8 mb-3">Welcome to {APP_NAME}</h1>
           <p className="text-sm text-zinc-500 mb-10">Sign in to earn points.</p>
           <div className="w-full space-y-4">
-            <button
-              onClick={handleSignIn}
-              className="w-full bg-white border border-zinc-200 py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-sm active:scale-95"
-            >
-              <img
-                src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
-                alt="G"
-                className="w-5 h-5"
-              />
+            <button onClick={handleSignIn} className="w-full bg-white border border-zinc-200 py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-sm active:scale-95">
+              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="G" className="w-5 h-5" />
               Continue with Google
             </button>
-            <button
-              onClick={handleGuest}
-              className="w-full bg-zinc-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg active:scale-95"
-            >
+            <button onClick={handleGuest} className="w-full bg-zinc-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg active:scale-95">
               <User size={20} /> Continue as Guest
             </button>
           </div>
-          <p className="mt-12 text-[10px] text-zinc-400 uppercase tracking-widest">
-            v{APP_VERSION}
-          </p>
+          <p className="mt-12 text-[10px] text-zinc-400 uppercase tracking-widest">v{APP_VERSION}</p>
         </div>
       </div>
     );
   }
 
-  // v13.5.0 — Profile-loading fallback is now a render-nothing so there's
-  // no flash of a secondary loader between auth and first Firestore
-  // snapshot. HomeScreen already handles the isLoading=true state with
-  // skeleton cards once the main tree mounts, so this null is safe.
-  if (!user) {
-    return null;
-  }
+  if (!user) return null;
 
   // ─── Main Layout ─────────────────────────────────────────────
   return (
@@ -963,7 +691,7 @@ export default function App() {
       <div className="flex-1 overflow-y-auto scroll-smooth relative">
         <Header user={{ ...user, points: displayPoints }} />
         <main className="max-w-md mx-auto px-6 py-6 pb-[120px]">
-          <AnimatePresence mode="wait">
+          <>
             {tab === 'offers' && (
               <HomeScreen
                 user={{ ...user, points: displayPoints }}
@@ -989,13 +717,7 @@ export default function App() {
             )}
 
             {tab === 'profile' && (
-              <motion.div
-                key="profile"
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                className="space-y-6"
-              >
-                {/* Profile Card */}
+              <div className="space-y-6 rh-slide-in">
                 <div className="bg-white rounded-3xl p-6 border border-zinc-200 shadow-sm text-center">
                   <div className="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
                     <User size={40} className="text-indigo-600" />
@@ -1016,7 +738,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Actions */}
                 <div className="space-y-3">
                   <button onClick={function() { setPrivacyOpen(true); }} className="w-full flex items-center justify-between p-5 bg-white rounded-2xl border border-zinc-200 shadow-sm">
                     <div className="flex items-center gap-3"><ShieldCheck size={20} className="text-indigo-600" /><span className="text-sm font-bold text-zinc-700">Privacy Policy</span></div>
@@ -1032,7 +753,6 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* History */}
                 <div className="space-y-3">
                   <h2 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">History</h2>
                   {transactions.length === 0 ? (
@@ -1075,14 +795,13 @@ export default function App() {
                   )}
                   <div className="h-40" />
                 </div>
-              </motion.div>
+              </div>
             )}
-          </AnimatePresence>
+          </>
         </main>
       </div>
 
       <Navbar tab={tab} setTab={setTab} />
-
       <WebAdModal isOpen={webOpen} onDone={onWebDone} onSkip={onWebSkip} num={webNum} total={webTotal} />
 
       <SimpleModal open={privacyOpen} close={function() { setPrivacyOpen(false); }}>
@@ -1091,12 +810,9 @@ export default function App() {
           <h3 className="text-xl font-black text-zinc-900">Privacy Policy</h3>
         </div>
         <div className="text-sm text-zinc-600 space-y-3 max-h-[40vh] overflow-y-auto">
-          <p className="font-bold text-zinc-900">Data:</p>
-          <p>Email and activity for functionality only.</p>
-          <p className="font-bold text-zinc-900">Deletion:</p>
-          <p>Delete anytime from Profile.</p>
-          <p className="font-bold text-zinc-900">Ads:</p>
-          <p>Google AdMob. We never sell your data.</p>
+          <p className="font-bold text-zinc-900">Data:</p><p>Email and activity for functionality only.</p>
+          <p className="font-bold text-zinc-900">Deletion:</p><p>Delete anytime from Profile.</p>
+          <p className="font-bold text-zinc-900">Ads:</p><p>Google AdMob. We never sell your data.</p>
         </div>
         <button onClick={function() { setPrivacyOpen(false); }} className="w-full mt-6 bg-indigo-600 text-white py-4 rounded-2xl font-bold active:scale-95">Got it</button>
       </SimpleModal>
