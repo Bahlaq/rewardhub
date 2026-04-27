@@ -5,20 +5,11 @@ import tailwindcss from '@tailwindcss/vite';
 function capacitorIosFixes(): Plugin {
   return {
     name: 'capacitor-ios-fixes',
-    apply: 'build',
-    generateBundle(_options, bundle) {
-      for (const fileName of Object.keys(bundle)) {
-        const chunk = bundle[fileName];
-        if (fileName.endsWith('.html') && chunk.type === 'asset') {
-          const original =
-            typeof chunk.source === 'string'
-              ? chunk.source
-              : Buffer.from(chunk.source as Uint8Array).toString('utf-8');
-          chunk.source = original
-            .replace(/\s+crossorigin(="[^"]*")?/g, '')
-            .replace(/\s+integrity="[^"]*"/g, '');
-        }
-      }
+    enforce: 'post',
+    transformIndexHtml(html) {
+      return html
+        .replace(/\s+crossorigin(="[^"]*")?/g, '')
+        .replace(/\s+integrity="[^"]*"/g, '');
     },
   };
 }
