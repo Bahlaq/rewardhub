@@ -38,35 +38,25 @@ const firebaseConfig = {
 };
 
 export const isConfigValid = true;
-
-let app: ReturnType<typeof initializeApp> | undefined;
-try {
-  app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-} catch (e) {
-  console.error('[Firebase] initializeApp failed:', e);
-}
+let app;
+try { app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp(); }
+catch (e) { console.error("Firebase init failed:", e); }
 
 let db: ReturnType<typeof initializeFirestore> | null = null;
 try {
   if (app) db = initializeFirestore(app, { experimentalForceLongPolling: true });
-} catch (e) {
-  console.error('[Firebase] initializeFirestore failed:', e);
-}
+} catch (e) { console.error('[Firebase] initializeFirestore failed:', e); }
 
 let auth: ReturnType<typeof getAuth> | null = null;
 try {
   if (app) auth = getAuth(app);
-} catch (e) {
-  console.error('[Firebase] getAuth failed:', e);
-}
+} catch (e) { console.error('[Firebase] getAuth failed:', e); }
 
 let googleProvider: GoogleAuthProvider | null = null;
 try {
   googleProvider = new GoogleAuthProvider();
   googleProvider.setCustomParameters({ client_id: PRODUCTION_WEB_CLIENT_ID });
-} catch (e) {
-  console.error('[Firebase] GoogleAuthProvider failed:', e);
-}
+} catch (e) { console.error('[Firebase] GoogleAuthProvider failed:', e); }
 
 export { auth, db };
 export type { FirebaseUser };
