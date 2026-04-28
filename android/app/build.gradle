@@ -9,8 +9,8 @@ android {
         applicationId "com.rewardhub.official.app"
         minSdkVersion    rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 11
-        versionName "13.5.7"
+        versionCode 13
+        versionName "13.5.9"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
