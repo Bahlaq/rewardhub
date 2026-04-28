@@ -1,4 +1,4 @@
-// App.tsx — v13.5.1 (2026-04-17). Push restored with safety wrapper + diagnostics.
+// App.tsx — v13.5.9 (Build 13). Dynamic import entry + fast auth clear.
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Gift, User, LayoutDashboard, PlayCircle, TrendingUp, AlertCircle,
@@ -351,13 +351,19 @@ export default function App() {
 
   // ─── Auth ─────────────────────────────────────────────────────
   useEffect(function() {
+    // 5-second fallback: if Firebase never fires (offline / IndexedDB slow on
+    // cold iOS start), stop showing blank and let the user reach the login screen.
     var timeout = setTimeout(function() {
       setAuthLoading(false);
     }, 5000);
     var unsub = firebaseService.onAuthChange(function(f) {
       clearTimeout(timeout);
       setFbUser(f);
-      if (!f) setAuthLoading(false);
+      // Always clear auth loading here — whether user or null.
+      // If there IS a user, Firestore profile loads in the background;
+      // the main tree renders immediately and skeleton cards handle
+      // the brief window before the profile snapshot arrives.
+      setAuthLoading(false);
     });
     return function() { clearTimeout(timeout); unsub(); };
   }, []);
@@ -478,7 +484,6 @@ export default function App() {
     }
 
     var uid = fbUser.uid;
-    setAuthLoading(true);
     firebaseService.checkDailyReset(uid);
 
     var u1 = firebaseService.onProfileChange(uid, function(p) {
@@ -498,7 +503,6 @@ export default function App() {
           lastBoostDate: new Date().toDateString(),
         });
       }
-      setAuthLoading(false);
     });
 
     var u2 = firebaseService.onClaimsChange(uid, setFsClaims);
