@@ -12,6 +12,7 @@ import { Offer, UserProfile, Transaction } from '../types';
 
 const PRODUCTION_WEB_CLIENT_ID = "563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com";
 
+// GoogleAuth plugin — UNCHANGED from working v12.1
 let GoogleAuthInstance: any = null;
 if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
   import('@codetrix-studio/capacitor-google-auth').then(({ GoogleAuth }) => {
@@ -68,6 +69,7 @@ function handleFsError(error: unknown, path: string | null, shouldThrow = true) 
 }
 
 export const firebaseService = {
+  // ─── AUTH (UNCHANGED from working v12.1) ─────────────────────────
   async signInWithGoogle() {
     if (!auth) throw new Error("Firebase Auth not initialized");
     if (Capacitor.isNativePlatform()) {
@@ -133,11 +135,12 @@ export const firebaseService = {
       token: token,
       platform: platform,
       updatedAt: serverTimestamp(),
-      appVersion: '13.5.7',
+      appVersion: '14.0.0',
     }, { merge: true });
     console.log('[firebase.ts] ★ setDoc SUCCESS — token saved to Firestore!');
   },
 
+  // ─── PROFILE (UNCHANGED) ────────────────────────────────────────
   onProfileChange(uid: string, cb: (p: UserProfile | null) => void) {
     if (!db) { cb(null); return () => {}; }
     return onSnapshot(doc(db, getCol(uid), uid), d => cb(d.exists() ? d.data() as UserProfile : null),
@@ -163,6 +166,7 @@ export const firebaseService = {
     catch (e) { handleFsError(e, `${getCol(uid)}/${uid}`, false); }
   },
 
+  // ─── AD WATCH (UNCHANGED) ──────────────────────────────────────
   async recordAdWatch(uid: string) {
     if (!db) throw new Error("Firestore not initialized");
     const userRef = doc(db, getCol(uid), uid); const today = new Date().toDateString();
@@ -193,6 +197,7 @@ export const firebaseService = {
     });
   },
 
+  // ─── LISTENERS (UNCHANGED) ─────────────────────────────────────
   onOffersChange(cb: (offers: Offer[]) => void) { if (!db) { cb([]); return () => {}; } return onSnapshot(query(collection(db, 'offers')), snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data(), points: Number(d.data().points || 0) } as Offer))), err => { handleFsError(err, 'offers', false); cb([]); }); },
   onClaimsChange(uid: string, cb: (claims: Transaction[]) => void) { if (!db) { cb([]); return () => {}; } return onSnapshot(query(collection(db, 'claims'), where('uid', '==', uid)), snap => cb(snap.docs.map(d => { const x = d.data(); return { id: d.id, type: 'claim', title: x.offerBrand, amount: -x.pointsSpent, timestamp: x.timestamp?.toDate?.()?.toISOString() || new Date().toISOString(), code: x.code, rewardType: x.code ? 'code' : 'link' } as Transaction; })), err => { handleFsError(err, 'claims', false); cb([]); }); },
   onHistoryChange(uid: string, cb: (history: Transaction[]) => void) { if (!db) { cb([]); return () => {}; } return onSnapshot(query(collection(db, 'history'), where('uid', '==', uid)), snap => cb(snap.docs.map(d => { const x = d.data(); return { id: d.id, type: 'earn', title: x.title || x.message, amount: x.amount || x.points, timestamp: x.timestamp?.toDate?.()?.toISOString() || new Date().toISOString() } as Transaction; })), err => { handleFsError(err, 'history', false); cb([]); }); },
