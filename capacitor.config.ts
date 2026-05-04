@@ -7,6 +7,8 @@ const config: CapacitorConfig = {
 
   ios: {
     contentInset: 'automatic',
+    // Single scheme setting — do NOT also set server.iosScheme.
+    // Having both causes a conflict; ios.scheme is the authoritative one.
     scheme: 'RewardHub',
   },
 
@@ -15,8 +17,8 @@ const config: CapacitorConfig = {
   },
 
   server: {
+    // iosScheme intentionally removed — ios.scheme above is the sole setting.
     androidScheme: 'https',
-    iosScheme: 'capacitor',
     allowNavigation: [
       'accounts.google.com',
       '*.firebaseapp.com',
@@ -28,8 +30,10 @@ const config: CapacitorConfig = {
   plugins: {
     GoogleAuth: {
       scopes: ['profile', 'email'],
+      // MUST be the WEB OAuth client ID (not the iOS client ID).
+      // The web client ID is what produces a valid idToken for Firebase.
       serverClientId:
-        '563861371307-8emfj8kd3725lpj0mb9kkkf1r16100hu.apps.googleusercontent.com',
+        '563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com',
       forceCodeForRefreshToken: true,
     },
     PushNotifications: {
