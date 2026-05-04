@@ -4,12 +4,6 @@ type TokenCallback = (token: string) => void;
 
 let registerCalled = false;
 
-// ─── Plugin loader ───────────────────────────────────────────────────
-// Returns { plugin } wrapper, NOT the plugin directly.
-// Capacitor plugin objects are Proxies; returning one from an async
-// function causes JavaScript's Promise resolution to call plugin.then()
-// to test for a thenable — that call hits the native bridge and throws
-// "PushNotifications.then() is not implemented on android".
 function loadPushPlugin(): Promise<{ plugin: any } | null> {
   console.log('[Push][1] loadPushPlugin — attempting dynamic import...');
   return import('@capacitor/push-notifications')
@@ -24,58 +18,8 @@ function loadPushPlugin(): Promise<{ plugin: any } | null> {
     });
 }
 
-// ─── Permission helpers ─────────────────────────────────────────────
-async function ensurePermission(PushNotifications: any): Promise<boolean> {
-  console.log('[Push][2] ensurePermission — checking current status...');
-  try {
-    const current = await PushNotifications.checkPermissions();
-    console.log('[Push][2] checkPermissions result:', JSON.stringify(current));
-
-    if (current.receive === 'granted') {
-      console.log('[Push][2] already granted');
-      return true;
-    }
-    if (current.receive === 'denied') {
-      console.log('[Push][2] previously DENIED — cannot register');
-      return false;
-    }
-
-    console.log('[Push][2] status is "' + current.receive + '" — requesting...');
-
-    // ── Android: set a pending flag BEFORE showing the system dialog.
-    // On aggressive OEMs (Samsung/Xiaomi), the permission dialog causes
-    // onPause → the OS kills the WebView process. When the user reopens
-    // the app, checkAndRegisterIfPermissionAlreadyGranted() sees the flag
-    // and calls register() silently without showing any UI.
-    if (Capacitor.getPlatform() === 'android') {
-      try { localStorage.setItem('rh_push_pending', '1'); } catch {}
-    }
-
-    const next = await PushNotifications.requestPermissions();
-    console.log('[Push][2] requestPermissions result:', JSON.stringify(next));
-
-    if (Capacitor.getPlatform() === 'android') {
-      try { localStorage.removeItem('rh_push_pending'); } catch {}
-    }
-
-    return next.receive === 'granted';
-  } catch (e) {
-    console.error('[Push][2] ensurePermission FAILED:', e);
-    if (Capacitor.getPlatform() === 'android') {
-      try { localStorage.removeItem('rh_push_pending'); } catch {}
-    }
-    return false;
-  }
-}
-
-// ─── Android channel bootstrap (noop on iOS) ────────────────────────
 async function ensureDefaultChannel(PushNotifications: any): Promise<void> {
-  const platform = Capacitor.getPlatform();
-  console.log('[Push][3] ensureDefaultChannel — platform:', platform);
-  if (platform !== 'android') {
-    console.log('[Push][3] not Android — skipping channel');
-    return;
-  }
+  if (Capacitor.getPlatform() !== 'android') return;
   try {
     await PushNotifications.createChannel({
       id: 'default',
@@ -93,140 +37,168 @@ async function ensureDefaultChannel(PushNotifications: any): Promise<void> {
   }
 }
 
-// ─── Attach listeners + register ────────────────────────────────────
-async function attachAndRegister(
+function attachListenersOnce(
   PushNotifications: any,
   onToken: TokenCallback,
-): Promise<void> {
+): void {
   console.log('[Push][4] attaching listeners...');
-  try {
-    PushNotifications.addListener('registration', function (token: any) {
-      console.log('[Push][5] ★ registration event fired!');
-      console.log('[Push][5] raw token object:', JSON.stringify(token));
-      try {
-        const raw = token && typeof token === 'object' ? token.value : token;
-        console.log('[Push][5] extracted token string (len=' + (raw ? raw.length : 0) + ')');
-        if (typeof raw === 'string' && raw.length > 0) {
-          console.log('[Push][5] calling onToken callback...');
-          onToken(raw);
-          console.log('[Push][5] onToken callback returned');
-        } else {
-          console.warn('[Push][5] empty token — NOT calling onToken');
-        }
-      } catch (cbErr) {
-        console.error('[Push][5] onToken callback threw:', cbErr);
+  PushNotifications.addListener('registration', function (token: any) {
+    console.log('[Push][5] ★ registration event fired!');
+    try {
+      const raw = token && typeof token === 'object' ? token.value : token;
+      console.log('[Push][5] token len=' + (raw ? raw.length : 0));
+      if (typeof raw === 'string' && raw.length > 0) {
+        onToken(raw);
       }
-    });
+    } catch (cbErr) {
+      console.error('[Push][5] onToken callback threw:', cbErr);
+    }
+  });
 
-    PushNotifications.addListener('registrationError', function (err: any) {
-      console.error('[Push][5] ★ registrationError event fired!');
-      console.error('[Push][5] error:', JSON.stringify(err));
-    });
+  PushNotifications.addListener('registrationError', function (err: any) {
+    console.error('[Push][5] ★ registrationError:', JSON.stringify(err));
+  });
 
-    PushNotifications.addListener(
-      'pushNotificationReceived',
-      function (n: any) {
-        console.log('[Push] notification received while foregrounded:', n && n.title);
-      }
-    );
+  PushNotifications.addListener('pushNotificationReceived', function (n: any) {
+    console.log('[Push] received foregrounded:', n && n.title);
+  });
 
-    PushNotifications.addListener(
-      'pushNotificationActionPerformed',
-      function (a: any) {
-        console.log('[Push] action performed:', a && a.actionId);
-      }
-    );
-    console.log('[Push][4] all listeners attached ✓');
-  } catch (e) {
-    console.error('[Push][4] addListener FAILED:', e);
-    return;
-  }
-
-  // Small delay on Android — lets the activity fully resume after the
-  // permission dialog onPause/onResume cycle before touching the FCM bridge.
-  if (Capacitor.getPlatform() === 'android') {
-    await new Promise(r => setTimeout(r, 400));
-  }
-
-  console.log('[Push][6] calling register()...');
-  try {
-    await PushNotifications.register();
-    console.log('[Push][6] register() resolved ✓ — waiting for registration event...');
-  } catch (e) {
-    console.error('[Push][6] register() THREW:', e);
-  }
+  PushNotifications.addListener('pushNotificationActionPerformed', function (a: any) {
+    console.log('[Push] action performed:', a && a.actionId);
+  });
+  console.log('[Push][4] listeners attached ✓');
 }
 
-// ─── Main entry ─────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════
+// Main entry — called when user taps "Enable Notifications" in our prompt.
+//
+// CRITICAL ANDROID FIX:
+// On aggressive OEMs (Samsung/Xiaomi), requestPermissions() shows the
+// system dialog which causes onPause/onResume — and the OS kills the
+// WebView process during the pause. The user then sees their home
+// screen and our app is gone.
+//
+// SOLUTION: On Android, call register() FIRST (no UI, safe). The FCM
+// token is obtained and saved to Firestore BEFORE the permission dialog
+// appears. Then we request permissions. If the app gets killed during
+// the dialog, the token is already saved — no harm done. POST_NOTIFICATIONS
+// permission only controls notification DISPLAY, not token registration,
+// so the token works regardless.
+//
+// On iOS, requestPermissions() does not cause the same crash. We can
+// keep the standard order: request permission, then register.
+// ═══════════════════════════════════════════════════════════════════════
 export async function initPushNotifications(
   onToken: TokenCallback
 ): Promise<void> {
-  console.log('════════════════════════════════════════════');
-  console.log('[Push] initPushNotifications called');
-  console.log('[Push] isNativePlatform:', Capacitor.isNativePlatform());
-  console.log('[Push] getPlatform:', Capacitor.getPlatform());
-  console.log('[Push] registerCalled:', registerCalled);
-  console.log('════════════════════════════════════════════');
+  console.log('[Push] initPushNotifications — platform:', Capacitor.getPlatform());
 
-  if (!Capacitor.isNativePlatform()) {
-    console.log('[Push] BAIL — not native platform');
-    return;
-  }
-
-  if (registerCalled) {
-    console.log('[Push] BAIL — already registered');
-    return;
-  }
+  if (!Capacitor.isNativePlatform()) return;
+  if (registerCalled) return;
   registerCalled = true;
 
-  const pluginWrapper = await loadPushPlugin();
-  if (!pluginWrapper) {
+  const wrapper = await loadPushPlugin();
+  if (!wrapper) {
     console.log('[Push] BAIL — plugin not in bundle');
     return;
   }
-  const PushNotifications = pluginWrapper.plugin;
+  const PushNotifications = wrapper.plugin;
 
-  const ok = await ensurePermission(PushNotifications);
-  if (!ok) {
-    console.log('[Push] BAIL — permission not granted');
+  if (Capacitor.getPlatform() === 'android') {
+    // ─── ANDROID PATH ──────────────────────────────────────────
+    // Step 1: channel + listeners + register (NO permission dialog yet).
+    // The FCM token comes back via the registration event listener.
+    await ensureDefaultChannel(PushNotifications);
+    attachListenersOnce(PushNotifications, onToken);
+    try {
+      await PushNotifications.register();
+      console.log('[Push] register() OK — token will arrive via event');
+    } catch (e) {
+      console.error('[Push] register() FAILED:', e);
+    }
+
+    // Step 2: NOW request permission. If this crashes the app, the
+    // token from step 1 is already saved in Firestore.
+    // Wait 2s so the registration event has time to fire and save the token.
+    await new Promise(r => setTimeout(r, 2000));
+
+    try {
+      const current = await PushNotifications.checkPermissions();
+      if (current.receive === 'granted' || current.receive === 'denied') {
+        console.log('[Push][android] permission already', current.receive);
+        return;
+      }
+      console.log('[Push][android] requesting permission AFTER register');
+      const next = await PushNotifications.requestPermissions();
+      console.log('[Push][android] requestPermissions:', JSON.stringify(next));
+    } catch (e) {
+      console.error('[Push][android] requestPermissions FAILED:', e);
+    }
     return;
   }
-  console.log('[Push] permission granted ✓');
 
-  await ensureDefaultChannel(PushNotifications);
-  await attachAndRegister(PushNotifications, onToken);
+  // ─── iOS PATH ──────────────────────────────────────────────
+  // iOS doesn't have the OEM-kill problem. Standard order is fine.
+  try {
+    const current = await PushNotifications.checkPermissions();
+    let granted = current.receive === 'granted';
+    if (!granted && current.receive !== 'denied') {
+      const next = await PushNotifications.requestPermissions();
+      granted = next.receive === 'granted';
+    }
+    if (!granted) {
+      console.log('[Push][ios] permission not granted');
+      return;
+    }
+    attachListenersOnce(PushNotifications, onToken);
+    await PushNotifications.register();
+    console.log('[Push][ios] register() OK');
+  } catch (e) {
+    console.error('[Push][ios] FAILED:', e);
+  }
 }
 
-// ─── Silent startup registration ─────────────────────────────────────
-// Called on every app start. If the user already granted permission
-// (including after the app was killed during the permission dialog on
-// a previous session), we register silently without any UI.
+// ═══════════════════════════════════════════════════════════════════════
+// Silent startup registration — fires on every app start.
+// Handles two cases:
+//   1. iOS: user previously granted permission; register silently.
+//   2. Android: previous session got killed during permission dialog.
+//      We register silently (no permission dialog) — token is saved.
+// ═══════════════════════════════════════════════════════════════════════
 export async function checkAndRegisterIfPermissionAlreadyGranted(
   onToken: TokenCallback
 ): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
   if (registerCalled) return;
 
-  const pluginWrapper = await loadPushPlugin();
-  if (!pluginWrapper) return;
-  const PushNotifications = pluginWrapper.plugin;
+  const wrapper = await loadPushPlugin();
+  if (!wrapper) return;
+  const PushNotifications = wrapper.plugin;
 
   try {
-    const status = await PushNotifications.checkPermissions();
-    console.log('[Push][silent] checkPermissions:', status?.receive);
-    if (status?.receive !== 'granted') return;
+    if (Capacitor.getPlatform() === 'android') {
+      // Android: ALWAYS register silently on startup (no permission dialog).
+      // FCM tokens work without POST_NOTIFICATIONS permission.
+      registerCalled = true;
+      await ensureDefaultChannel(PushNotifications);
+      attachListenersOnce(PushNotifications, onToken);
+      await PushNotifications.register();
+      console.log('[Push][silent-android] register() OK on startup');
+      return;
+    }
 
-    // Permission already granted — register silently.
+    // iOS: only register silently if permission already granted.
+    const status = await PushNotifications.checkPermissions();
+    if (status?.receive !== 'granted') return;
     registerCalled = true;
-    console.log('[Push][silent] permission already granted — registering silently');
-    await ensureDefaultChannel(PushNotifications);
-    await attachAndRegister(PushNotifications, onToken);
+    attachListenersOnce(PushNotifications, onToken);
+    await PushNotifications.register();
+    console.log('[Push][silent-ios] register() OK');
   } catch (e) {
-    console.warn('[Push][silent] silent check failed (non-fatal):', e);
+    console.warn('[Push][silent] failed (non-fatal):', e);
   }
 }
 
-// ─── Cleanup helper ─────────────────────────────────────────────────
 export async function removeAllPushListeners(): Promise<void> {
   try {
     const wrapper = await loadPushPlugin();
