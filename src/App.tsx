@@ -12,7 +12,7 @@ import { twMerge } from 'tailwind-merge';
 import { Offer, UserProfile, Transaction } from './types';
 import { useAds, initAdMobEarly } from './hooks/useAds';
 import { firebaseService, FirebaseUser, isConfigValid } from './services/firebase';
-import { initPushNotifications } from './services/notifications';
+import { initPushNotifications, checkAndRegisterIfPermissionAlreadyGranted } from './services/notifications';
 import { APP_NAME, APP_VERSION } from './constants';
 import {
   HomeScreen, offerMatchesCountry, offerMatchesCategory,
