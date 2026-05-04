@@ -257,6 +257,18 @@ export default function App() {
     }, 5000);
     return () => clearTimeout(t);
   }, [isNative, fbUser?.uid]);
+  
+    // ─── Phase 3b: Silent startup registration ───────────────────────
+  // If the user already granted push permission in a previous session
+  // (including after the app was killed during the Android permission
+  // dialog), register silently without showing any UI.
+  useEffect(() => {
+    if (!isNative || !fbUser?.uid || pushInitRef.current) return;
+    const uid = fbUser.uid;
+    checkAndRegisterIfPermissionAlreadyGranted(token => {
+      saveFcmToken(uid, token).catch(console.error);
+    }).catch(console.error);
+  }, [isNative, fbUser?.uid]);
 
   const handleEnableNotifications = useCallback(() => {
     setShowNotifPrompt(false);
