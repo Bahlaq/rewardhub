@@ -7,9 +7,13 @@ const config: CapacitorConfig = {
 
   ios: {
     contentInset: 'automatic',
-    // Single scheme setting — do NOT also set server.iosScheme.
-    // Having both causes a conflict; ios.scheme is the authoritative one.
-    scheme: 'RewardHub',
+    // CRITICAL: 'capacitor' (default) — NOT a custom scheme like 'RewardHub'.
+    // WKWebView treats custom URL schemes as opaque origins, which makes
+    // ALL same-origin script errors appear as opaque cross-origin
+    // "Script error." with no filename or stack trace. The default
+    // 'capacitor' scheme is recognized as a first-party origin and
+    // surfaces real error details to window.onerror.
+    scheme: 'capacitor',
   },
 
   android: {
@@ -17,7 +21,6 @@ const config: CapacitorConfig = {
   },
 
   server: {
-    // iosScheme intentionally removed — ios.scheme above is the sole setting.
     androidScheme: 'https',
     allowNavigation: [
       'accounts.google.com',
@@ -30,8 +33,6 @@ const config: CapacitorConfig = {
   plugins: {
     GoogleAuth: {
       scopes: ['profile', 'email'],
-      // MUST be the WEB OAuth client ID (not the iOS client ID).
-      // The web client ID is what produces a valid idToken for Firebase.
       serverClientId:
         '563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com',
       forceCodeForRefreshToken: true,
