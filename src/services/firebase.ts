@@ -45,7 +45,9 @@ catch (e) { console.error("Firebase init failed:", e); }
 
 let db: ReturnType<typeof initializeFirestore> | null = null;
 try {
-  if (app) db = initializeFirestore(app, { experimentalForceLongPolling: true });
+  // experimentalAutoDetectLongPolling replaces the deprecated
+  // experimentalForceLongPolling — avoids XHR hangs on iOS WKWebView.
+  if (app) db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
 } catch (e) { console.error('[Firebase] initializeFirestore failed:', e); }
 
 let auth: ReturnType<typeof getAuth> | null = null;
