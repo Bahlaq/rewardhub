@@ -122,6 +122,12 @@ const SimpleModal = ({ open, close, children }: { open: boolean; close: () => vo
 
 async function saveFcmToken(uid: string, token: string): Promise<boolean> {
   if (!uid || !token) return false;
+  // Firestore rules require request.auth.uid == doc id. Offline/local
+  // guest ids have no Firebase Auth session, so writes are always denied.
+  if (uid.startsWith('local_guest_')) {
+    console.warn('[FCM] skip save — local guest has no Firebase Auth uid');
+    return false;
+  }
   const platform = Capacitor.getPlatform();
   const svc = firebaseService as any;
   if (typeof svc.saveFcmToken !== 'function') { console.error('[FCM] saveFcmToken missing'); return false; }
@@ -269,8 +275,10 @@ export default function App() {
   // dialog), register silently without showing any UI.
   useEffect(() => {
     if (!isNative || !fbUser?.uid || pushInitRef.current) return;
+    if (fbUser.uid.startsWith('local_guest_')) return;
     const uid = fbUser.uid;
     checkAndRegisterIfPermissionAlreadyGranted(token => {
+      pushInitRef.current = true;
       saveFcmToken(uid, token).catch(console.error);
     }).catch(console.error);
   }, [isNative, fbUser?.uid]);
@@ -278,6 +286,7 @@ export default function App() {
   const handleEnableNotifications = useCallback(() => {
     setShowNotifPrompt(false);
     if (pushInitRef.current || !fbUser?.uid) return;
+    if (fbUser.uid.startsWith('local_guest_')) return;
     pushInitRef.current = true;
     const uid = fbUser.uid;
     initPushNotifications(token => {

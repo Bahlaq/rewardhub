@@ -160,6 +160,27 @@ export const firebaseService = {
     if (!db) {
       throw new Error('Firestore db is null — saveFcmToken cannot write');
     }
+    if (!uid || uid.startsWith('local_guest_')) {
+      throw new Error('Cannot save FCM token for unauthenticated/local guest uid');
+    }
+    // Rules require request.auth.uid == document id. Wait briefly if auth
+    // state is still settling after cold start / sign-in.
+    if (!auth?.currentUser || auth.currentUser.uid !== uid) {
+      await new Promise<void>((resolve, reject) => {
+        if (!auth) return reject(new Error('Firebase Auth not initialized'));
+        const timeout = setTimeout(() => {
+          unsub();
+          reject(new Error('Auth not ready to write fcm_tokens/' + uid.slice(0, 8)));
+        }, 8000);
+        const unsub = onAuthStateChanged(auth, (user) => {
+          if (user?.uid === uid) {
+            clearTimeout(timeout);
+            unsub();
+            resolve();
+          }
+        });
+      });
+    }
     const ref = doc(db, 'fcm_tokens', uid);
     console.log('[firebase.ts] writing to fcm_tokens/' + uid.slice(0, 10) + '...');
     await setDoc(ref, {
