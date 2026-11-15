@@ -52,6 +52,16 @@
         window.FinalizationRegistry.prototype.unregister = function () {};
       }
 
+      // AggregateError (needed by Promise.any polyfill on older WKWebView)
+      if (typeof AggregateError === 'undefined') {
+        window.AggregateError = function AggregateError(errors, message) {
+          var err = new Error(message || 'All promises were rejected');
+          err.name = 'AggregateError';
+          err.errors = errors || [];
+          return err;
+        };
+      }
+
       // Promise.any
       if (typeof Promise.any === 'undefined') {
         Promise.any = function (promises) {

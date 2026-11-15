@@ -217,8 +217,10 @@ export default function App() {
 
   // ─── Phase 1: error handlers + AdMob warm-up ─────────────────
   useEffect(() => {
-    const onUncaught = (ev: ErrorEvent) => { console.error('[Global]', ev.message); ev.preventDefault(); };
-    const onRejection = (ev: PromiseRejectionEvent) => { console.error('[Global] rejection:', ev.reason); ev.preventDefault(); };
+    // Log only — do NOT preventDefault. index.html's capture-phase
+    // __rhShow handler needs the event to surface boot failures on iOS.
+    const onUncaught = (ev: ErrorEvent) => { console.error('[Global]', ev.message); };
+    const onRejection = (ev: PromiseRejectionEvent) => { console.error('[Global] rejection:', ev.reason); };
     window.addEventListener('error', onUncaught);
     window.addEventListener('unhandledrejection', onRejection);
     if (isNative) {
@@ -229,14 +231,17 @@ export default function App() {
     return () => { window.removeEventListener('error', onUncaught); window.removeEventListener('unhandledrejection', onRejection); };
   }, [isNative]);
 
-  // ─── Phase 2: App Open Ad (T+800ms) ──────────────────────────
+  // ─── Phase 2: App Open Ad (after first paint + AdMob warm-up) ─
+  // Was T+800ms which raced the first frame on iOS and made cold
+  // start look like a freeze/crash when the interstitial covered
+  // a still-loading WebView.
   useEffect(() => {
     if (!isNative || appOpenShownRef.current) return;
     const t = setTimeout(() => {
       if (appOpenShownRef.current) return;
       appOpenShownRef.current = true;
       showAppOpenAd().catch(console.warn);
-    }, 800);
+    }, 3500);
     return () => clearTimeout(t);
   }, [isNative, showAppOpenAd]);
 

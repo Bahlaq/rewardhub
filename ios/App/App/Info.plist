@@ -101,6 +101,9 @@
 		<dict><key>SKAdNetworkIdentifier</key><string>3qcr597p9d.skadnetwork</string></dict>
 	</array>
 
+	<key>GIDClientID</key>
+	<string>563861371307-8emfj8kd3725lpj0mb9kkkf1r16100hu.apps.googleusercontent.com</string>
+
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

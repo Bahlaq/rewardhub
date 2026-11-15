@@ -4,22 +4,29 @@ import {
   deleteDoc, onSnapshot, runTransaction, serverTimestamp
 } from 'firebase/firestore';
 import {
-  getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged,
+  getAuth, initializeAuth, indexedDBLocalPersistence,
+  GoogleAuthProvider, signInWithPopup, onAuthStateChanged,
   signOut, signInAnonymously, deleteUser, User as FirebaseUser, signInWithCredential
 } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
 import { Offer, UserProfile, Transaction } from '../types';
 
 const PRODUCTION_WEB_CLIENT_ID = "563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com";
+// iOS OAuth client from GoogleService-Info.plist CLIENT_ID — required by Google Sign-In SDK on iOS.
+const PRODUCTION_IOS_CLIENT_ID = "563861371307-8emfj8kd3725lpj0mb9kkkf1r16100hu.apps.googleusercontent.com";
 
-// GoogleAuth plugin — UNCHANGED from working v12.1
+// GoogleAuth plugin — platform-correct client IDs.
+// iOS must use the iOS CLIENT_ID as clientId; serverClientId stays the web client
+// so Firebase can verify the idToken. Using the web ID as clientId on iOS breaks
+// GIDSignIn and can leave the bridge in a bad state after cold start.
 let GoogleAuthInstance: any = null;
 if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
   import('@codetrix-studio/capacitor-google-auth').then(({ GoogleAuth }) => {
     GoogleAuthInstance = GoogleAuth;
     try {
+      const isIOS = Capacitor.getPlatform() === 'ios';
       (GoogleAuth as any).initialize({
-        clientId: PRODUCTION_WEB_CLIENT_ID,
+        clientId: isIOS ? PRODUCTION_IOS_CLIENT_ID : PRODUCTION_WEB_CLIENT_ID,
         serverClientId: PRODUCTION_WEB_CLIENT_ID,
         scopes: ['profile', 'email'],
         grantOfflineAccess: true
@@ -50,10 +57,27 @@ try {
   if (app) db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
 } catch (e) { console.error('[Firebase] initializeFirestore failed:', e); }
 
+// CRITICAL iOS FIX:
+// getAuth() assumes a normal browser origin. On Capacitor iOS (capacitor://)
+// that path hangs — onAuthStateChanged never fires, promises never resolve,
+// and the WebView stays on a white / "Loading…" screen forever.
+// initializeAuth + indexedDBLocalPersistence is the supported Capacitor path.
 let auth: ReturnType<typeof getAuth> | null = null;
 try {
-  if (app) auth = getAuth(app);
-} catch (e) { console.error('[Firebase] getAuth failed:', e); }
+  if (app) {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        auth = initializeAuth(app, { persistence: indexedDBLocalPersistence });
+      } catch (e) {
+        // Auth already initialized (HMR / re-entry) — fall back to getAuth.
+        console.warn('[Firebase] initializeAuth fallback to getAuth:', e);
+        auth = getAuth(app);
+      }
+    } else {
+      auth = getAuth(app);
+    }
+  }
+} catch (e) { console.error('[Firebase] Auth init failed:', e); }
 
 let googleProvider: GoogleAuthProvider | null = null;
 try {
@@ -79,7 +103,13 @@ export const firebaseService = {
         if (!GoogleAuthInstance) {
           const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
           GoogleAuthInstance = GoogleAuth;
-          (GoogleAuthInstance as any).initialize({ clientId: PRODUCTION_WEB_CLIENT_ID, serverClientId: PRODUCTION_WEB_CLIENT_ID, scopes: ['profile', 'email'], grantOfflineAccess: true });
+          const isIOS = Capacitor.getPlatform() === 'ios';
+          (GoogleAuthInstance as any).initialize({
+            clientId: isIOS ? PRODUCTION_IOS_CLIENT_ID : PRODUCTION_WEB_CLIENT_ID,
+            serverClientId: PRODUCTION_WEB_CLIENT_ID,
+            scopes: ['profile', 'email'],
+            grantOfflineAccess: true,
+          });
         }
         try { await GoogleAuthInstance.signOut(); } catch {}
         const googleUser = await GoogleAuthInstance.signIn();
