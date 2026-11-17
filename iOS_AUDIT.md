@@ -34,7 +34,7 @@ What to do:
 
 ## 4. FCM default channel
 
-**Android:** `com.google.firebase.messaging.default_notification_channel_id` meta-data + `createChannel('default', …)` at runtime. Already handled in `write_manifest.py` + `notifications.ts`.
+**Android:** `com.google.firebase.messaging.default_notification_channel_id` meta-data + `createChannel('new_codes', …)` at runtime. The id is `new_codes` in `write_manifest.py` and `notifications.ts` so an update can create the channel at high importance.
 
 **iOS:** channels don't exist. iOS has notification *categories* for action buttons, but for a single-tier notification product we don't need them. The `ensureDefaultChannel()` helper in `notifications.ts` returns early on iOS. **No iOS work needed.**
 

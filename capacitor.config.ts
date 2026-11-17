@@ -37,6 +37,9 @@ const config: CapacitorConfig = {
         '563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com',
       forceCodeForRefreshToken: true,
     },
+    // "alert" is what shows a push while the app is in the foreground
+    // (Android posts it from the plugin; iOS maps it to banner + list).
+    // Do not remove it or foreground messages will only be logged.
     PushNotifications: {
       presentationOptions: ['badge', 'sound', 'alert'],
     },

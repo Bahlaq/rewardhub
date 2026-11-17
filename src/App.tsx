@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Gift, User, LayoutDashboard, PlayCircle, TrendingUp, AlertCircle,
-  ChevronRight, Zap, History, ExternalLink, ShieldCheck, Trash2, Bell
+  ChevronRight, Zap, History, ExternalLink, ShieldCheck, Trash2
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Clipboard } from '@capacitor/clipboard';
@@ -12,7 +12,7 @@ import { twMerge } from 'tailwind-merge';
 import { Offer, UserProfile, Transaction } from './types';
 import { useAds, initAdMobEarly } from './hooks/useAds';
 import { firebaseService, FirebaseUser, isConfigValid } from './services/firebase';
-import { initPushNotifications, checkAndRegisterIfPermissionAlreadyGranted } from './services/notifications';
+import { requestNotificationPermission, setBroadcastUser, setPushOpenHandler } from './services/notifications';
 import { APP_NAME, APP_VERSION } from './constants';
 import {
   HomeScreen, offerMatchesCountry, offerMatchesCategory,
@@ -120,25 +120,6 @@ const SimpleModal = ({ open, close, children }: { open: boolean; close: () => vo
   );
 };
 
-async function saveFcmToken(uid: string, token: string): Promise<boolean> {
-  if (!uid || !token) return false;
-  const platform = Capacitor.getPlatform();
-  const svc = firebaseService as any;
-  if (typeof svc.saveFcmToken !== 'function') { console.error('[FCM] saveFcmToken missing'); return false; }
-  const delays = [1000, 2000, 4000];
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      await svc.saveFcmToken(uid, token, platform);
-      console.log('[FCM] token saved on attempt', attempt + 1);
-      return true;
-    } catch (e) {
-      console.error('[FCM] attempt', attempt + 1, 'failed:', e);
-      if (attempt < 2) await new Promise(r => setTimeout(r, delays[attempt]));
-    }
-  }
-  return false;
-}
-
 async function requestATTIfNeeded(): Promise<void> {
   if (Capacitor.getPlatform() !== 'ios') return;
   try {
@@ -163,11 +144,9 @@ export default function App() {
   const [webOpen, setWebOpen] = useState(false);
   const [webNum, setWebNum] = useState(1);
   const [webTotal, setWebTotal] = useState(1);
-  const [showNotifPrompt, setShowNotifPrompt] = useState(false);
+  const [focusOfferId, setFocusOfferId] = useState<string | null>(null);
   const webRef = useRef<((v: boolean) => void) | null>(null);
   const appOpenShownRef = useRef(false);
-  const notifPromptRef = useRef(false);
-  const pushInitRef = useRef(false);
 
   // ─── Cooldown ────────────────────────────────────────────────
   const [cdActive, setCdActive] = useState(false);
@@ -222,8 +201,12 @@ export default function App() {
     window.addEventListener('error', onUncaught);
     window.addEventListener('unhandledrejection', onRejection);
     if (isNative) {
+      // ATT first. The notification prompt runs after it resolves so the
+      // two system dialogs never stack, and AdMob still initializes with
+      // the tracking answer already known.
       requestATTIfNeeded().catch(console.warn).finally(() => {
         initAdMobEarly().then(ok => console.log('[AdMob] warm-up:', ok)).catch(console.warn);
+        requestNotificationPermission().catch(console.warn);
       });
     }
     return () => { window.removeEventListener('error', onUncaught); window.removeEventListener('unhandledrejection', onRejection); };
@@ -240,44 +223,8 @@ export default function App() {
     return () => clearTimeout(t);
   }, [isNative, showAppOpenAd]);
 
-  // ─── Phase 3: In-app notification prompt ─────────────────────
-  // Shown 5 seconds after the user lands on the main screen.
-  // Replaces the old auto-timer that triggered the system dialog
-  // while the app was in the foreground, causing Android OEMs
-  // (Samsung/Xiaomi) to kill the activity.
   useEffect(() => {
-    if (!isNative || !fbUser?.uid || notifPromptRef.current) return;
-    const lastAsked = localStorage.getItem('rh_notif_asked');
-    if (lastAsked && Date.now() - parseInt(lastAsked) < 7 * 24 * 60 * 60 * 1000) return;
-    const t = setTimeout(() => {
-      if (notifPromptRef.current) return;
-      notifPromptRef.current = true;
-      localStorage.setItem('rh_notif_asked', String(Date.now()));
-      setShowNotifPrompt(true);
-    }, 5000);
-    return () => clearTimeout(t);
-  }, [isNative, fbUser?.uid]);
-  
-    // ─── Phase 3b: Silent startup registration ───────────────────────
-  // If the user already granted push permission in a previous session
-  // (including after the app was killed during the Android permission
-  // dialog), register silently without showing any UI.
-  useEffect(() => {
-    if (!isNative || !fbUser?.uid || pushInitRef.current) return;
-    const uid = fbUser.uid;
-    checkAndRegisterIfPermissionAlreadyGranted(token => {
-      saveFcmToken(uid, token).catch(console.error);
-    }).catch(console.error);
-  }, [isNative, fbUser?.uid]);
-
-  const handleEnableNotifications = useCallback(() => {
-    setShowNotifPrompt(false);
-    if (pushInitRef.current || !fbUser?.uid) return;
-    pushInitRef.current = true;
-    const uid = fbUser.uid;
-    initPushNotifications(token => {
-      saveFcmToken(uid, token).catch(console.error);
-    }).catch(console.error);
+    setBroadcastUser(fbUser?.uid ?? null);
   }, [fbUser?.uid]);
 
   // ─── Firestore listeners ──────────────────────────────────────
@@ -314,6 +261,30 @@ export default function App() {
   // ─── Filters ─────────────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>(ALL_CATEGORIES);
+
+  // Notification taps: an offerId opens that offer, anything else opens
+  // the rewards list. Registered for guests and signed-in users alike.
+  useEffect(() => {
+    setPushOpenHandler((offerId) => {
+      setTab('offers');
+      setSearchQuery('');
+      setSelectedCategory(ALL_CATEGORIES);
+      onCountryChange(ALL_COUNTRIES);
+      setFocusOfferId(offerId);
+    });
+    return () => setPushOpenHandler(null);
+  }, [onCountryChange]);
+
+  // Keep the id while the offers listener catches up with a just-published
+  // code. Drop it if the document still is not there, so a later unrelated
+  // update does not open a modal on its own.
+  useEffect(() => {
+    if (!focusOfferId || isLoading) return;
+    if (offers.some((o) => o.id === focusOfferId)) return;
+    const t = setTimeout(() => setFocusOfferId(null), 8000);
+    return () => clearTimeout(t);
+  }, [focusOfferId, isLoading, offers]);
+
   const categories = useMemo(() => buildCategoriesList(offers), [offers]);
   const countries = useMemo(() => buildCountriesList(offers), [offers]);
   useEffect(() => { if (!countries.includes(country)) { setCountry(ALL_COUNTRIES); localStorage.setItem('rh_country', ALL_COUNTRIES); } }, [countries, country]);
@@ -498,6 +469,8 @@ export default function App() {
               handleClaimOffer={handleClaimOffer} handleClaimBoostReward={handleClaimBoost}
               isAdRunning={adRunning} selectedCountry={country} setSelectedCountry={onCountryChange}
               isCooldownActive={cdActive} cooldownSecondsLeft={cdSec}
+              openedOfferId={focusOfferId}
+              onCloseOpenedOffer={() => setFocusOfferId(null)}
             />
           )}
           {tab === 'profile' && (
@@ -573,23 +546,6 @@ export default function App() {
 
       <Navbar tab={tab} setTab={setTab} />
       <WebAdModal isOpen={webOpen} onDone={onWebDone} onSkip={onWebSkip} num={webNum} total={webTotal} />
-
-      {/* Notification permission prompt — user-initiated, replaces auto-timer */}
-      <SimpleModal open={showNotifPrompt} close={() => setShowNotifPrompt(false)}>
-        <div className="text-center">
-          <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Bell size={32} className="text-indigo-600" />
-          </div>
-          <h3 className="text-xl font-black text-zinc-900 mb-2">Stay Updated!</h3>
-          <p className="text-sm text-zinc-500 mb-6">Get notified about new rewards and exclusive offers.</p>
-          <button onClick={handleEnableNotifications} className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold active:scale-95 mb-3">
-            Enable Notifications
-          </button>
-          <button onClick={() => setShowNotifPrompt(false)} className="w-full bg-zinc-100 text-zinc-600 py-4 rounded-2xl font-bold active:scale-95">
-            Maybe Later
-          </button>
-        </div>
-      </SimpleModal>
 
       <SimpleModal open={privacyOpen} close={() => setPrivacyOpen(false)}>
         <div className="flex items-center gap-3 mb-6">

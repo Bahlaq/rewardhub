@@ -2,6 +2,12 @@ import './index.css';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
+import { startBroadcastPush } from './services/notifications';
+
+// Attach push listeners before React mounts so a cold start from a
+// notification tap is not dropped. Permission is requested later, after
+// the iOS tracking prompt.
+startBroadcastPush();
 
 const rootElement = document.getElementById('root');
 

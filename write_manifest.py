@@ -71,10 +71,10 @@ MANIFEST = '''<?xml version="1.0" encoding="utf-8"?>
         <meta-data
             android:name="com.google.android.gms.ads.DELAY_APP_MEASUREMENT_INIT"
             android:value="true" />
-        <!-- FCM / Push Notifications — default channel routing -->
+        <!-- FCM / Push Notifications — channel id must match ANDROID_NOTIFICATION_CHANNEL_ID -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="default" />
+            android:value="new_codes" />
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_icon"
             android:resource="@mipmap/ic_launcher" />

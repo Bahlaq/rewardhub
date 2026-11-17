@@ -1,0 +1,23 @@
+diff --git a/node_modules/@capacitor/push-notifications/ios/Sources/PushNotificationsPlugin/PushNotificationsHandler.swift b/node_modules/@capacitor/push-notifications/ios/Sources/PushNotificationsPlugin/PushNotificationsHandler.swift
+index f3972b6..81317cf 100644
+--- a/node_modules/@capacitor/push-notifications/ios/Sources/PushNotificationsPlugin/PushNotificationsHandler.swift
++++ b/node_modules/@capacitor/push-notifications/ios/Sources/PushNotificationsPlugin/PushNotificationsHandler.swift
+@@ -34,8 +34,16 @@ public class PushNotificationsHandler: NSObject, NotificationHandlerProtocol {
+ 
+             optionsArray.forEach { option in
+                 switch option {
+-                case "alert":
+-                    presentationOptions.insert(.alert)
++                case "alert", "banner":
++                    // iOS 14+ ignores the deprecated `.alert` bit. Map it to
++                    // banner + notification center so a foreground push is
++                    // actually visible. iOS 13 still uses `.alert`.
++                    if #available(iOS 14.0, *) {
++                        presentationOptions.insert(.banner)
++                        presentationOptions.insert(.list)
++                    } else {
++                        presentationOptions.insert(.alert)
++                    }
+                 case "badge":
+                     presentationOptions.insert(.badge)
+ 

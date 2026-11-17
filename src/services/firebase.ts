@@ -9,6 +9,7 @@ import {
 } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
 import { Offer, UserProfile, Transaction } from '../types';
+import { APP_VERSION } from '../constants';
 
 const PRODUCTION_WEB_CLIENT_ID = "563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com";
 
@@ -137,7 +138,7 @@ export const firebaseService = {
       token: token,
       platform: platform,
       updatedAt: serverTimestamp(),
-      appVersion: '14.0.0',
+      appVersion: APP_VERSION,
     }, { merge: true });
     console.log('[firebase.ts] ★ setDoc SUCCESS — token saved to Firestore!');
   },
