@@ -108,7 +108,7 @@ workflows:
             fi
             # FCM default notification channel
             if ! grep -q "com.google.firebase.messaging.default_notification_channel_id" "$MANIFEST"; then
-              sed -i '' 's|</application>|        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="rewardhub_default"/>\n    </application>|' "$MANIFEST"
+              sed -i '' 's|</application>|        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="new_codes"/>\n    </application>|' "$MANIFEST"
             fi
           fi
           

@@ -406,6 +406,8 @@ interface HomeScreenProps {
   setSelectedCountry: (c: string) => void;
   isCooldownActive: boolean;
   cooldownSecondsLeft: number;
+  openedOfferId?: string | null;
+  onCloseOpenedOffer?: () => void;
 }
 
 // ─── HomeScreen Component ───────────────────────────────────────
@@ -429,7 +431,14 @@ export const HomeScreen = (props: HomeScreenProps) => {
     setSelectedCountry,
     isCooldownActive,
     cooldownSecondsLeft,
+    offers,
+    openedOfferId = null,
+    onCloseOpenedOffer,
   } = props;
+
+  const openedOffer = openedOfferId
+    ? offers.find((o) => o.id === openedOfferId) || null
+    : null;
 
   const today = new Date().toDateString();
   const isNewDay = user.lastBoostDate !== today;
@@ -612,6 +621,37 @@ export const HomeScreen = (props: HomeScreenProps) => {
       </div>
 
       <div className="h-[100px]" />
+
+      {openedOffer && (
+        <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center">
+          <div
+            className="absolute inset-0 bg-zinc-900/60"
+            onClick={() => onCloseOpenedOffer && onCloseOpenedOffer()}
+          />
+          <div
+            className="relative w-full max-w-md mx-auto px-4"
+            style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1.5rem)' }}
+          >
+            <div className="flex justify-end mb-2">
+              <button
+                onClick={() => onCloseOpenedOffer && onCloseOpenedOffer()}
+                className="bg-white text-zinc-700 rounded-full p-2 shadow"
+                aria-label="Close offer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <OfferCard
+              offer={openedOffer}
+              onClaim={handleClaimOffer}
+              user={user}
+              unlocked={isOfferUnlocked(openedOffer.id, transactions, openedOffer.brand)}
+              code={transactions.find((t) => t.title === openedOffer.brand)?.code}
+              timeLeft={getTimeLeft(openedOffer.id)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

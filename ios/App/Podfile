@@ -15,6 +15,7 @@ def capacitor_pods
   pod 'CapacitorBrowser', :path => '../../node_modules/@capacitor/browser'
   pod 'CapacitorClipboard', :path => '../../node_modules/@capacitor/clipboard'
   pod 'CapacitorPushNotifications', :path => '../../node_modules/@capacitor/push-notifications'
+  pod 'CapacitorCommunityFcm', :path => '../../node_modules/@capacitor-community/fcm'
   pod 'CapacitorToast', :path => '../../node_modules/@capacitor/toast'
   pod 'CodetrixStudioCapacitorGoogleAuth', :path => '../../node_modules/@codetrix-studio/capacitor-google-auth'
   pod 'CapacitorPluginAppTrackingTransparency', :path => '../../node_modules/capacitor-plugin-app-tracking-transparency'
@@ -39,6 +40,12 @@ target 'App' do
   # to v2.7.x. The `~> 2.7.0` operator allows 2.7.x patch updates but
   # blocks 2.8.0+ and all of 3.x.
   pod 'GoogleUserMessagingPlatform', '~> 2.7.0'
+
+  # Topic subscription (@capacitor-community/fcm) uses Firebase Messaging.
+  # Stay on the 10.x line so CocoaPods keeps GoogleUtilities 7.x, which
+  # Google-Mobile-Ads-SDK 11.3.0 is built against. Do not move this to
+  # Firebase 11+ without upgrading the AdMob SDK in the same change.
+  pod 'Firebase/Messaging', '10.29.0'
 end
 
 post_install do |installer|
