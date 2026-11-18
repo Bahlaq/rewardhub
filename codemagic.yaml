@@ -60,10 +60,12 @@ workflows:
             fi
           fi
           
-          # Version
+          # Version (must exceed last Play Console upload)
           if [ -f "android/app/build.gradle" ]; then
-            sed -i '' 's/versionCode [0-9]*/versionCode 15/g' android/app/build.gradle
-            sed -i '' 's/versionName "[0-9.]*"/versionName "13.0.0"/g' android/app/build.gradle
+            sed -i '' 's/versionCode [0-9]*/versionCode 18/g' android/app/build.gradle
+            sed -i '' 's/versionName "[0-9.]*"/versionName "14.0.3"/g' android/app/build.gradle
+            # Play Automatic Protection requires minSdk 24+
+            sed -i '' 's/minSdkVersion.*/minSdkVersion 24/' android/app/build.gradle
           fi
           
           # Gradle 8.7 + AGP 8.2.1
@@ -85,8 +87,9 @@ workflows:
             fi
           fi
           
-          # SDK 35
+          # SDK 35 + minSdk 24 (Play Automatic Protection)
           if [ -f "android/variables.gradle" ]; then
+            sed -i '' 's/minSdkVersion = [0-9]*/minSdkVersion = 24/g' android/variables.gradle
             sed -i '' 's/compileSdkVersion = [0-9]*/compileSdkVersion = 35/g' android/variables.gradle
             sed -i '' 's/targetSdkVersion = [0-9]*/targetSdkVersion = 35/g' android/variables.gradle
           fi
