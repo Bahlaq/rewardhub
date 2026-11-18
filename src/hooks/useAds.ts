@@ -146,6 +146,19 @@ export function useAds(uid?: string) {
 
   var showAppOpenAd = useCallback(async function (): Promise<void> {
     if (!isNative) return;
+    // @capacitor-community/admob@6.2.0 ships NO App Open APIs on iOS
+    // (prepareAppOpenAd / showAppOpenAd are missing from pluginMethods).
+    // Calling them throws Capacitor Unimplemented and was wiping the UI
+    // right after Google sign-in when the T+N timer fired.
+    if (IS_IOS) {
+      console.log('[AppOpen] skipped — not supported by AdMob plugin on iOS');
+      return;
+    }
+    if (typeof AdMobPlugin?.prepareAppOpenAd !== 'function' ||
+        typeof AdMobPlugin?.showAppOpenAd !== 'function') {
+      console.warn('[AppOpen] skipped — plugin methods missing');
+      return;
+    }
     var ok = await initAdMob();
     if (!ok || !AdMobPlugin) return;
 
@@ -153,7 +166,7 @@ export function useAds(uid?: string) {
       console.log('[AppOpen] Preparing:', AD_IDS.appOpen);
       await AdMobPlugin.prepareAppOpenAd({
         adId: AD_IDS.appOpen,
-        isTesting: IS_IOS ? IOS_IS_TESTING : ANDROID_IS_TESTING_APPOPEN,
+        isTesting: ANDROID_IS_TESTING_APPOPEN,
       });
       console.log('[AppOpen] Showing...');
       await AdMobPlugin.showAppOpenAd();

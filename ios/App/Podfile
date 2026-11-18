@@ -39,6 +39,12 @@ target 'App' do
   # to v2.7.x. The `~> 2.7.0` operator allows 2.7.x patch updates but
   # blocks 2.8.0+ and all of 3.x.
   pod 'GoogleUserMessagingPlatform', '~> 2.7.0'
+
+  # Required so AppDelegate can convert the APNs device token into an
+  # FCM registration token. Without this, Capacitor Push on iOS either
+  # never fires "registration" or only returns a raw APNs hex string
+  # that Firebase Admin / Console cannot use.
+  pod 'FirebaseMessaging'
 end
 
 post_install do |installer|

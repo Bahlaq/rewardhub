@@ -4,27 +4,34 @@ import {
   deleteDoc, onSnapshot, runTransaction, serverTimestamp
 } from 'firebase/firestore';
 import {
-  getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged,
+  getAuth, initializeAuth, indexedDBLocalPersistence, browserLocalPersistence,
+  GoogleAuthProvider, signInWithPopup, onAuthStateChanged,
   signOut, signInAnonymously, deleteUser, User as FirebaseUser, signInWithCredential
 } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
 import { Offer, UserProfile, Transaction } from '../types';
 
 const PRODUCTION_WEB_CLIENT_ID = "563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com";
+// iOS OAuth client from GoogleService-Info.plist CLIENT_ID — required by Google Sign-In SDK on iOS.
+const PRODUCTION_IOS_CLIENT_ID = "563861371307-8emfj8kd3725lpj0mb9kkkf1r16100hu.apps.googleusercontent.com";
 
-// GoogleAuth plugin — UNCHANGED from working v12.1
+// GoogleAuth plugin — platform-correct client IDs.
+// iOS must use the iOS CLIENT_ID as clientId; serverClientId stays the web client
+// so Firebase can verify the idToken. Using the web ID as clientId on iOS breaks
+// GIDSignIn and can leave the bridge in a bad state after cold start.
 let GoogleAuthInstance: any = null;
 if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
   import('@codetrix-studio/capacitor-google-auth').then(({ GoogleAuth }) => {
     GoogleAuthInstance = GoogleAuth;
-    try {
+    const isIOS = Capacitor.getPlatform() === 'ios';
+    Promise.resolve(
       (GoogleAuth as any).initialize({
-        clientId: PRODUCTION_WEB_CLIENT_ID,
+        clientId: isIOS ? PRODUCTION_IOS_CLIENT_ID : PRODUCTION_WEB_CLIENT_ID,
         serverClientId: PRODUCTION_WEB_CLIENT_ID,
         scopes: ['profile', 'email'],
         grantOfflineAccess: true
-      });
-    } catch (error) { console.error("[GoogleAuth] initialize() failed:", error); }
+      })
+    ).catch((error: unknown) => console.error("[GoogleAuth] initialize() failed:", error));
   }).catch(err => { console.error("[GoogleAuth] Failed to load:", err); });
 }
 
@@ -50,10 +57,30 @@ try {
   if (app) db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
 } catch (e) { console.error('[Firebase] initializeFirestore failed:', e); }
 
+// CRITICAL iOS FIX:
+// getAuth() assumes a normal browser origin. On Capacitor iOS (capacitor://)
+// that path hangs — onAuthStateChanged never fires, promises never resolve,
+// and the WebView stays on a white / "Loading…" screen forever.
+// initializeAuth + indexedDBLocalPersistence is the supported Capacitor path.
 let auth: ReturnType<typeof getAuth> | null = null;
 try {
-  if (app) auth = getAuth(app);
-} catch (e) { console.error('[Firebase] getAuth failed:', e); }
+  if (app) {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        // Prefer IndexedDB; fall back to localStorage if IDB is flaky on WKWebView.
+        auth = initializeAuth(app, {
+          persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+        });
+      } catch (e) {
+        // Auth already initialized (HMR / re-entry) — fall back to getAuth.
+        console.warn('[Firebase] initializeAuth fallback to getAuth:', e);
+        auth = getAuth(app);
+      }
+    } else {
+      auth = getAuth(app);
+    }
+  }
+} catch (e) { console.error('[Firebase] Auth init failed:', e); }
 
 let googleProvider: GoogleAuthProvider | null = null;
 try {
@@ -79,7 +106,15 @@ export const firebaseService = {
         if (!GoogleAuthInstance) {
           const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
           GoogleAuthInstance = GoogleAuth;
-          (GoogleAuthInstance as any).initialize({ clientId: PRODUCTION_WEB_CLIENT_ID, serverClientId: PRODUCTION_WEB_CLIENT_ID, scopes: ['profile', 'email'], grantOfflineAccess: true });
+          const isIOS = Capacitor.getPlatform() === 'ios';
+          await Promise.resolve(
+            (GoogleAuthInstance as any).initialize({
+              clientId: isIOS ? PRODUCTION_IOS_CLIENT_ID : PRODUCTION_WEB_CLIENT_ID,
+              serverClientId: PRODUCTION_WEB_CLIENT_ID,
+              scopes: ['profile', 'email'],
+              grantOfflineAccess: true,
+            })
+          ).catch((error: unknown) => console.error('[GoogleAuth] initialize() failed:', error));
         }
         try { await GoogleAuthInstance.signOut(); } catch {}
         const googleUser = await GoogleAuthInstance.signIn();
@@ -130,6 +165,27 @@ export const firebaseService = {
     if (!db) {
       throw new Error('Firestore db is null — saveFcmToken cannot write');
     }
+    if (!uid || uid.startsWith('local_guest_')) {
+      throw new Error('Cannot save FCM token for unauthenticated/local guest uid');
+    }
+    // Rules require request.auth.uid == document id. Wait briefly if auth
+    // state is still settling after cold start / sign-in.
+    if (!auth?.currentUser || auth.currentUser.uid !== uid) {
+      await new Promise<void>((resolve, reject) => {
+        if (!auth) return reject(new Error('Firebase Auth not initialized'));
+        const timeout = setTimeout(() => {
+          unsub();
+          reject(new Error('Auth not ready to write fcm_tokens/' + uid.slice(0, 8)));
+        }, 8000);
+        const unsub = onAuthStateChanged(auth, (user) => {
+          if (user?.uid === uid) {
+            clearTimeout(timeout);
+            unsub();
+            resolve();
+          }
+        });
+      });
+    }
     const ref = doc(db, 'fcm_tokens', uid);
     console.log('[firebase.ts] writing to fcm_tokens/' + uid.slice(0, 10) + '...');
     await setDoc(ref, {
@@ -137,7 +193,7 @@ export const firebaseService = {
       token: token,
       platform: platform,
       updatedAt: serverTimestamp(),
-      appVersion: '14.0.0',
+      appVersion: '14.0.3',
     }, { merge: true });
     console.log('[firebase.ts] ★ setDoc SUCCESS — token saved to Firestore!');
   },

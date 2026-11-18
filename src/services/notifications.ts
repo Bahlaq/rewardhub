@@ -1,17 +1,32 @@
 import { Capacitor } from '@capacitor/core';
-import { PushNotifications } from '@capacitor/push-notifications';
 
 type TokenCallback = (token: string) => void;
+type PushPlugin = typeof import('@capacitor/push-notifications').PushNotifications;
 
 let registerCalled = false;
 let listenersAttached = false;
+let PushNotifications: PushPlugin | null = null;
 
-
+async function loadPushPlugin(): Promise<PushPlugin | null> {
+  if (PushNotifications) return PushNotifications;
+  try {
+    // Dynamic import — a static top-level import of the native bridge has
+    // crashed cold start on devices where the plugin isn't registered yet.
+    const mod = await import('@capacitor/push-notifications');
+    PushNotifications = mod.PushNotifications;
+    return PushNotifications;
+  } catch (e) {
+    console.warn('[Push] plugin unavailable (non-fatal):', e);
+    return null;
+  }
+}
 
 async function ensureDefaultChannel(): Promise<void> {
   if (Capacitor.getPlatform() !== 'android') return;
+  const Push = await loadPushPlugin();
+  if (!Push) return;
   try {
-    await PushNotifications.createChannel({
+    await Push.createChannel({
       id: 'default',
       name: 'General Notifications',
       description: 'Reward updates and account activity',
@@ -27,34 +42,37 @@ async function ensureDefaultChannel(): Promise<void> {
   }
 }
 
-function attachListenersOnce(onToken: TokenCallback): void {
+async function attachListenersOnce(onToken: TokenCallback): Promise<void> {
   if (listenersAttached) return;
+  const Push = await loadPushPlugin();
+  if (!Push) return;
   listenersAttached = true;
   console.log('[Push][4] attaching listeners...');
-  PushNotifications.addListener('registration', function (token: any) {
-    console.log('[Push][5] ★ registration event fired!');
-    try {
-      const raw = token && typeof token === 'object' ? token.value : token;
-      console.log('[Push][5] token len=' + (raw ? raw.length : 0));
-      if (typeof raw === 'string' && raw.length > 0) {
-        onToken(raw);
+  // Capacitor 6 addListener returns a Promise — must await/catch or it
+  // surfaces as an unhandledrejection (and our boot overlay kills the UI).
+  await Promise.all([
+    Push.addListener('registration', function (token: any) {
+      console.log('[Push][5] ★ registration event fired!');
+      try {
+        const raw = token && typeof token === 'object' ? token.value : token;
+        console.log('[Push][5] token len=' + (raw ? raw.length : 0));
+        if (typeof raw === 'string' && raw.length > 0) {
+          onToken(raw);
+        }
+      } catch (cbErr) {
+        console.error('[Push][5] onToken callback threw:', cbErr);
       }
-    } catch (cbErr) {
-      console.error('[Push][5] onToken callback threw:', cbErr);
-    }
-  });
-
-  PushNotifications.addListener('registrationError', function (err: any) {
-    console.error('[Push][5] ★ registrationError:', JSON.stringify(err));
-  });
-
-  PushNotifications.addListener('pushNotificationReceived', function (n: any) {
-    console.log('[Push] received foregrounded:', n && n.title);
-  });
-
-  PushNotifications.addListener('pushNotificationActionPerformed', function (a: any) {
-    console.log('[Push] action performed:', a && a.actionId);
-  });
+    }),
+    Push.addListener('registrationError', function (err: any) {
+      console.error('[Push][5] ★ registrationError:', JSON.stringify(err));
+    }),
+    Push.addListener('pushNotificationReceived', function (n: any) {
+      console.log('[Push] received foregrounded:', n && n.title);
+    }),
+    Push.addListener('pushNotificationActionPerformed', function (a: any) {
+      console.log('[Push] action performed:', a && a.actionId);
+    }),
+  ]);
   console.log('[Push][4] listeners attached ✓');
 }
 
@@ -85,14 +103,17 @@ export async function initPushNotifications(
   if (!Capacitor.isNativePlatform()) return;
   if (registerCalled) return;
 
+  const Push = await loadPushPlugin();
+  if (!Push) return;
+
   if (Capacitor.getPlatform() === 'android') {
     // ─── ANDROID PATH ──────────────────────────────────────────
     // Step 1: channel + listeners + register (NO permission dialog yet).
     // The FCM token comes back via the registration event listener.
     await ensureDefaultChannel();
-    attachListenersOnce(onToken);
+    await attachListenersOnce(onToken);
     try {
-      await PushNotifications.register();
+      await Push.register();
       registerCalled = true;
       console.log('[Push] register() OK — token will arrive via event');
     } catch (e) {
@@ -111,7 +132,7 @@ export async function initPushNotifications(
     // from Android system settings.
 
     try {
-      const current = await PushNotifications.checkPermissions();
+      const current = await Push.checkPermissions();
       if (current.receive !== 'granted') {
         console.log('[Push][android] permission is', current.receive, '— skipping in-app request to prevent OEM crash');
       } else {
@@ -126,18 +147,18 @@ export async function initPushNotifications(
   // ─── iOS PATH ──────────────────────────────────────────────
   // iOS doesn't have the OEM-kill problem. Standard order is fine.
   try {
-    const current = await PushNotifications.checkPermissions();
+    const current = await Push.checkPermissions();
     let granted = current.receive === 'granted';
     if (!granted && current.receive !== 'denied') {
-      const next = await PushNotifications.requestPermissions();
+      const next = await Push.requestPermissions();
       granted = next.receive === 'granted';
     }
     if (!granted) {
       console.log('[Push][ios] permission not granted');
       return;
     }
-    attachListenersOnce(onToken);
-    await PushNotifications.register();
+    await attachListenersOnce(onToken);
+    await Push.register();
     registerCalled = true;
     console.log('[Push][ios] register() OK');
   } catch (e) {
@@ -158,23 +179,26 @@ export async function checkAndRegisterIfPermissionAlreadyGranted(
   if (!Capacitor.isNativePlatform()) return;
   if (registerCalled) return;
 
+  const Push = await loadPushPlugin();
+  if (!Push) return;
+
   try {
     if (Capacitor.getPlatform() === 'android') {
       // Android: ALWAYS register silently on startup (no permission dialog).
       // FCM tokens work without POST_NOTIFICATIONS permission.
       await ensureDefaultChannel();
-      attachListenersOnce(onToken);
-      await PushNotifications.register();
+      await attachListenersOnce(onToken);
+      await Push.register();
       registerCalled = true;
       console.log('[Push][silent-android] register() OK on startup');
       return;
     }
 
     // iOS: only register silently if permission already granted.
-    const status = await PushNotifications.checkPermissions();
+    const status = await Push.checkPermissions();
     if (status?.receive !== 'granted') return;
-    attachListenersOnce(onToken);
-    await PushNotifications.register();
+    await attachListenersOnce(onToken);
+    await Push.register();
     registerCalled = true;
     console.log('[Push][silent-ios] register() OK');
   } catch (e) {
@@ -184,7 +208,9 @@ export async function checkAndRegisterIfPermissionAlreadyGranted(
 
 export async function removeAllPushListeners(): Promise<void> {
   try {
-    await PushNotifications.removeAllListeners();
+    const Push = await loadPushPlugin();
+    if (!Push) return;
+    await Push.removeAllListeners();
   } catch (e) {
     console.warn('[Push] removeAllListeners failed:', e);
   }

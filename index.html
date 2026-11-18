@@ -52,6 +52,16 @@
         window.FinalizationRegistry.prototype.unregister = function () {};
       }
 
+      // AggregateError (needed by Promise.any polyfill on older WKWebView)
+      if (typeof AggregateError === 'undefined') {
+        window.AggregateError = function AggregateError(errors, message) {
+          var err = new Error(message || 'All promises were rejected');
+          err.name = 'AggregateError';
+          err.errors = errors || [];
+          return err;
+        };
+      }
+
       // Promise.any
       if (typeof Promise.any === 'undefined') {
         Promise.any = function (promises) {
@@ -183,10 +193,26 @@
 
         window.addEventListener('unhandledrejection', function (e) {
           var r = e.reason;
-          window.__rhShow(
-            'Unhandled promise rejection',
-            (r && r.stack) || (r && r.message) || (typeof r === 'string' ? r : JSON.stringify(r))
-          );
+          var msg = (r && r.message) || (typeof r === 'string' ? r : '');
+          var code = r && r.code ? String(r.code) : '';
+          var stack = (r && r.stack) || '';
+          var detail = [msg, code ? ('code: ' + code) : '', stack]
+            .filter(Boolean)
+            .join('\n') || (function () {
+              try { return JSON.stringify(r); } catch (_) { return String(r); }
+            })();
+          console.error('[unhandledrejection]', r);
+
+          // After React has mounted, do NOT replace the whole UI — that made
+          // successful Google sign-in look like a crash. Boot-time failures
+          // still use the full-screen overlay while #rh-loader is present.
+          var loader = document.getElementById('rh-loader');
+          var booting = !!(loader && loader.parentNode);
+          if (!booting) {
+            e.preventDefault();
+            return;
+          }
+          window.__rhShow('Unhandled promise rejection', detail);
         });
 
         setTimeout(function () {

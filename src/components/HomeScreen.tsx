@@ -325,7 +325,7 @@ const OfferCard = ({
                 <button
                   onClick={async () => {
                     await Clipboard.write({ string: code || offer.code! });
-                    await Toast.show({ text: 'Copied!', duration: 'short' });
+                    await Toast.show({ text: 'Copied!', duration: 'short' }).catch(() => {});
                   }}
                   className="p-2 bg-indigo-50 text-indigo-600 rounded-xl"
                 >

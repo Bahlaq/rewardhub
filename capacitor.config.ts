@@ -33,6 +33,10 @@ const config: CapacitorConfig = {
   plugins: {
     GoogleAuth: {
       scopes: ['profile', 'email'],
+      // iOS native Google Sign-In client (GoogleService-Info.plist CLIENT_ID)
+      iosClientId:
+        '563861371307-8emfj8kd3725lpj0mb9kkkf1r16100hu.apps.googleusercontent.com',
+      // Web client — used as serverClientId so Firebase gets a valid idToken
       serverClientId:
         '563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com',
       forceCodeForRefreshToken: true,

@@ -23,6 +23,14 @@ import icon from '../assets/icon.png';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
+/** Capacitor Toast.show returns a Promise — always catch so rejections
+ *  cannot tear down the UI via the global unhandledrejection overlay. */
+function showToast(text: string, duration: 'short' | 'long' = 'short') {
+  return Toast.show({ text, duration }).catch((e) => {
+    console.warn('[Toast]', text, e);
+  });
+}
+
 const CD_MS = 2 * 60 * 1000;
 const CD_KEY = 'rh_cd';
 
@@ -122,6 +130,12 @@ const SimpleModal = ({ open, close, children }: { open: boolean; close: () => vo
 
 async function saveFcmToken(uid: string, token: string): Promise<boolean> {
   if (!uid || !token) return false;
+  // Firestore rules require request.auth.uid == doc id. Offline/local
+  // guest ids have no Firebase Auth session, so writes are always denied.
+  if (uid.startsWith('local_guest_')) {
+    console.warn('[FCM] skip save — local guest has no Firebase Auth uid');
+    return false;
+  }
   const platform = Capacitor.getPlatform();
   const svc = firebaseService as any;
   if (typeof svc.saveFcmToken !== 'function') { console.error('[FCM] saveFcmToken missing'); return false; }
@@ -217,8 +231,10 @@ export default function App() {
 
   // ─── Phase 1: error handlers + AdMob warm-up ─────────────────
   useEffect(() => {
-    const onUncaught = (ev: ErrorEvent) => { console.error('[Global]', ev.message); ev.preventDefault(); };
-    const onRejection = (ev: PromiseRejectionEvent) => { console.error('[Global] rejection:', ev.reason); ev.preventDefault(); };
+    // Log only — do NOT preventDefault. index.html's capture-phase
+    // __rhShow handler needs the event to surface boot failures on iOS.
+    const onUncaught = (ev: ErrorEvent) => { console.error('[Global]', ev.message); };
+    const onRejection = (ev: PromiseRejectionEvent) => { console.error('[Global] rejection:', ev.reason); };
     window.addEventListener('error', onUncaught);
     window.addEventListener('unhandledrejection', onRejection);
     if (isNative) {
@@ -229,14 +245,17 @@ export default function App() {
     return () => { window.removeEventListener('error', onUncaught); window.removeEventListener('unhandledrejection', onRejection); };
   }, [isNative]);
 
-  // ─── Phase 2: App Open Ad (T+800ms) ──────────────────────────
+  // ─── Phase 2: App Open Ad (after first paint + AdMob warm-up) ─
+  // Was T+800ms which raced the first frame on iOS and made cold
+  // start look like a freeze/crash when the interstitial covered
+  // a still-loading WebView.
   useEffect(() => {
     if (!isNative || appOpenShownRef.current) return;
     const t = setTimeout(() => {
       if (appOpenShownRef.current) return;
       appOpenShownRef.current = true;
       showAppOpenAd().catch(console.warn);
-    }, 800);
+    }, 3500);
     return () => clearTimeout(t);
   }, [isNative, showAppOpenAd]);
 
@@ -264,8 +283,10 @@ export default function App() {
   // dialog), register silently without showing any UI.
   useEffect(() => {
     if (!isNative || !fbUser?.uid || pushInitRef.current) return;
+    if (fbUser.uid.startsWith('local_guest_')) return;
     const uid = fbUser.uid;
     checkAndRegisterIfPermissionAlreadyGranted(token => {
+      pushInitRef.current = true;
       saveFcmToken(uid, token).catch(console.error);
     }).catch(console.error);
   }, [isNative, fbUser?.uid]);
@@ -273,6 +294,7 @@ export default function App() {
   const handleEnableNotifications = useCallback(() => {
     setShowNotifPrompt(false);
     if (pushInitRef.current || !fbUser?.uid) return;
+    if (fbUser.uid.startsWith('local_guest_')) return;
     pushInitRef.current = true;
     const uid = fbUser.uid;
     initPushNotifications(token => {
@@ -345,8 +367,11 @@ export default function App() {
 
   // ─── Banner ───────────────────────────────────────────────────
   useEffect(() => {
-    if (isNative && tab === 'offers' && !adRunning) showBanner();
-    else if (isNative) hideBanner();
+    if (isNative && tab === 'offers' && !adRunning) {
+      void showBanner().catch((e) => console.warn('[Banner] show:', e));
+    } else if (isNative) {
+      void hideBanner().catch((e) => console.warn('[Banner] hide:', e));
+    }
   }, [tab, adRunning, isNative, showBanner, hideBanner]);
 
   // ─── Web Ad ───────────────────────────────────────────────────
@@ -359,31 +384,37 @@ export default function App() {
   const handleWatchAd = async () => {
     if (adRunning || !user || cdActive) return;
     setAdRunning(true);
-    if (isNative) await hideBanner();
+    if (isNative) await hideBanner().catch((e) => console.warn('[Banner] hide:', e));
     const boostLevel = Number(user.boostLevel) || 1;
     const currentProgress = Number(user.currentLevelAdCounter) || 0;
     const adsNeeded = boostLevel;
     const remaining = adsNeeded - currentProgress;
-    if (remaining <= 0) { await handleClaimBoost(); startCooldown(); setAdRunning(false); if (isNative) showBanner(); return; }
+    if (remaining <= 0) {
+      await handleClaimBoost();
+      startCooldown();
+      setAdRunning(false);
+      if (isNative) void showBanner().catch((e) => console.warn('[Banner] show:', e));
+      return;
+    }
     let completed = 0;
     for (let i = 0; i < remaining; i++) {
       const adNum = currentProgress + i + 1;
       const ok = isNative ? await showRewardedAdAndWait() : await showWebAd(adNum, adsNeeded);
-      if (!ok) { Toast.show({ text: 'Ad not completed.', duration: 'short' }); break; }
+      if (!ok) { await showToast('Ad not completed.', 'short'); break; }
       const result = await recordAdWatch();
       if (result) {
         completed++;
-        if (adNum < adsNeeded) { Toast.show({ text: `Ad ${adNum}/${adsNeeded}!`, duration: 'short' }); await new Promise(r => setTimeout(r, 800)); }
+        if (adNum < adsNeeded) { await showToast(`Ad ${adNum}/${adsNeeded}!`, 'short'); await new Promise(r => setTimeout(r, 800)); }
       }
     }
     if (completed === remaining) { await handleClaimBoost(); startCooldown(); }
     setAdRunning(false);
-    if (isNative && tab === 'offers') showBanner();
+    if (isNative && tab === 'offers') void showBanner().catch((e) => console.warn('[Banner] show:', e));
   };
 
   const handleClaimBoost = async () => {
-    try { const result = await claimBoostReward(); if (result) Toast.show({ text: '+100 pts!', duration: 'long' }); }
-    catch { Toast.show({ text: 'Claim failed.', duration: 'short' }); }
+    try { const result = await claimBoostReward(); if (result) await showToast('+100 pts!', 'long'); }
+    catch { await showToast('Claim failed.', 'short'); }
   };
 
   // ─── Claim Offer ──────────────────────────────────────────────
@@ -398,18 +429,26 @@ export default function App() {
       recordUnlock(offer.id);
       if (!offer.code) { Browser.open({ url: offer.url }); }
       else {
-        setConfirmCfg({ title: 'Success!', msg: 'Code: ' + offer.code, fn: () => { Clipboard.write({ string: offer.code! }); Toast.show({ text: 'Copied!', duration: 'short' }); } });
+        setConfirmCfg({ title: 'Success!', msg: 'Code: ' + offer.code, fn: () => { void Clipboard.write({ string: offer.code! }); void showToast('Copied!', 'short'); } });
         setConfirmOpen(true);
       }
-    } catch { Toast.show({ text: 'Failed.', duration: 'long' }); }
+    } catch { await showToast('Failed.', 'long'); }
   };
 
   // ─── Auth handlers ────────────────────────────────────────────
   const handleSignIn = async () => {
     setAuthLoading(true);
-    try { const u = await firebaseService.signInWithGoogle(); if (u) { setFbUser(u); Toast.show({ text: 'Signed in!', duration: 'short' }); } }
-    catch (e: any) { Toast.show({ text: String(e?.message || e).slice(0, 100), duration: 'long' }); }
-    finally { setAuthLoading(false); }
+    try {
+      const u = await firebaseService.signInWithGoogle();
+      if (u) {
+        setFbUser(u);
+        await showToast('Signed in!', 'short');
+      }
+    } catch (e: any) {
+      await showToast(String(e?.message || e).slice(0, 100), 'long');
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
   const handleGuest = async () => {
@@ -435,9 +474,9 @@ export default function App() {
     try {
       await firebaseService.deleteUserProfile(user.uid);
       if (!user.uid.startsWith('local_guest_')) await firebaseService.deleteAccount();
-      Toast.show({ text: 'Deleted', duration: 'long' });
+      await showToast('Deleted', 'long');
     } catch (e: any) {
-      Toast.show({ text: e?.code === 'auth/requires-recent-login' ? 'Re-sign in first.' : 'Failed.', duration: 'long' });
+      await showToast(e?.code === 'auth/requires-recent-login' ? 'Re-sign in first.' : 'Failed.', 'long');
     } finally { setFbUser(null); setUser(null); setAuthLoading(false); setDeleteOpen(false); }
   };
 
@@ -556,7 +595,7 @@ export default function App() {
                         {tx.type === 'earn' ? '+' : '-'}{Math.abs(tx.amount)} pts
                       </span>
                       {tx.code && (
-                        <button onClick={async () => { await Clipboard.write({ string: tx.code! }); Toast.show({ text: 'Copied!', duration: 'short' }); }}
+                        <button onClick={async () => { await Clipboard.write({ string: tx.code! }); await showToast('Copied!', 'short'); }}
                           className="block text-[10px] font-mono bg-zinc-100 px-2 py-0.5 rounded text-zinc-600 border border-zinc-200 mt-1">
                           {tx.code}
                         </button>
