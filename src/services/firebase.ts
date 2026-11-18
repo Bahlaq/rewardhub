@@ -193,7 +193,7 @@ export const firebaseService = {
       token: token,
       platform: platform,
       updatedAt: serverTimestamp(),
-      appVersion: '14.0.0',
+      appVersion: '14.0.3',
     }, { merge: true });
     console.log('[firebase.ts] ★ setDoc SUCCESS — token saved to Firestore!');
   },
