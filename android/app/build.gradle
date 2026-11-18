@@ -7,9 +7,10 @@ android {
 
     defaultConfig {
         applicationId "com.rewardhub.official.app"
-        minSdkVersion    rootProject.ext.minSdkVersion
+        // Play Automatic Protection requires minSdk 24+
+        minSdkVersion 24
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 17
+        versionCode 18
         versionName "14.0.3"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
