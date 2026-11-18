@@ -4,7 +4,7 @@ import {
   deleteDoc, onSnapshot, runTransaction, serverTimestamp
 } from 'firebase/firestore';
 import {
-  getAuth, initializeAuth, indexedDBLocalPersistence,
+  getAuth, initializeAuth, indexedDBLocalPersistence, browserLocalPersistence,
   GoogleAuthProvider, signInWithPopup, onAuthStateChanged,
   signOut, signInAnonymously, deleteUser, User as FirebaseUser, signInWithCredential
 } from 'firebase/auth';
@@ -23,15 +23,15 @@ let GoogleAuthInstance: any = null;
 if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
   import('@codetrix-studio/capacitor-google-auth').then(({ GoogleAuth }) => {
     GoogleAuthInstance = GoogleAuth;
-    try {
-      const isIOS = Capacitor.getPlatform() === 'ios';
+    const isIOS = Capacitor.getPlatform() === 'ios';
+    Promise.resolve(
       (GoogleAuth as any).initialize({
         clientId: isIOS ? PRODUCTION_IOS_CLIENT_ID : PRODUCTION_WEB_CLIENT_ID,
         serverClientId: PRODUCTION_WEB_CLIENT_ID,
         scopes: ['profile', 'email'],
         grantOfflineAccess: true
-      });
-    } catch (error) { console.error("[GoogleAuth] initialize() failed:", error); }
+      })
+    ).catch((error: unknown) => console.error("[GoogleAuth] initialize() failed:", error));
   }).catch(err => { console.error("[GoogleAuth] Failed to load:", err); });
 }
 
@@ -67,7 +67,10 @@ try {
   if (app) {
     if (Capacitor.isNativePlatform()) {
       try {
-        auth = initializeAuth(app, { persistence: indexedDBLocalPersistence });
+        // Prefer IndexedDB; fall back to localStorage if IDB is flaky on WKWebView.
+        auth = initializeAuth(app, {
+          persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+        });
       } catch (e) {
         // Auth already initialized (HMR / re-entry) — fall back to getAuth.
         console.warn('[Firebase] initializeAuth fallback to getAuth:', e);
@@ -104,12 +107,14 @@ export const firebaseService = {
           const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
           GoogleAuthInstance = GoogleAuth;
           const isIOS = Capacitor.getPlatform() === 'ios';
-          (GoogleAuthInstance as any).initialize({
-            clientId: isIOS ? PRODUCTION_IOS_CLIENT_ID : PRODUCTION_WEB_CLIENT_ID,
-            serverClientId: PRODUCTION_WEB_CLIENT_ID,
-            scopes: ['profile', 'email'],
-            grantOfflineAccess: true,
-          });
+          await Promise.resolve(
+            (GoogleAuthInstance as any).initialize({
+              clientId: isIOS ? PRODUCTION_IOS_CLIENT_ID : PRODUCTION_WEB_CLIENT_ID,
+              serverClientId: PRODUCTION_WEB_CLIENT_ID,
+              scopes: ['profile', 'email'],
+              grantOfflineAccess: true,
+            })
+          ).catch((error: unknown) => console.error('[GoogleAuth] initialize() failed:', error));
         }
         try { await GoogleAuthInstance.signOut(); } catch {}
         const googleUser = await GoogleAuthInstance.signIn();

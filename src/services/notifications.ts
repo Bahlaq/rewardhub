@@ -48,30 +48,31 @@ async function attachListenersOnce(onToken: TokenCallback): Promise<void> {
   if (!Push) return;
   listenersAttached = true;
   console.log('[Push][4] attaching listeners...');
-  Push.addListener('registration', function (token: any) {
-    console.log('[Push][5] ★ registration event fired!');
-    try {
-      const raw = token && typeof token === 'object' ? token.value : token;
-      console.log('[Push][5] token len=' + (raw ? raw.length : 0));
-      if (typeof raw === 'string' && raw.length > 0) {
-        onToken(raw);
+  // Capacitor 6 addListener returns a Promise — must await/catch or it
+  // surfaces as an unhandledrejection (and our boot overlay kills the UI).
+  await Promise.all([
+    Push.addListener('registration', function (token: any) {
+      console.log('[Push][5] ★ registration event fired!');
+      try {
+        const raw = token && typeof token === 'object' ? token.value : token;
+        console.log('[Push][5] token len=' + (raw ? raw.length : 0));
+        if (typeof raw === 'string' && raw.length > 0) {
+          onToken(raw);
+        }
+      } catch (cbErr) {
+        console.error('[Push][5] onToken callback threw:', cbErr);
       }
-    } catch (cbErr) {
-      console.error('[Push][5] onToken callback threw:', cbErr);
-    }
-  });
-
-  Push.addListener('registrationError', function (err: any) {
-    console.error('[Push][5] ★ registrationError:', JSON.stringify(err));
-  });
-
-  Push.addListener('pushNotificationReceived', function (n: any) {
-    console.log('[Push] received foregrounded:', n && n.title);
-  });
-
-  Push.addListener('pushNotificationActionPerformed', function (a: any) {
-    console.log('[Push] action performed:', a && a.actionId);
-  });
+    }),
+    Push.addListener('registrationError', function (err: any) {
+      console.error('[Push][5] ★ registrationError:', JSON.stringify(err));
+    }),
+    Push.addListener('pushNotificationReceived', function (n: any) {
+      console.log('[Push] received foregrounded:', n && n.title);
+    }),
+    Push.addListener('pushNotificationActionPerformed', function (a: any) {
+      console.log('[Push] action performed:', a && a.actionId);
+    }),
+  ]);
   console.log('[Push][4] listeners attached ✓');
 }
 
