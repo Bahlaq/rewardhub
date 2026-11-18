@@ -153,17 +153,6 @@ async function saveFcmToken(uid: string, token: string): Promise<boolean> {
   return false;
 }
 
-async function requestATTIfNeeded(): Promise<void> {
-  if (Capacitor.getPlatform() !== 'ios') return;
-  try {
-    const mod: any = await import('capacitor-plugin-app-tracking-transparency');
-    const ATT = mod.AppTrackingTransparency || mod.default;
-    if (!ATT) return;
-    const status = await ATT.getStatus();
-    if (status?.status === 'notDetermined') await ATT.requestPermission();
-  } catch (e) { console.warn('[ATT] non-fatal:', e); }
-}
-
 export default function App() {
   const [tab, setTab] = useState('offers');
   const [fbUser, setFbUser] = useState<FirebaseUser | null>(null);
@@ -238,9 +227,10 @@ export default function App() {
     window.addEventListener('error', onUncaught);
     window.addEventListener('unhandledrejection', onRejection);
     if (isNative) {
-      requestATTIfNeeded().catch(console.warn).finally(() => {
-        initAdMobEarly().then(ok => console.log('[AdMob] warm-up:', ok)).catch(console.warn);
-      });
+      // initAdMobEarly waits for the iOS tracking prompt and UMP consent
+      // before MobileAds.start(). Banner/rewarded share that same promise,
+      // so they cannot start the SDK first and latch a blank IDFA.
+      initAdMobEarly().then(ok => console.log('[AdMob] warm-up:', ok)).catch(console.warn);
     }
     return () => { window.removeEventListener('error', onUncaught); window.removeEventListener('unhandledrejection', onRejection); };
   }, [isNative]);
