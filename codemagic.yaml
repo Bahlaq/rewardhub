@@ -4,11 +4,12 @@ workflows:
     max_build_duration: 60
     instance_type: mac_mini_m1
     environment:
+      # Secret groups only — NEVER put android_signing here (that loads the OLD keystore vars).
       groups:
         - admob_secrets
         - firebase_secrets
-      # Codemagic code-signing identity — sets CM_KEYSTORE_PATH / CM_* vars.
-      # Do NOT use the legacy android_signing secret group or decode CM_KEYSTORE to a local .jks.
+      # Codemagic Android keystore identity (same level as groups/node/java).
+      # Sets CM_KEYSTORE_PATH, CM_KEYSTORE_PASSWORD, CM_KEY_ALIAS, CM_KEY_PASSWORD.
       android_signing:
         - rewardhub_key
       node: 22
@@ -160,23 +161,12 @@ workflows:
       - name: Verify AAB signing SHA-1
         script: |
           set -e
-          EXPECTED_SHA1="30:F6:0A:82:AD:F4:9C:5F:0F:9C:01:9B:39:8D:1E:C0:66:8E:F5:A9"
-          OLD_SHA1="42:7F:E8:07:6A:BA:FF:B6:D2:05:C8:71:C1:E9:E3:4C:E1:67:47:D7"
-          # Capacitor path (Flutter equivalent: build/app/outputs/bundle/release/app-release.aab)
           AAB="android/app/build/outputs/bundle/release/app-release.aab"
-          if [ ! -f "$AAB" ]; then
-            AAB=$(ls android/app/build/outputs/bundle/release/*.aab | head -n 1)
-          fi
           echo "===== AAB signing certificate: $AAB ====="
-          keytool -printcert -jarfile "$AAB" | tee /tmp/aab_cert.txt
-          # Mandatory: fail immediately if SHA-1 is not the Codemagic rewardhub_key
-          keytool -printcert -jarfile "$AAB" | grep -qi "$EXPECTED_SHA1" \
-            || (echo "WRONG SIGNING KEY" && echo "Expected: $EXPECTED_SHA1" && grep -i SHA1 /tmp/aab_cert.txt && exit 1)
-          if grep -qi "$OLD_SHA1" /tmp/aab_cert.txt; then
-            echo "WRONG SIGNING KEY — AAB still signed with OLD key ($OLD_SHA1)"
-            exit 1
-          fi
-          echo "✅ AAB SHA-1 matches rewardhub_key ($EXPECTED_SHA1)"
+          keytool -printcert -jarfile "$AAB"
+          # Mandatory gate: must match Codemagic android_signing rewardhub_key exactly
+          keytool -printcert -jarfile android/app/build/outputs/bundle/release/app-release.aab | grep -q "30:F6:0A:82:AD:F4:9C:5F:0F:9C:01:9B:39:8D:1E:C0:66:8E:F5:A9" || (echo "WRONG SIGNING KEY" && exit 1)
+          echo "✅ AAB SHA-1 matches rewardhub_key"
     artifacts:
       - android/app/build/outputs/bundle/release/*.aab
       - android/app/build/outputs/apk/release/*.apk
