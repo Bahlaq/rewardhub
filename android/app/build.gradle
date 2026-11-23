@@ -7,13 +7,14 @@ def hasCmSigning = cmKeystorePath != null && !cmKeystorePath.trim().isEmpty()
 
 android {
     namespace "com.rewardhub.official.app"
-    compileSdk rootProject.ext.compileSdkVersion
+    // Play requires targetSdk 36+; pin compile/target explicitly (also set in variables.gradle)
+    compileSdk 36
     defaultConfig {
         applicationId "com.rewardhub.official.app"
         // Play Automatic Protection requires minSdk 24+
         minSdkVersion 24
-        targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 22
+        targetSdkVersion 36
+        versionCode 23
         versionName "14.0.3"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
