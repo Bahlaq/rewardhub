@@ -101,7 +101,7 @@ workflows:
             fi
           fi
 
-          # Restore committed app build.gradle (CM_* signing, minSdk 24, versionCode 20).
+          # Restore committed app build.gradle (CM_* signing, minSdk 24, versionCode 21).
           # Cap add regenerates android/, so without this the old signing path can reappear.
           git checkout HEAD -- android/app/build.gradle
           echo "✅ Restored committed android/app/build.gradle (CM_KEYSTORE_PATH-only signing)"
@@ -114,57 +114,27 @@ workflows:
       - name: Build Signed Android
         script: |
           set -e
-          EXPECTED_SHA1="30:F6:0A:82:AD:F4:9C:5F:0F:9C:01:9B:39:8D:1E:C0:66:8E:F5:A9"
-          OLD_SHA1="42:7F:E8:07:6A:BA:FF:B6:D2:05:C8:71:C1:E9:E3:4C:E1:67:47:D7"
-
-          # Refuse legacy secret-group keystore decoding — only android_signing: rewardhub_key
-          unset CM_KEYSTORE || true
-          rm -f android/app/rewardhub-key.jks android/rewardhub-key.jks \
-                android/key.properties android/app/key.properties
+          # No base64 keystore decode. No key.properties overwrite.
+          # Signing comes only from android_signing: rewardhub_key → CM_KEYSTORE_PATH / CM_*.
+          rm -f android/key.properties android/app/key.properties
           find android -type f \( -name '*.jks' -o -name '*.keystore' \) -print -delete || true
 
           if [ -z "$CM_KEYSTORE_PATH" ] || [ ! -f "$CM_KEYSTORE_PATH" ]; then
-            echo "❌ CM_KEYSTORE_PATH missing or not a file — check android_signing: rewardhub_key"
+            echo "❌ CM_KEYSTORE_PATH missing — check environment.android_signing: rewardhub_key"
             exit 1
           fi
           if [ -z "$CM_KEYSTORE_PASSWORD" ] || [ -z "$CM_KEY_ALIAS" ] || [ -z "$CM_KEY_PASSWORD" ]; then
             echo "❌ Missing CM_KEYSTORE_PASSWORD / CM_KEY_ALIAS / CM_KEY_PASSWORD"
             exit 1
           fi
-          echo "✅ Codemagic keystore: $CM_KEYSTORE_PATH"
-          echo "✅ Key alias: $CM_KEY_ALIAS"
+          echo "✅ Using Codemagic rewardhub_key at: $CM_KEYSTORE_PATH (alias=$CM_KEY_ALIAS)"
 
-          # Print expected upload-key fingerprint BEFORE building
-          echo "===== Keystore certificate (rewardhub_key) ====="
-          keytool -list -v \
-            -keystore "$CM_KEYSTORE_PATH" \
-            -storepass "$CM_KEYSTORE_PASSWORD" \
-            -alias "$CM_KEY_ALIAS" 2>/dev/null | tee /tmp/cm_keystore_cert.txt || \
-          keytool -list -v \
-            -keystore "$CM_KEYSTORE_PATH" \
-            -storepass "$CM_KEYSTORE_PASSWORD" | tee /tmp/cm_keystore_cert.txt
-          if grep -qi "$OLD_SHA1" /tmp/cm_keystore_cert.txt; then
-            echo "WRONG SIGNING KEY — keystore is the OLD upload key ($OLD_SHA1)"
-            exit 1
-          fi
-          if ! grep -qi "$EXPECTED_SHA1" /tmp/cm_keystore_cert.txt; then
-            echo "WRONG SIGNING KEY — keystore SHA-1 is not rewardhub_key ($EXPECTED_SHA1)"
-            grep -i SHA1 /tmp/cm_keystore_cert.txt || true
-            exit 1
-          fi
-          echo "✅ Keystore SHA-1 matches rewardhub_key"
-
-          # Sign ONLY via CM_* env vars from android_signing: rewardhub_key (no injected local .jks)
           cd android && chmod +x gradlew
           ./gradlew clean assembleRelease bundleRelease --no-daemon
 
-      - name: Verify AAB signing SHA-1
+      - name: Verify AAB SHA1
         script: |
           set -e
-          AAB="android/app/build/outputs/bundle/release/app-release.aab"
-          echo "===== AAB signing certificate: $AAB ====="
-          keytool -printcert -jarfile "$AAB"
-          # Mandatory gate: must match Codemagic android_signing rewardhub_key exactly
           keytool -printcert -jarfile android/app/build/outputs/bundle/release/app-release.aab | grep -q "30:F6:0A:82:AD:F4:9C:5F:0F:9C:01:9B:39:8D:1E:C0:66:8E:F5:A9" || (echo "WRONG SIGNING KEY" && exit 1)
           echo "✅ AAB SHA-1 matches rewardhub_key"
     artifacts:
