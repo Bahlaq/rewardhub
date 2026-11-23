@@ -119,11 +119,11 @@ workflows:
             fi
           fi
 
-          # Restore committed app build.gradle (CM_* signing, minSdk 24, versionCode 21).
+          # Restore committed app build.gradle (CM_* signing, minSdk 24, versionCode 22).
           # Cap add regenerates android/, so without this the old signing path can reappear.
           git checkout HEAD -- android/app/build.gradle
           echo "✅ Restored committed android/app/build.gradle (CM_KEYSTORE_PATH-only signing)"
-          grep -n "CM_KEYSTORE_PATH\|signingConfigs\|versionCode" android/app/build.gradle | head -20
+          grep -n "CM_KEYSTORE_PATH\|signingConfigs\|signingConfig\|versionCode" android/app/build.gradle | head -30
 
           # Remove any local keystore / key.properties that could override Codemagic signing
           rm -f android/key.properties android/app/key.properties
@@ -148,11 +148,20 @@ workflows:
           echo "✅ Using Codemagic rewardhub_key at: $CM_KEYSTORE_PATH (alias=$CM_KEY_ALIAS)"
 
           cd android && chmod +x gradlew
-          ./gradlew clean assembleRelease bundleRelease --no-daemon
+          ./gradlew clean assembleRelease bundleRelease \
+            -Pandroid.injected.signing.store.file="$CM_KEYSTORE_PATH" \
+            -Pandroid.injected.signing.store.password="$CM_KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$CM_KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$CM_KEY_PASSWORD" \
+            --no-daemon
 
       - name: Verify AAB SHA1
         script: |
           set -e
+          echo "=== KEYSTORE SHA1 ==="
+          keytool -list -v -keystore "$CM_KEYSTORE_PATH" -storepass "$CM_KEYSTORE_PASSWORD" | grep "SHA1:" || true
+          echo "=== AAB CERT SHA1 ==="
+          keytool -printcert -jarfile android/app/build/outputs/bundle/release/app-release.aab || true
           keytool -printcert -jarfile android/app/build/outputs/bundle/release/app-release.aab | grep -q "30:F6:0A:82:AD:F4:9C:5F:0F:9C:01:9B:39:8D:1E:C0:66:8E:F5:A9" || (echo "WRONG SIGNING KEY" && exit 1)
           echo "✅ AAB SHA-1 matches rewardhub_key"
     artifacts:
