@@ -118,7 +118,16 @@ workflows:
             fi
           fi
           
-          # Signing — Codemagic android_signing (rewardhub_key) CM_* vars only; no .jks fallback
+      - name: Build Signed Android
+        script: |
+          set -e
+          if [ -z "$CM_KEYSTORE_PATH" ] || [ ! -f "$CM_KEYSTORE_PATH" ]; then
+            echo "❌ CM_KEYSTORE_PATH missing or not a file — check android_signing: rewardhub_key"
+            exit 1
+          fi
+          echo "✅ Codemagic keystore: $CM_KEYSTORE_PATH"
+          echo "✅ Key alias: $CM_KEY_ALIAS"
+          # Inject CM_* signing only after keystore is confirmed (no .jks fallback)
           if [ -f "android/app/build.gradle" ]; then
             sed -i '' '/buildTypes {/i \
             signingConfigs { \
@@ -133,15 +142,6 @@ workflows:
                 signingConfig signingConfigs.release' android/app/build.gradle
             echo "✅ Injected strict CM_* signingConfigs (no local .jks fallback)"
           fi
-      - name: Build Signed Android
-        script: |
-          set -e
-          if [ -z "$CM_KEYSTORE_PATH" ] || [ ! -f "$CM_KEYSTORE_PATH" ]; then
-            echo "❌ CM_KEYSTORE_PATH missing or not a file — check android_signing: rewardhub_key"
-            exit 1
-          fi
-          echo "✅ Codemagic keystore: $CM_KEYSTORE_PATH"
-          echo "✅ Key alias: $CM_KEY_ALIAS"
           # Never decode/write a local .jks; always sign with CM_KEYSTORE_PATH from rewardhub_key
           cd android && chmod +x gradlew
           ./gradlew assembleRelease bundleRelease \

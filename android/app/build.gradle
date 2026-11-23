@@ -16,19 +16,19 @@ android {
     }
 
     // Release signing uses Codemagic android_signing (rewardhub_key) only.
-    // No fallback to any repo-local .jks — CM_* env vars are required.
+    // No fallback to any repo-local .jks. Configure only when CM_* is present so
+    // local assembleDebug still works without Codemagic credentials.
+    def cmKeystorePath = System.getenv("CM_KEYSTORE_PATH")
+    def hasCmSigning = cmKeystorePath != null && !cmKeystorePath.trim().isEmpty()
+
     signingConfigs {
         release {
-            def keystorePath = System.getenv("CM_KEYSTORE_PATH")
-            if (keystorePath == null || keystorePath.trim().isEmpty()) {
-                throw new GradleException(
-                    "CM_KEYSTORE_PATH is required for release signing (Codemagic android_signing: rewardhub_key)"
-                )
+            if (hasCmSigning) {
+                storeFile file(cmKeystorePath)
+                storePassword System.getenv("CM_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("CM_KEY_ALIAS")
+                keyPassword System.getenv("CM_KEY_PASSWORD")
             }
-            storeFile file(keystorePath)
-            storePassword System.getenv("CM_KEYSTORE_PASSWORD")
-            keyAlias System.getenv("CM_KEY_ALIAS")
-            keyPassword System.getenv("CM_KEY_PASSWORD")
         }
     }
 
@@ -36,7 +36,9 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.release
+            if (hasCmSigning) {
+                signingConfig signingConfigs.release
+            }
         }
         debug {
             applicationIdSuffix ""
