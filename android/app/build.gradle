@@ -10,19 +10,28 @@ android {
         // Play Automatic Protection requires minSdk 24+
         minSdkVersion 24
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 18
+        versionCode 19
         versionName "14.0.3"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    // Release signing uses Codemagic android_signing (rewardhub_key) only.
-    // No fallback to any repo-local .jks. Configure only when CM_* is present so
-    // local assembleDebug still works without Codemagic credentials.
+    // Release signing: Codemagic android_signing (rewardhub_key) via CM_* only.
+    // Never read android/key.properties or any repo-local .jks.
+    def ignoredKeyProps = [
+            rootProject.file('key.properties'),
+            rootProject.file('app/key.properties'),
+            file('key.properties'),
+    ]
+    ignoredKeyProps.findAll { it.exists() }.each { props ->
+        logger.lifecycle("WARNING: Ignoring ${props.absolutePath} — release signing uses CM_KEYSTORE_PATH only")
+    }
+
     def cmKeystorePath = System.getenv("CM_KEYSTORE_PATH")
     def hasCmSigning = cmKeystorePath != null && !cmKeystorePath.trim().isEmpty()
 
     signingConfigs {
         release {
+            // Prefer CM_KEYSTORE_PATH first; never fall back to key.properties / local .jks
             if (hasCmSigning) {
                 storeFile file(cmKeystorePath)
                 storePassword System.getenv("CM_KEYSTORE_PASSWORD")
@@ -48,6 +57,28 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+// Fail release assemble/bundle if CM_KEYSTORE_PATH is missing (debug builds still OK)
+gradle.taskGraph.whenReady { graph ->
+    def releaseTasks = graph.allTasks.findAll { task ->
+        def n = task.name.toLowerCase()
+        (n.startsWith('assemble') || n.startsWith('bundle') || n.contains('bundle')) &&
+                n.contains('release')
+    }
+    if (!releaseTasks.isEmpty()) {
+        def path = System.getenv("CM_KEYSTORE_PATH")
+        if (path == null || path.trim().isEmpty()) {
+            throw new GradleException(
+                    "CM_KEYSTORE_PATH is required for release signing " +
+                    "(Codemagic android_signing: rewardhub_key). " +
+                    "Refusing to fall back to key.properties or any local .jks."
+            )
+        }
+        if (!file(path).exists()) {
+            throw new GradleException("CM_KEYSTORE_PATH does not exist: ${path}")
+        }
     }
 }
 

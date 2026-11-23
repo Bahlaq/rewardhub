@@ -7,8 +7,8 @@ workflows:
       groups:
         - admob_secrets
         - firebase_secrets
-      # Use Codemagic code-signing identity (sets CM_KEYSTORE_PATH / CM_* vars).
-      # Do NOT use the legacy android_signing secret group or a repo-local .jks.
+      # Codemagic code-signing identity — sets CM_KEYSTORE_PATH / CM_* vars.
+      # Do NOT use the legacy android_signing secret group or decode CM_KEYSTORE to a local .jks.
       android_signing:
         - rewardhub_key
       node: 22
@@ -23,12 +23,13 @@ workflows:
         script: npm install --legacy-peer-deps
       - name: Build and Sync Capacitor
         script: |
+          set -e
           npm run build
           if [ ! -d "dist" ]; then echo "❌ dist not found"; exit 1; fi
-          
+
           rm -rf android
           npx cap add android
-          
+
           # Assets
           mkdir -p assets
           if [ -f "assets/icon.png" ]; then
@@ -46,7 +47,7 @@ workflows:
           npx @capacitor/assets generate --android --assetPath assets
           npx cap sync android
           python3 write_manifest.py
-          
+
           # google-services.json
           if [ ! -z "$GOOGLE_SERVICES_JSON" ]; then
             echo $GOOGLE_SERVICES_JSON | base64 --decode > android/app/google-services.json
@@ -54,7 +55,7 @@ workflows:
           elif [ -f "google-services.json" ]; then
             cp google-services.json android/app/google-services.json
           fi
-          
+
           # server_client_id in strings.xml
           STRINGS_XML="android/app/src/main/res/values/strings.xml"
           if [ -f "$STRINGS_XML" ]; then
@@ -62,15 +63,7 @@ workflows:
               sed -i '' 's|</resources>|    <string name="server_client_id">563861371307-cg3bnlt6j34r88odgtn5t5816o6dlchc.apps.googleusercontent.com</string>\n</resources>|' "$STRINGS_XML"
             fi
           fi
-          
-          # Version (must exceed last Play Console upload)
-          if [ -f "android/app/build.gradle" ]; then
-            sed -i '' 's/versionCode [0-9]*/versionCode 18/g' android/app/build.gradle
-            sed -i '' 's/versionName "[0-9.]*"/versionName "14.0.3"/g' android/app/build.gradle
-            # Play Automatic Protection requires minSdk 24+
-            sed -i '' 's/minSdkVersion.*/minSdkVersion 24/' android/app/build.gradle
-          fi
-          
+
           # Gradle 8.7 + AGP 8.2.1
           if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
             printf "distributionBase=GRADLE_USER_HOME\ndistributionPath=wrapper/dists\ndistributionUrl=https\://services.gradle.org/distributions/gradle-8.7-all.zip\nzipStoreBase=GRADLE_USER_HOME\nzipStorePath=wrapper/dists\n" > android/gradle/wrapper/gradle-wrapper.properties
@@ -82,42 +75,40 @@ workflows:
               classpath "com.google.gms:google-services:4.4.1"' android/build.gradle
             fi
           fi
-          
-          # Google Services plugin
-          if [ -f "android/app/build.gradle" ]; then
-            if ! grep -q "com.google.gms.google-services" android/app/build.gradle; then
-              echo "apply plugin: 'com.google.gms.google-services'" >> android/app/build.gradle
-            fi
-          fi
-          
+
           # SDK 35 + minSdk 24 (Play Automatic Protection)
           if [ -f "android/variables.gradle" ]; then
             sed -i '' 's/minSdkVersion = [0-9]*/minSdkVersion = 24/g' android/variables.gradle
             sed -i '' 's/compileSdkVersion = [0-9]*/compileSdkVersion = 35/g' android/variables.gradle
             sed -i '' 's/targetSdkVersion = [0-9]*/targetSdkVersion = 35/g' android/variables.gradle
           fi
-          
+
           # Permissions + AdMob
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
-            # AD_ID permission
             if ! grep -q "com.google.android.gms.permission.AD_ID" "$MANIFEST"; then
               sed -i '' 's/<application/<uses-permission android:name="com.google.android.gms.permission.AD_ID"\/>\n    <application/g' "$MANIFEST"
             fi
-            # POST_NOTIFICATIONS for Android 13+ (push notifications)
             if ! grep -q "android.permission.POST_NOTIFICATIONS" "$MANIFEST"; then
               sed -i '' 's/<application/<uses-permission android:name="android.permission.POST_NOTIFICATIONS"\/>\n    <application/g' "$MANIFEST"
             fi
-            # AdMob App ID
             if ! grep -q "com.google.android.gms.ads.APPLICATION_ID" "$MANIFEST"; then
               sed -i '' 's|</application>|        <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-1560161047680443~4972275282"/>\n    </application>|' "$MANIFEST"
             fi
-            # FCM default notification channel
             if ! grep -q "com.google.firebase.messaging.default_notification_channel_id" "$MANIFEST"; then
               sed -i '' 's|</application>|        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="rewardhub_default"/>\n    </application>|' "$MANIFEST"
             fi
           fi
-          
+
+          # Restore committed app build.gradle (CM_* signing, minSdk 24, versionCode 19).
+          # Cap add regenerates android/, so without this the old signing path can reappear.
+          git checkout HEAD -- android/app/build.gradle
+          echo "✅ Restored committed android/app/build.gradle (CM_KEYSTORE_PATH-only signing)"
+
+          # Remove any local keystore / key.properties that could override Codemagic signing
+          rm -f android/key.properties android/app/key.properties
+          find android -type f \( -name '*.jks' -o -name '*.keystore' \) -print -delete || true
+
       - name: Build Signed Android
         script: |
           set -e
@@ -127,39 +118,50 @@ workflows:
           fi
           echo "✅ Codemagic keystore: $CM_KEYSTORE_PATH"
           echo "✅ Key alias: $CM_KEY_ALIAS"
-          # Inject CM_* signing only after keystore is confirmed (no .jks fallback)
-          if [ -f "android/app/build.gradle" ]; then
-            sed -i '' '/buildTypes {/i \
-            signingConfigs { \
-                release { \
-                    storeFile file(System.getenv("CM_KEYSTORE_PATH")) \
-                    storePassword System.getenv("CM_KEYSTORE_PASSWORD") \
-                    keyAlias System.getenv("CM_KEY_ALIAS") \
-                    keyPassword System.getenv("CM_KEY_PASSWORD") \
-                } \
-            }' android/app/build.gradle
-            sed -i '' '/proguardFiles/a \
-                signingConfig signingConfigs.release' android/app/build.gradle
-            echo "✅ Injected strict CM_* signingConfigs (no local .jks fallback)"
+
+          # Print expected upload-key fingerprint BEFORE building
+          echo "===== Keystore certificate (rewardhub_key) ====="
+          keytool -list -v \
+            -keystore "$CM_KEYSTORE_PATH" \
+            -storepass "$CM_KEYSTORE_PASSWORD" \
+            -alias "$CM_KEY_ALIAS" 2>/dev/null | tee /tmp/cm_keystore_cert.txt || \
+          keytool -list -v \
+            -keystore "$CM_KEYSTORE_PATH" \
+            -storepass "$CM_KEYSTORE_PASSWORD" | tee /tmp/cm_keystore_cert.txt
+          if grep -qi 'SHA1:.*42:7F:E8' /tmp/cm_keystore_cert.txt; then
+            echo "❌ Keystore still has OLD SHA-1 (42:7F:E8…). rewardhub_key is misconfigured in Codemagic."
+            exit 1
           fi
-          # Never decode/write a local .jks; always sign with CM_KEYSTORE_PATH from rewardhub_key
+          if ! grep -qi 'SHA1:.*30:F6:0A' /tmp/cm_keystore_cert.txt; then
+            echo "⚠️ Expected SHA-1 prefix 30:F6:0A not found in keystore listing — check Codemagic rewardhub_key"
+            grep -i 'SHA1' /tmp/cm_keystore_cert.txt || true
+          fi
+
+          # Never decode CM_KEYSTORE / write a local .jks — sign only via CM_KEYSTORE_PATH
           cd android && chmod +x gradlew
-          ./gradlew assembleRelease bundleRelease \
-            -Pandroid.injected.signing.store.file="$CM_KEYSTORE_PATH" \
-            -Pandroid.injected.signing.store.password="$CM_KEYSTORE_PASSWORD" \
-            -Pandroid.injected.signing.key.alias="$CM_KEY_ALIAS" \
-            -Pandroid.injected.signing.key.password="$CM_KEY_PASSWORD" \
-            --no-daemon
+          ./gradlew assembleRelease bundleRelease --no-daemon
+
       - name: Print AAB signing SHA-1
         script: |
           set -e
+          # Capacitor output (Flutter-equivalent: build/app/outputs/bundle/release/app-release.aab)
           AAB="android/app/build/outputs/bundle/release/app-release.aab"
           if [ ! -f "$AAB" ]; then
             AAB=$(ls android/app/build/outputs/bundle/release/*.aab | head -n 1)
           fi
-          echo "Inspecting signing certificate for: $AAB"
-          # Capacitor path (same role as Flutter build/app/outputs/bundle/release/app-release.aab)
-          keytool -printcert -jarfile "$AAB" | grep SHA1
+          echo "===== AAB signing certificate: $AAB ====="
+          keytool -printcert -jarfile "$AAB" | tee /tmp/aab_cert.txt
+          echo "===== SHA-1 ====="
+          grep -i SHA1 /tmp/aab_cert.txt
+          if grep -qi 'SHA1:.*42:7F:E8' /tmp/aab_cert.txt; then
+            echo "❌ AAB signed with OLD key (42:7F:E8…). Aborting."
+            exit 1
+          fi
+          if ! grep -qi 'SHA1:.*30:F6:0A' /tmp/aab_cert.txt; then
+            echo "❌ AAB SHA-1 does not start with 30:F6:0A (rewardhub_key). Aborting."
+            exit 1
+          fi
+          echo "✅ AAB SHA-1 matches rewardhub_key (30:F6:0A…)"
     artifacts:
       - android/app/build/outputs/bundle/release/*.aab
       - android/app/build/outputs/apk/release/*.apk
