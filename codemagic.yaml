@@ -83,23 +83,27 @@ workflows:
             fi
           fi
 
-          # Gradle 8.7 + AGP 8.2.1
+          # Gradle 8.11.1 + AGP 8.9.1 (required for compileSdk / targetSdk 36)
           if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
-            printf "distributionBase=GRADLE_USER_HOME\ndistributionPath=wrapper/dists\ndistributionUrl=https\://services.gradle.org/distributions/gradle-8.7-all.zip\nzipStoreBase=GRADLE_USER_HOME\nzipStorePath=wrapper/dists\n" > android/gradle/wrapper/gradle-wrapper.properties
+            printf "distributionBase=GRADLE_USER_HOME\ndistributionPath=wrapper/dists\ndistributionUrl=https\://services.gradle.org/distributions/gradle-8.11.1-all.zip\nzipStoreBase=GRADLE_USER_HOME\nzipStorePath=wrapper/dists\n" > android/gradle/wrapper/gradle-wrapper.properties
           fi
           if [ -f "android/build.gradle" ]; then
-            sed -i '' 's/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:8.2.1/g' android/build.gradle
+            sed -i '' 's/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:8.9.1/g' android/build.gradle
             if ! grep -q "com.google.gms:google-services" android/build.gradle; then
               sed -i '' '/dependencies {/a \
               classpath "com.google.gms:google-services:4.4.1"' android/build.gradle
             fi
           fi
 
-          # SDK 35 + minSdk 24 (Play Automatic Protection)
+          # SDK 36 (Play Console requirement) + minSdk 24
+          # Cap add regenerates variables.gradle — restore committed pin, then force sed.
+          git checkout HEAD -- android/variables.gradle 2>/dev/null || true
           if [ -f "android/variables.gradle" ]; then
             sed -i '' 's/minSdkVersion = [0-9]*/minSdkVersion = 24/g' android/variables.gradle
-            sed -i '' 's/compileSdkVersion = [0-9]*/compileSdkVersion = 35/g' android/variables.gradle
-            sed -i '' 's/targetSdkVersion = [0-9]*/targetSdkVersion = 35/g' android/variables.gradle
+            sed -i '' 's/compileSdkVersion = [0-9]*/compileSdkVersion = 36/g' android/variables.gradle
+            sed -i '' 's/targetSdkVersion = [0-9]*/targetSdkVersion = 36/g' android/variables.gradle
+            echo "✅ android/variables.gradle SDKs:"
+            grep -E 'minSdkVersion|compileSdkVersion|targetSdkVersion' android/variables.gradle
           fi
 
           # Permissions + AdMob
@@ -119,11 +123,11 @@ workflows:
             fi
           fi
 
-          # Restore committed app build.gradle (CM_* signing, minSdk 24, versionCode 22).
+          # Restore committed app build.gradle (CM_* signing, targetSdk 36, versionCode 23).
           # Cap add regenerates android/, so without this the old signing path can reappear.
           git checkout HEAD -- android/app/build.gradle
           echo "✅ Restored committed android/app/build.gradle (CM_KEYSTORE_PATH-only signing)"
-          grep -n "CM_KEYSTORE_PATH\|signingConfigs\|signingConfig\|versionCode" android/app/build.gradle | head -30
+          grep -n "CM_KEYSTORE_PATH\|signingConfigs\|signingConfig\|versionCode\|compileSdk\|targetSdkVersion" android/app/build.gradle | head -40
 
           # Remove any local keystore / key.properties that could override Codemagic signing
           rm -f android/key.properties android/app/key.properties
