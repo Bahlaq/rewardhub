@@ -100,10 +100,11 @@ workflows:
             fi
           fi
 
-          # Restore committed app build.gradle (CM_* signing, minSdk 24, versionCode 19).
+          # Restore committed app build.gradle (CM_* signing, minSdk 24, versionCode 20).
           # Cap add regenerates android/, so without this the old signing path can reappear.
           git checkout HEAD -- android/app/build.gradle
           echo "✅ Restored committed android/app/build.gradle (CM_KEYSTORE_PATH-only signing)"
+          grep -n "CM_KEYSTORE_PATH\|signingConfigs\|versionCode" android/app/build.gradle | head -20
 
           # Remove any local keystore / key.properties that could override Codemagic signing
           rm -f android/key.properties android/app/key.properties
@@ -112,8 +113,21 @@ workflows:
       - name: Build Signed Android
         script: |
           set -e
+          EXPECTED_SHA1="30:F6:0A:82:AD:F4:9C:5F:0F:9C:01:9B:39:8D:1E:C0:66:8E:F5:A9"
+          OLD_SHA1="42:7F:E8:07:6A:BA:FF:B6:D2:05:C8:71:C1:E9:E3:4C:E1:67:47:D7"
+
+          # Refuse legacy secret-group keystore decoding — only android_signing: rewardhub_key
+          unset CM_KEYSTORE || true
+          rm -f android/app/rewardhub-key.jks android/rewardhub-key.jks \
+                android/key.properties android/app/key.properties
+          find android -type f \( -name '*.jks' -o -name '*.keystore' \) -print -delete || true
+
           if [ -z "$CM_KEYSTORE_PATH" ] || [ ! -f "$CM_KEYSTORE_PATH" ]; then
             echo "❌ CM_KEYSTORE_PATH missing or not a file — check android_signing: rewardhub_key"
+            exit 1
+          fi
+          if [ -z "$CM_KEYSTORE_PASSWORD" ] || [ -z "$CM_KEY_ALIAS" ] || [ -z "$CM_KEY_PASSWORD" ]; then
+            echo "❌ Missing CM_KEYSTORE_PASSWORD / CM_KEY_ALIAS / CM_KEY_PASSWORD"
             exit 1
           fi
           echo "✅ Codemagic keystore: $CM_KEYSTORE_PATH"
@@ -128,40 +142,41 @@ workflows:
           keytool -list -v \
             -keystore "$CM_KEYSTORE_PATH" \
             -storepass "$CM_KEYSTORE_PASSWORD" | tee /tmp/cm_keystore_cert.txt
-          if grep -qi 'SHA1:.*42:7F:E8' /tmp/cm_keystore_cert.txt; then
-            echo "❌ Keystore still has OLD SHA-1 (42:7F:E8…). rewardhub_key is misconfigured in Codemagic."
+          if grep -qi "$OLD_SHA1" /tmp/cm_keystore_cert.txt; then
+            echo "WRONG SIGNING KEY — keystore is the OLD upload key ($OLD_SHA1)"
             exit 1
           fi
-          if ! grep -qi 'SHA1:.*30:F6:0A' /tmp/cm_keystore_cert.txt; then
-            echo "⚠️ Expected SHA-1 prefix 30:F6:0A not found in keystore listing — check Codemagic rewardhub_key"
-            grep -i 'SHA1' /tmp/cm_keystore_cert.txt || true
+          if ! grep -qi "$EXPECTED_SHA1" /tmp/cm_keystore_cert.txt; then
+            echo "WRONG SIGNING KEY — keystore SHA-1 is not rewardhub_key ($EXPECTED_SHA1)"
+            grep -i SHA1 /tmp/cm_keystore_cert.txt || true
+            exit 1
           fi
+          echo "✅ Keystore SHA-1 matches rewardhub_key"
 
-          # Never decode CM_KEYSTORE / write a local .jks — sign only via CM_KEYSTORE_PATH
+          # Sign ONLY via CM_* env vars from android_signing: rewardhub_key (no injected local .jks)
           cd android && chmod +x gradlew
-          ./gradlew assembleRelease bundleRelease --no-daemon
+          ./gradlew clean assembleRelease bundleRelease --no-daemon
 
-      - name: Print AAB signing SHA-1
+      - name: Verify AAB signing SHA-1
         script: |
           set -e
-          # Capacitor output (Flutter-equivalent: build/app/outputs/bundle/release/app-release.aab)
+          EXPECTED_SHA1="30:F6:0A:82:AD:F4:9C:5F:0F:9C:01:9B:39:8D:1E:C0:66:8E:F5:A9"
+          OLD_SHA1="42:7F:E8:07:6A:BA:FF:B6:D2:05:C8:71:C1:E9:E3:4C:E1:67:47:D7"
+          # Capacitor path (Flutter equivalent: build/app/outputs/bundle/release/app-release.aab)
           AAB="android/app/build/outputs/bundle/release/app-release.aab"
           if [ ! -f "$AAB" ]; then
             AAB=$(ls android/app/build/outputs/bundle/release/*.aab | head -n 1)
           fi
           echo "===== AAB signing certificate: $AAB ====="
           keytool -printcert -jarfile "$AAB" | tee /tmp/aab_cert.txt
-          echo "===== SHA-1 ====="
-          grep -i SHA1 /tmp/aab_cert.txt
-          if grep -qi 'SHA1:.*42:7F:E8' /tmp/aab_cert.txt; then
-            echo "❌ AAB signed with OLD key (42:7F:E8…). Aborting."
+          # Mandatory: fail immediately if SHA-1 is not the Codemagic rewardhub_key
+          keytool -printcert -jarfile "$AAB" | grep -qi "$EXPECTED_SHA1" \
+            || (echo "WRONG SIGNING KEY" && echo "Expected: $EXPECTED_SHA1" && grep -i SHA1 /tmp/aab_cert.txt && exit 1)
+          if grep -qi "$OLD_SHA1" /tmp/aab_cert.txt; then
+            echo "WRONG SIGNING KEY — AAB still signed with OLD key ($OLD_SHA1)"
             exit 1
           fi
-          if ! grep -qi 'SHA1:.*30:F6:0A' /tmp/aab_cert.txt; then
-            echo "❌ AAB SHA-1 does not start with 30:F6:0A (rewardhub_key). Aborting."
-            exit 1
-          fi
-          echo "✅ AAB SHA-1 matches rewardhub_key (30:F6:0A…)"
+          echo "✅ AAB SHA-1 matches rewardhub_key ($EXPECTED_SHA1)"
     artifacts:
       - android/app/build/outputs/bundle/release/*.aab
       - android/app/build/outputs/apk/release/*.apk
