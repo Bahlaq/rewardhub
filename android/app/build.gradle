@@ -1,5 +1,10 @@
 apply plugin: 'com.android.application'
 
+// Release signing uses ONLY Codemagic CM_* env vars from android_signing: rewardhub_key.
+// NEVER load key.properties, NEVER fall back to a repo-local .jks / .keystore.
+def cmKeystorePath = System.getenv("CM_KEYSTORE_PATH")
+def hasCmSigning = cmKeystorePath != null && !cmKeystorePath.trim().isEmpty()
+
 android {
     namespace "com.rewardhub.official.app"
     compileSdk rootProject.ext.compileSdkVersion
@@ -16,11 +21,6 @@ android {
         }
     }
 
-    // Release signing uses ONLY Codemagic CM_* env vars from android_signing: rewardhub_key.
-    // NEVER load key.properties, NEVER fall back to a repo-local .jks / .keystore.
-    def cmKeystorePath = System.getenv("CM_KEYSTORE_PATH")
-    def hasCmSigning = cmKeystorePath != null && !cmKeystorePath.trim().isEmpty()
-
     [
             rootProject.file('key.properties'),
             rootProject.file('app/key.properties'),
@@ -31,13 +31,14 @@ android {
 
     signingConfigs {
         release {
-            if (!hasCmSigning) {
-                throw new GradleException("CM_KEYSTORE_PATH is missing!")
+            // Populate only when CM_* is present so local assembleDebug can configure.
+            // Release tasks still fail hard below if CM_KEYSTORE_PATH is missing.
+            if (hasCmSigning) {
+                storeFile file(System.getenv("CM_KEYSTORE_PATH"))
+                storePassword System.getenv("CM_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("CM_KEY_ALIAS")
+                keyPassword System.getenv("CM_KEY_PASSWORD")
             }
-            storeFile file(System.getenv("CM_KEYSTORE_PATH"))
-            storePassword System.getenv("CM_KEYSTORE_PASSWORD")
-            keyAlias System.getenv("CM_KEY_ALIAS")
-            keyPassword System.getenv("CM_KEY_PASSWORD")
         }
     }
 
@@ -45,9 +46,21 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            // Always require the Codemagic release signing config — never unsigned / debug-signed
+            // Always attach release signing config — never leave release unsigned / debug-signed
             signingConfig signingConfigs.release
         }
+    }
+}
+
+// Fail only when a release assemble/bundle is requested (keep debug/test usable locally)
+gradle.taskGraph.whenReady { graph ->
+    def releaseTasks = graph.allTasks.findAll { task ->
+        def n = task.name.toLowerCase()
+        (n.startsWith('assemble') || n.startsWith('bundle') || n.contains('bundle')) &&
+                n.contains('release')
+    }
+    if (!releaseTasks.isEmpty() && !hasCmSigning) {
+        throw new GradleException("CM_KEYSTORE_PATH is missing!")
     }
 }
 
