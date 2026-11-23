@@ -10,15 +10,43 @@ android {
         // Play Automatic Protection requires minSdk 24+
         minSdkVersion 24
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 18
+        versionCode 21
         versionName "14.0.3"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // Release signing uses ONLY Codemagic CM_* env vars from android_signing: rewardhub_key.
+    // NEVER load key.properties, NEVER fall back to a repo-local .jks / .keystore.
+    def cmKeystorePath = System.getenv("CM_KEYSTORE_PATH")
+    def hasCmSigning = cmKeystorePath != null && !cmKeystorePath.trim().isEmpty()
+
+    [
+            rootProject.file('key.properties'),
+            rootProject.file('app/key.properties'),
+            file('key.properties'),
+    ].findAll { it.exists() }.each { props ->
+        logger.lifecycle("IGNORING ${props.absolutePath} — release signing uses CM_KEYSTORE_PATH only")
+    }
+
+    signingConfigs {
+        release {
+            if (hasCmSigning) {
+                storeFile file(System.getenv("CM_KEYSTORE_PATH"))
+                storePassword System.getenv("CM_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("CM_KEY_ALIAS")
+                keyPassword System.getenv("CM_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Strict: release must be signed with CM_* — no key.properties / local .jks fallback
+            if (hasCmSigning) {
+                signingConfig signingConfigs.release
+            }
         }
         debug {
             applicationIdSuffix ""
@@ -28,6 +56,28 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+// Fail release assemble/bundle if CM_KEYSTORE_PATH is missing (debug builds still OK)
+gradle.taskGraph.whenReady { graph ->
+    def releaseTasks = graph.allTasks.findAll { task ->
+        def n = task.name.toLowerCase()
+        (n.startsWith('assemble') || n.startsWith('bundle') || n.contains('bundle')) &&
+                n.contains('release')
+    }
+    if (!releaseTasks.isEmpty()) {
+        def path = System.getenv("CM_KEYSTORE_PATH")
+        if (path == null || path.trim().isEmpty()) {
+            throw new GradleException(
+                    "CM_KEYSTORE_PATH is required for release signing " +
+                    "(Codemagic android_signing: rewardhub_key). " +
+                    "Refusing to fall back to key.properties or any local .jks."
+            )
+        }
+        if (!file(path).exists()) {
+            throw new GradleException("CM_KEYSTORE_PATH does not exist: ${path}")
+        }
     }
 }
 

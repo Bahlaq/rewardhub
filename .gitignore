@@ -11,4 +11,5 @@ coverage/
 android/
 *.keystore
 *.jks
+key.properties
 signing.properties
