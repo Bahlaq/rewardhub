@@ -7,7 +7,10 @@ workflows:
       groups:
         - admob_secrets
         - firebase_secrets
-        - android_signing
+      # Use Codemagic code-signing identity (sets CM_KEYSTORE_PATH / CM_* vars).
+      # Do NOT use the legacy android_signing secret group or a repo-local .jks.
+      android_signing:
+        - rewardhub_key
       node: 22
       java: 21
     scripts:
@@ -115,30 +118,48 @@ workflows:
             fi
           fi
           
-          # Signing
+          # Signing — Codemagic android_signing (rewardhub_key) CM_* vars only; no .jks fallback
           if [ -f "android/app/build.gradle" ]; then
             sed -i '' '/buildTypes {/i \
             signingConfigs { \
                 release { \
-                    storeFile file(System.getenv("CM_KEYSTORE_PATH") ?: "rewardhub-key.jks") \
-                    storePassword System.getenv("CM_KEYSTORE_PASSWORD") ?: "123456" \
-                    keyAlias System.getenv("CM_KEY_ALIAS") ?: "rewardhub" \
-                    keyPassword System.getenv("CM_KEY_PASSWORD") ?: "123456" \
+                    storeFile file(System.getenv("CM_KEYSTORE_PATH")) \
+                    storePassword System.getenv("CM_KEYSTORE_PASSWORD") \
+                    keyAlias System.getenv("CM_KEY_ALIAS") \
+                    keyPassword System.getenv("CM_KEY_PASSWORD") \
                 } \
             }' android/app/build.gradle
             sed -i '' '/proguardFiles/a \
                 signingConfig signingConfigs.release' android/app/build.gradle
+            echo "✅ Injected strict CM_* signingConfigs (no local .jks fallback)"
           fi
       - name: Build Signed Android
         script: |
-          echo $CM_KEYSTORE | base64 --decode > $FCI_BUILD_DIR/android/app/rewardhub-key.jks
+          set -e
+          if [ -z "$CM_KEYSTORE_PATH" ] || [ ! -f "$CM_KEYSTORE_PATH" ]; then
+            echo "❌ CM_KEYSTORE_PATH missing or not a file — check android_signing: rewardhub_key"
+            exit 1
+          fi
+          echo "✅ Codemagic keystore: $CM_KEYSTORE_PATH"
+          echo "✅ Key alias: $CM_KEY_ALIAS"
+          # Never decode/write a local .jks; always sign with CM_KEYSTORE_PATH from rewardhub_key
           cd android && chmod +x gradlew
           ./gradlew assembleRelease bundleRelease \
-            -Pandroid.injected.signing.store.file=$FCI_BUILD_DIR/android/app/rewardhub-key.jks \
-            -Pandroid.injected.signing.store.password=$CM_KEYSTORE_PASSWORD \
-            -Pandroid.injected.signing.key.alias=$CM_KEY_ALIAS \
-            -Pandroid.injected.signing.key.password=$CM_KEY_PASSWORD \
+            -Pandroid.injected.signing.store.file="$CM_KEYSTORE_PATH" \
+            -Pandroid.injected.signing.store.password="$CM_KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$CM_KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$CM_KEY_PASSWORD" \
             --no-daemon
+      - name: Print AAB signing SHA-1
+        script: |
+          set -e
+          AAB="android/app/build/outputs/bundle/release/app-release.aab"
+          if [ ! -f "$AAB" ]; then
+            AAB=$(ls android/app/build/outputs/bundle/release/*.aab | head -n 1)
+          fi
+          echo "Inspecting signing certificate for: $AAB"
+          # Capacitor path (same role as Flutter build/app/outputs/bundle/release/app-release.aab)
+          keytool -printcert -jarfile "$AAB" | grep SHA1
     artifacts:
       - android/app/build/outputs/bundle/release/*.aab
       - android/app/build/outputs/apk/release/*.apk
