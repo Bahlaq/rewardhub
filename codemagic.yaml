@@ -49,12 +49,30 @@ workflows:
           npx cap sync android
           python3 write_manifest.py
 
-          # google-services.json
-          if [ ! -z "$GOOGLE_SERVICES_JSON" ]; then
-            echo $GOOGLE_SERVICES_JSON | base64 --decode > android/app/google-services.json
-            echo "✅ google-services.json injected"
+          # google-services.json — restore committed file first (rm -rf android wiped it).
+          # Do NOT let a bad/empty GOOGLE_SERVICES_JSON base64 decode fail the whole step.
+          git checkout HEAD -- android/app/google-services.json 2>/dev/null || true
+          if [ -n "${GOOGLE_SERVICES_JSON:-}" ]; then
+            TMP_GS="$(mktemp)"
+            if printf '%s' "$GOOGLE_SERVICES_JSON" | base64 --decode >"$TMP_GS" 2>/dev/null \
+              && [ -s "$TMP_GS" ] && head -c 1 "$TMP_GS" | grep -q '{'; then
+              mv "$TMP_GS" android/app/google-services.json
+              echo "✅ google-services.json injected from GOOGLE_SERVICES_JSON (base64)"
+            elif printf '%s' "$GOOGLE_SERVICES_JSON" | head -c 1 | grep -q '{'; then
+              printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+              rm -f "$TMP_GS"
+              echo "✅ google-services.json injected from GOOGLE_SERVICES_JSON (raw JSON)"
+            else
+              rm -f "$TMP_GS"
+              echo "⚠️ GOOGLE_SERVICES_JSON is set but not valid base64/JSON — keeping committed file"
+            fi
           elif [ -f "google-services.json" ]; then
             cp google-services.json android/app/google-services.json
+            echo "✅ google-services.json copied from repo root"
+          fi
+          if [ ! -f android/app/google-services.json ]; then
+            echo "❌ android/app/google-services.json missing after sync"
+            exit 1
           fi
 
           # server_client_id in strings.xml
